@@ -69,31 +69,46 @@ it('makes the J-11 caller await a false asynchronous actionability predicate', a
   } finally { vi.useRealTimers(); }
 });
 
-function j08WaitBoundary() {
-  const source=readFileSync(new URL('../../e2e/run-j08.mjs',import.meta.url),'utf8').match(/async function waitFor\(renderer,[\s\S]*?\n\}/u)?.[0];
-  if(!source)throw Error('J-08 wait seam missing');
+function journeyWaitBoundary(journey: string) {
+  const source = readFileSync(new URL(`../../e2e/run-j${journey}.mjs`, import.meta.url), 'utf8')
+    .match(/async function waitFor\(renderer,[\s\S]*?\n\}/u)?.[0];
+  if (!source) throw Error(`J-${journey} wait seam missing`);
   return Function('journeyCheckFailure',`return (${source})`)((_journey:string,name:string)=>Error(name));
 }
 
-it('keeps the actual J-08 wait boundary closed for resolved false, then continues on resolved true', async () => {
+it.each(['08', '13'])('keeps the actual J-%s wait boundary closed for resolved false, then continues on resolved true', async (journey) => {
   vi.useFakeTimers();
   try {
     let ready=false,finished=false;
     const probe=vi.fn(async()=>ready),renderer={evaluate:async(expression:string)=>await Function('probe',`return (${expression})`)(probe)};
-    const pending=j08WaitBoundary()(renderer,'probe()','asynchronous-ready',500).then(()=>{finished=true;});
+    const pending=journeyWaitBoundary(journey)(renderer,'probe()','asynchronous-ready',500).then(()=>{finished=true;});
     await vi.advanceTimersByTimeAsync(100);
     expect(finished).toBe(false);expect(probe.mock.calls.length).toBeGreaterThan(1);
     ready=true;await vi.advanceTimersByTimeAsync(50);await pending;expect(finished).toBe(true);
   } finally {vi.useRealTimers();}
 });
 
-it('times out at the actual J-08 wait boundary when a Promise keeps resolving false', async () => {
+it.each(['08', '13'])('times out at the actual J-%s wait boundary when a Promise keeps resolving false', async (journey) => {
   vi.useFakeTimers();
   try {
     const renderer={evaluate:async(expression:string)=>await Function(`return (${expression})`)()};
-    const result=j08WaitBoundary()(renderer,'Promise.resolve(false)','still-not-ready',1).then(()=>null,(error:Error)=>error.message);
+    const result=journeyWaitBoundary(journey)(renderer,'Promise.resolve(false)','still-not-ready',1).then(()=>null,(error:Error)=>error.message);
     await vi.advanceTimersByTimeAsync(50);expect(await result).toBe('still-not-ready');
   } finally {vi.useRealTimers();}
+});
+
+it('polls a synchronous J-13 predicate until its value becomes truthy', async () => {
+  vi.useFakeTimers();
+  try {
+    const probe = vi.fn().mockReturnValueOnce(0).mockReturnValue('ready');
+    const renderer = { evaluate: async (expression: string) => Function('probe', `return (${expression})`)(probe) };
+    const pending = journeyWaitBoundary('13')(renderer, 'probe()', 'sync-ready', 500);
+    await vi.advanceTimersByTimeAsync(50);
+    await pending;
+    expect(probe).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('never starts the background-review fixture when its plan preview does not disable models', async () => {
