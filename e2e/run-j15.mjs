@@ -209,7 +209,7 @@ async function createEmptyBook(renderer, title) {
 const HOUSE_GUIDELINE_NAME = '本社文字规范.txt';
 const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。',
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
-const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存'];
+const KNOWLEDGE_TABS = ['审阅规范文件', '字表与词表', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
 // 事实核查契约 remains fixed; current plot-consistency reads clauses as well as pinned baseline leads (#1167).
 const GUIDELINE_FIXED = new Map([
@@ -576,8 +576,13 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
-    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===8`, 'knowledge-category-home');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===9`, 'knowledge-category-home');
     await assertRenderer(renderer, `document.querySelectorAll('.guideline-card, .library-material').length===0 && document.querySelector('.knowledge-recent') !== null`, 'knowledge-home-has-no-files');
+    await click(renderer, '字表与词表', 'knowledge-standard-tables');
+    await waitFor(renderer, `document.querySelectorAll('[data-standard-table-id]').length===4`, 'knowledge-preinstalled-tables');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-standard-table-id]')).every(card => card.textContent.includes('已识别') && card.textContent.includes('启用') && card.querySelector('[data-standard-table-action="import-version"]'))`, 'knowledge-table-status');
+    await pointerClick(renderer, waitFor, '[data-standard-table-action="inspect"]', 'knowledge-table-open');
+    await waitFor(renderer, `document.querySelector('[data-standard-table-detail] [data-standard-table-row]') && document.querySelector('[data-standard-table-action="save-version"]')`, 'knowledge-table-entries');
     await click(renderer, '审阅规范文件', 'knowledge-open-category');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.

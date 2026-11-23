@@ -85,6 +85,13 @@ describe('R5-L2 standard-table library service', () => {
     expect(store.standardTables.setStandardTableEnabled({ tableId: empty.table.tableId, enabled: false }).tables.find(t => t.tableId === empty.table.tableId)?.enabled).toBe(false);
   });
 
+  it('applies a table-wide strength while preserving explicit row choices on import', async () => {
+    const preview = await store.standardTables.previewStandardTableImport({ text: '推荐写法\t不推荐写法\n甲词\t乙词\n丙词\t丁词', fileName: '词表.tsv' });
+    const saved = await store.standardTables.commitStandardTableImport({ previewId: preview.previewId, strength: 'national',
+      edits: [{ position: 1, row: { ...row('甲词', ['乙词']), strength: 'dictionary' } }] });
+    expect(saved.entries.map(entry => entry.strength)).toEqual(['dictionary', 'national']);
+  });
+
   it('shows added, removed and changed rows before importing a new version', async () => {
     const first = await importText('推荐写法\t不推荐写法\n甲词\t乙词\n丙词\t丁词');
     const preview = await store.standardTables.previewStandardTableImport({ tableId: first.table.tableId, text: '推荐写法\t不推荐写法\n甲词\t戊词\n新词\t旧词', fileName: '新版本.tsv' });

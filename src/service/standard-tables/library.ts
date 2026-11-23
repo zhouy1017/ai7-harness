@@ -169,7 +169,8 @@ export class StandardTableLibrary {
   }
   #edit(rows: Row[], input: Ops['saveStandardTable']['input']): Row[] {
     requireStore(!(input.entries && input.edits), 'STANDARD_TABLE_INPUT_INVALID', '请使用整表保存或逐行修改中的一种方式。');
-    let changed = input.entries ?? rows;
+    // The table-wide choice supplies a default; explicit row edits may choose a different strength.
+    let changed = (input.entries ?? rows).map(r => input.strength ? { ...r, strength: input.strength } : r);
     if (input.edits) {
       const edits = new Map<number, Row | null>(); const appended: Row[] = [];
       for (const edit of input.edits) {
@@ -178,7 +179,7 @@ export class StandardTableLibrary {
       }
       changed = [...changed.flatMap((r, i) => edits.has(i + 1) ? edits.get(i + 1) ? [edits.get(i + 1)!] : [] : [r]), ...appended];
     }
-    return checkedRows(changed.map(r => input.strength ? { ...r, strength: input.strength } : r));
+    return checkedRows(changed);
   }
   #write(input: Ops['saveStandardTable']['input'], rows: Row[], source: { fileName: string; digest: string } | null, report: StandardTableConversionReport): string {
     const current = input.tableId ? this.#version(input.tableId) : null;

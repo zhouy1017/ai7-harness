@@ -1,6 +1,7 @@
 import { loadLibraryCheck, libraryDetail, selectedStandardTables } from '../../src/service/review/deterministic/library-check.js';
 import { readSeedRows } from '../../src/service/standard-table-seed.cjs';
 import { randomUUID } from 'node:crypto';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
@@ -24,9 +25,9 @@ describe('R5-L2 direct standard-table conversion', () => {
   });
   it('reads XLSX inline and shared strings, and DOCX table cells without a model', async () => {
     const sheet = '<worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>不推荐写法</t></is></c></row><row><c r="A2" t="inlineStr"><is><t>甲词</t></is></c><c r="B2" t="s"><v>1</v></c></row></sheetData></worksheet>';
-    const xlsx = zipSync({ 'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>乙词</t></si></sst>'), 'xl/worksheets/sheet1.xml': strToU8(sheet) });
+    const xlsx = zipSync({ 'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>乙词</t></si></sst>'), 'xl/worksheets/sheet1.xml': strToU8(sheet) }, { mtime: fixedArchiveTime() });
     const cell = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
-    const docx = zipSync({ 'word/document.xml': strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr>${cell('规范字')}${cell('异体字')}</w:tr><w:tr>${cell('甲词')}${cell('乙词')}</w:tr></w:tbl></w:body></w:document>`) });
+    const docx = zipSync({ 'word/document.xml': strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr>${cell('规范字')}${cell('异体字')}</w:tr><w:tr>${cell('甲词')}${cell('乙词')}</w:tr></w:tbl></w:body></w:document>`) }, { mtime: fixedArchiveTime() });
     for (const [name, bytes] of [['table.xlsx', xlsx], ['table.docx', docx]] as const) {
       expect((await convertTable(bytes, name, 'national')).rows?.[0]).toMatchObject({ recommended: '甲词', discouraged: ['乙词'], strength: 'national', status: 'applied' });
     }
@@ -48,8 +49,8 @@ describe('R5-L2 direct standard-table conversion', () => {
   });
   it('leaves HTML, DOCX prose and unrecognised spreadsheets for Flash and bounds every part', async () => {
     const text = '公开说明中推荐甲词而不采用乙词。';
-    const docx = zipSync({ 'word/document.xml': strToU8(`<document><body><p><r><t>${text}</t></r></p></body></document>`) });
-    const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(`<worksheet><sheetData><row><c t="inlineStr"><is><t>${text}</t></is></c></row></sheetData></worksheet>`) });
+    const docx = zipSync({ 'word/document.xml': strToU8(`<document><body><p><r><t>${text}</t></r></p></body></document>`) }, { mtime: fixedArchiveTime() });
+    const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(`<worksheet><sheetData><row><c t="inlineStr"><is><t>${text}</t></is></c></row></sheetData></worksheet>`) }, { mtime: fixedArchiveTime() });
     for (const [name, bytes] of [['text.html', Buffer.from(`<html><body><p>${text}</p></body></html>`)], ['text.docx', docx], ['text.xlsx', xlsx]] as const) {
       const read = await convertTable(bytes, name, 'house'); expect(read.rows).toBeNull(); expect(read.paragraphs).toContain(text);
     }

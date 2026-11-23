@@ -110,7 +110,7 @@ describe('Run-local pinned retrieval', () => {
   it('keeps the retrieval owner free of any filesystem, network or process seam', () => {
     const root = new URL('../../src/service/retrieval/', import.meta.url);
     const files = readdirSync(root).filter((name) => name.endsWith('.ts')).sort();
-    expect(files).toEqual(['index.ts', 'local-rule.ts', 'result-validator.ts', 'source-readers.ts']);
+    expect(files).toEqual(['flash-assist.ts', 'index.ts', 'local-rule.ts', 'result-validator.ts', 'source-readers.ts']);
     for (const name of files) {
       const text = readFileSync(new URL(name, root), 'utf8');
       expect(text).not.toMatch(/from '(?:node:)?(?:fs|fs\/promises|net|http|https|http2|tls|dgram|dns|child_process|worker_threads)'/u);
