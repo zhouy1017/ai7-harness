@@ -1,3 +1,4 @@
+import { installPreinstalledStandardTables, preinstalledTableId, standardTableDigest } from '../../src/service/standard-tables.js';
 import { randomUUID } from 'node:crypto';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor, type ModelRequestPermit, type ModelRequestProducer } from '../../src/service/analysis/execution.js';
 import { join } from 'node:path';
@@ -105,6 +106,17 @@ describe('provider-free local ReviewRun', () => {
     const scope = { kind: 'selection', fromChapterBlockId: target, toChapterBlockId: target } as const;
     const db = database();
     try {
+      // A later edition of the pre-installed table. Restore below can only reinstall edition one.
+      const tableId = preinstalledTableId('cycb-2');
+      const edition = randomUUID();
+      const digest = standardTableDigest('common-words', [['苹果', [], 1, null, null, 'dictionary', 'applied', null, null]]);
+      db.exec('BEGIN');
+      db.prepare(`INSERT INTO standard_table_versions
+        SELECT ?, table_id, 2, '合成第二版', source_description, ?, digest, 1, NULL, NULL, NULL, recorded_at
+        FROM standard_table_versions WHERE table_id = ? AND ordinal = 1`).run(edition, digest, tableId);
+      db.prepare("INSERT INTO standard_table_entries VALUES (?, 1, '苹果', '[]', 1, NULL, NULL, 'dictionary', 'applied', NULL, NULL)").run(edition);
+      db.prepare('UPDATE standard_tables SET current_version_id = ? WHERE table_id = ?').run(edition, tableId);
+      db.exec('COMMIT');
       const prepared = prepare(book,policy,options,scope);
       db.exec("UPDATE standard_tables SET enabled = 0 WHERE kind = 'common-words'");
       authorize(book,prepared);
@@ -123,13 +135,34 @@ describe('provider-free local ReviewRun', () => {
       db.exec("UPDATE standard_tables SET enabled = 1 WHERE kind = 'common-words'");
       const deleted = prepare(book,policy,options,scope);
       db.exec(`BEGIN;
-        DELETE FROM standard_table_entries WHERE version_id IN (SELECT current_version_id FROM standard_tables WHERE kind='common-words');
+        DELETE FROM standard_table_entries WHERE version_id IN (SELECT version_id FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE kind='common-words'));
         DELETE FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE kind='common-words');
         DELETE FROM standard_tables WHERE kind='common-words'; COMMIT`);
       expect(() => authorize(book,deleted)).toThrow(/字表已删除/);
       expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
       expect(findings().find(f => f.quote === '按纳')?.note).not.toContain('已删除');
+      db.exec('BEGIN');
+      installPreinstalledStandardTables(db, ['cycb-2']);
+      db.exec('COMMIT');
+      expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
     } finally { db.close(); }
+  });
+  it('reports the frozen rule versions in the export and technical results (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书版本核查');
+    const block = replaceFirst(book, '按纳。');
+    const scope = { kind: 'selection', fromChapterBlockId: block, toChapterBlockId: block } as const;
+    const options = { ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] } };
+    const prepared = prepare(book, await resolveSourceCheckoutLaunchPolicy(roots.codeRoot), options, scope);
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel());
+    await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!;
+    const line = run.report!.record.categorySummaries.entries[0]!.stateLine;
+    for (const [id, version] of [['C01',2], ['C02',2], ['V01',2], ['T01',1], ['P02',1]] as const) {
+      expect(line).toContain(`${id}/v${version}：`);
+      expect(run.localCheck!.counts![id]).toMatchObject({ version });
+    }
   });
   it('counts advisory notes on the unedited admitted sample1 (#1717)', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

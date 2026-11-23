@@ -21,10 +21,10 @@ import { compositeReviewRun, type CompositeReviewRun } from '../procedures/compo
 import { procedureContent } from '../procedures/execution.js';
 import { compositeMembers, readProcedurePlanView, resolveProcedureForKind } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
-import { enabledStandardTables, loadLibraryCheck, missingLibraryPins, selectedStandardTables, STRENGTH, type LibraryPin } from './deterministic/library-check.js';
-import { preinstalledTableId } from '../standard-tables.js';
+import { enabledStandardTables, loadLibraryCheck, missingStandardTableIds, selectedStandardTables, STRENGTH, type LibraryPin } from './deterministic/library-check.js';
+import { preinstalledTableId, preinstalledVersionId, preinstalledDigest } from '../standard-tables.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV5, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
-import { exactLocalCandidateIds, checkLocalPlan, anyLocalCandidateNote, mechanicalReplacement, validateLocalResultV3, type AnyLocalCheckResult } from './deterministic/checker.js';
+import { exactLocalCandidateIds, checkLocalPlan, anyLocalCandidateNote, mechanicalReplacement, validateLocalResultV3, versionedLocalCounts, type AnyLocalCheckResult } from './deterministic/checker.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE, LOCAL_CHECK_LIMITATION, LOCAL_TABLE_LIMITATION, LOCAL_RULE_IDS } from './deterministic/rules.js';
 import { HouseWordLists } from './house-word-list.js';
 import { HouseWordListError } from '../../shared/protocol/house-word-list.js';
@@ -1263,7 +1263,7 @@ export class ReviewRunStore {
     const plan = snapshot.localPlan;
     requireReview(plan !== undefined, 'LOCAL_PLAN_INVALID', '本地检查计划缺失。');
     localRefusal(() => validateAnyLocalPlan(plan));
-    if (plan.schema === 'ai7.review.local-plan/5') requireReview(!missingLibraryPins(this.#db, plan.standardTables),
+    if (plan.schema === 'ai7.review.local-plan/5') requireReview(missingStandardTableIds(this.#db, plan.standardTables).size === 0,
       'LOCAL_TABLE_MISSING', '依据的字表已删除，请重新准备本地检查。');
     requireReview(plan.bookImportId === this.#localBookImport(snapshot.bookId), 'LOCAL_IMPORTED_AUTHORITY', '导入的审阅记录只供查看；请在本机新建本地文字检查。');
     const head = this.#head(snapshot.bookId);
@@ -2886,7 +2886,7 @@ export class ReviewRunStore {
   #synthesisEligible(snapshot: RunSnapshot): boolean {
     const members = snapshot.categories.filter(entry => entry.entry.synthesisKey === undefined && entry.task !== null);
     return new Set(this.#synthesisUnits(snapshot, members).map(unit => unit.ordinal)).size > 1 &&
-      this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).some(finding => members.some(member => member.categoryId === finding.categoryId));
+      this.#findingViews(snapshot, null).some(finding => members.some(member => member.categoryId === finding.categoryId));
   }
 
   /**
@@ -2997,7 +2997,7 @@ export class ReviewRunStore {
     const kept = this.#db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
     if (kept?.input_json != null) return true;
     const modelCategories = snapshot.categories.filter((entry) => entry.categoryId !== RUN_SYNTHESIS_CATEGORY && entry.task !== null);
-    const views = this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null);
+    const views = this.#findingViews(snapshot, null);
     const modelIds = new Set(modelCategories.map((entry) => entry.categoryId));
     const findings = views.filter((finding) => modelIds.has(finding.categoryId));
     const manifestUnits = this.#synthesisUnits(snapshot, modelCategories);
@@ -3107,7 +3107,7 @@ export class ReviewRunStore {
     const runId = category.task === null ? null : this.#runRecordOf(category.task.taskIntentId);
     const ledgerState = runId === null ? null : this.#categoryLedger(category, snapshot).currentRunState(runId);
     const paused = event?.state !== 'interrupted' && (ledgerState === 'paused' || ledgerState === 'resumable');
-    const findings = new Map(this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => [finding.findingId, finding]));
+    const findings = new Map(this.#findingViews(snapshot, null).map((finding) => [finding.findingId, finding]));
     if (terminal && input === null) {
       const modelCategories = snapshot.categories.filter(member => member.task !== null && member.entry.synthesisKey === undefined);
       const modelIds = new Set(modelCategories.map(member => member.categoryId));
@@ -3901,7 +3901,7 @@ export class ReviewRunStore {
     requireReview(reason.length > 0, 'REVIEW_REASON_REQUIRED', '忽略一条发现需要说明原因。');
     requireReview([...reason].length <= MAX_REASON_CHARACTERS, 'REVIEW_REASON_TOO_LONG', `原因不能超过 ${MAX_REASON_CHARACTERS} 个字。`);
     transact(this.#db, () => {
-      const finding = this.#findingViews(reviewRunId, snapshot.manuscript.branchId, findingId)[0];
+      const finding = this.#findingViews(snapshot, findingId)[0];
       requireReview(finding !== undefined, 'REVIEW_FINDING_NOT_FOUND', '这次审阅没有这条发现。');
       requireReview(finding.status === 'pending', 'REVIEW_FINDING_NOT_PENDING',
         finding.status === 'ignored' ? '这条发现已经忽略过。' : '这条发现已经处理过，不能再忽略。');
@@ -4032,7 +4032,7 @@ export class ReviewRunStore {
             stateLabel,
             stateLine: (categoryView.detail === null ? stateLabel : `${stateLabel}：${categoryView.detail}`) + (snapshot.localPlan === undefined || category.executor !== 'local-text-check' ? '' : ` ${isLocalTablePlan(snapshot.localPlan) ? LOCAL_TABLE_LIMITATION : LOCAL_CHECK_LIMITATION} ` + (() => {
               const result = readLocalStageArtifacts(this.#db, reviewRunId).at(-1)?.record.result;
-              return Object.entries(result?.counts ?? {}).map(([id, count]) => `${id}/v1：检查${count.checked}，排除${count.exempt}，跳过${count.skipped}，未识别${count.notRecognized}，无发现${count.noFinding}，发现${count.findings}，错误${count.error}，未启用${count.disabled}，不适用${count.outOfApplicability}`).join('；');
+              return Object.entries(versionedLocalCounts(snapshot.localPlan!, result) ?? {}).map(([id, count]) => `${id}/v${count.version}：检查${count.checked}，排除${count.exempt}，跳过${count.skipped}，未识别${count.notRecognized}，无发现${count.noFinding}，发现${count.findings}，错误${count.error}，未启用${count.disabled}，不适用${count.outOfApplicability}`).join('；');
             })()),
             basisStatement: category.basisStatement + (category.task === null || snapshot.housePreferences?.[category.task.kind] === undefined ? '' : `；参考${housePreferenceLabel(snapshot.housePreferences[category.task.kind]!)}`),
             excludedCount: typeof output?.record.excludedCount === 'number' ? output.record.excludedCount : 0,
@@ -5104,7 +5104,7 @@ export class ReviewRunStore {
   #runView(snapshot: RunSnapshot, chains: Map<string, StoredExclusion[]> = new Map()): RunView {
     return {
       ...this.#runStateView(snapshot),
-      findings: this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null),
+      findings: this.#findingViews(snapshot, null),
       historicallyAffected: this.#historicallyAffected(snapshot, chains),
     };
   }
@@ -5334,7 +5334,7 @@ export class ReviewRunStore {
     const all = (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
       .flatMap((row) => {
         const snapshot = this.#snapshotOf(row);
-        return this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => ({ snapshot, finding }));
+        return this.#findingViews(snapshot, null).map((finding) => ({ snapshot, finding }));
       });
     // The public rvf finding id includes its Run: a no-mark finding is distinct in every Run, as in the report.
     const markBlock = this.#db.prepare(`SELECT em.block_id FROM editorial_marks em
@@ -5376,7 +5376,8 @@ export class ReviewRunStore {
    * mark each names, the latest decision on it, what it became when converted, and whether it — or the
    * same finding in another Run, through the one mark they share — was ignored.
    */
-  #findingViews(reviewRunId: string, branchId: string, findingId: string | null): FindingView[] {
+  #findingViews(snapshot: RunSnapshot, findingId: string | null): FindingView[] {
+    const { reviewRunId, manuscript: { branchId } } = snapshot;
     const rows = this.#db.prepare(
       `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.block_id mark_block, em.from_grapheme mark_from, em.to_grapheme mark_to,
               COALESCE((SELECT d.decision_id FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1),
@@ -5401,8 +5402,12 @@ export class ReviewRunStore {
     // mark, never the finding's own record. The paragraph numbers come in one pass over the pages.
     const placeOf = (view: typeof views[number]): string => view.mark.markId !== null && view.mark.blockId !== null ? view.mark.blockId : text(view.row.finding_block);
     const positions = positionsOfBlocks(this.#db, branchId, views.map(placeOf));
-    const surviving = new Set(this.#db.prepare('SELECT table_id FROM standard_tables').all().map(row => row.table_id));
-    const legacyIds = { 'C01/v1': preinstalledTableId('tgh-2013'), 'C02/v1': preinstalledTableId('tgh-2013-annex-1'), 'V01/v1': preinstalledTableId('gf-1001-2001') };
+    const localPlan = snapshot.localPlan;
+    const legacyTables = { 'C01/v1': 'tgh-2013', 'C02/v1': 'tgh-2013-annex-1', 'V01/v1': 'gf-1001-2001' } as const;
+    const pins = !localPlan || !isLocalTablePlan(localPlan) ? [] : localPlan.schema === 'ai7.review.local-plan/5'
+      ? localPlan.standardTables
+      : Object.values(legacyTables).map(key => ({ tableId: preinstalledTableId(key), versionId: preinstalledVersionId(key), digest: preinstalledDigest(key) }));
+    const missingTables = pins.length ? missingStandardTableIds(this.#db, pins) : new Set<string>();
     return views.map(({ row, mark }): FindingView => {
       const originMarkId = nullableText(row.mark_id);
       const ignoreReason = nullableText(row.ignore_reason);
@@ -5416,10 +5421,10 @@ export class ReviewRunStore {
         decision: decision === null || decision === 'withdrawn' ? null : decision as 'accepted' | 'accepted-with-edit' | 'rejected',
         convertedTo: mark.convertedTo,
       });
-      const legacy = Object.entries(legacyIds).find(([rule]) => nullableText(row.state_line)?.startsWith(rule))?.[1];
+      const legacy = Object.entries(legacyTables).find(([rule]) => nullableText(row.state_line)?.startsWith(rule))?.[1];
       const evidence = text(row.canonical_json).includes('"standardTableIds"') ? recordOf(text(row.canonical_json),text(row.sha256)) : null;
-      const tableIds = evidence?.standardTableIds as string[] | undefined ?? (legacy ? [legacy] : []);
-      const missing = tableIds.some(id => !surviving.has(id));
+      const tableIds = evidence?.standardTableIds as string[] | undefined ?? (legacy ? [preinstalledTableId(legacy)] : []);
+      const missing = tableIds.some(id => missingTables.has(id));
       return {
         findingId: text(row.finding_id),
         categoryId: text(row.category_id),
@@ -5659,7 +5664,7 @@ export class ReviewRunStore {
             label: STRENGTH[strength], count: batch.filter(f => f.standardStrengths?.includes(strength)).length,
           })).filter(row => row.count);
           return { strengths, planDigest: snapshot.localPlan!.digest, options: snapshot.localPlan!.options, state: last?.state ?? 'prepared', paragraphs: snapshot.localPlan!.blocks.length,
-            counts: result?.counts ?? null, excluded: [...(result?.excluded ?? []), ...(result?.candidates.filter((candidate) => !valid.has(candidate.id)).slice(0, 256).map((candidate) => ({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' })) ?? [])] };
+            counts: versionedLocalCounts(snapshot.localPlan!, result), excluded: [...(result?.excluded ?? []), ...(result?.candidates.filter((candidate) => !valid.has(candidate.id)).slice(0, 256).map((candidate) => ({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' })) ?? [])] };
         })() }),
         reviewRunId: snapshot.reviewRunId,
         ordinal: snapshot.ordinal,

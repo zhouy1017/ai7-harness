@@ -12,6 +12,8 @@ import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../../src/service/review/run-synthe
 export const REVIEW_DOMAIN_TABLES = [...Object.keys(REVIEW_RUN_SCHEMA_SQL), 'review_local_stage_artifacts', 'review_run_synthesis'];
 /** external-owner stub — not a schema or provenance proof. Parity checks every column's type, NOT NULL and key position. */
 export const REVIEW_EXTERNAL_STUBS = {
+  standard_tables: 'table_id TEXT NOT NULL PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL, current_version_id TEXT NOT NULL',
+  standard_table_versions: 'version_id TEXT NOT NULL PRIMARY KEY, table_id TEXT NOT NULL, version_label TEXT NOT NULL, source_description TEXT NOT NULL, digest TEXT NOT NULL',
   books: 'book_id TEXT NOT NULL, stable_identity TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(book_id)',
   manuscripts: 'manuscript_id TEXT NOT NULL, book_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(manuscript_id)',
   manuscript_branches: 'branch_id TEXT NOT NULL, manuscript_id TEXT NOT NULL, name TEXT NOT NULL, base_revision_id TEXT, created_at TEXT NOT NULL, PRIMARY KEY(branch_id)',

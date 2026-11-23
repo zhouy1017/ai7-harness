@@ -829,7 +829,7 @@ export interface ReviewRunProjection {
     options: import('./procedures.js').LocalCheckOptions;
     state: string;
     paragraphs: number;
-    counts: Readonly<Record<string, { checked: number; exempt: number; skipped: number; error: number; findings: number; disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number }>> | null;
+    counts: Readonly<Record<string, { version: number; checked: number; exempt: number; skipped: number; error: number; findings: number; disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number }>> | null;
     excluded: readonly { candidateId: string; reason: string }[];
   };
   reviewRunId: string;

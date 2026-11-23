@@ -1443,7 +1443,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       local.append(el('p', 'field-note', `${technicalLayerVisible ? `${localBoundary}；` : ''}本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       if (technicalLayerVisible && Object.keys(run.localCheck.counts ?? {}).length > 0) {
         const counts = el('ul');
-        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v${count.version}：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
         local.append(counts);
       }
       if (run.localCheck.excluded.length > 0) {

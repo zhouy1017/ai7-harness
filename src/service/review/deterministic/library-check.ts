@@ -24,9 +24,9 @@ export function validLibraryPins(pins: unknown): pins is LibraryPin[] {
     ['standard-characters', 'character-forms', 'word-forms', 'common-words'].includes(String(pin.kind)) &&
     typeof pin.name === 'string' && typeof pin.label === 'string' && typeof pin.source === 'string') && new Set(pins.map(pin => pin.tableId)).size === pins.length;
 }
-export function missingLibraryPins(db: DatabaseSync, pins: readonly LibraryPin[]): boolean {
+export function missingStandardTableIds(db: DatabaseSync, pins: readonly Pick<LibraryPin, 'tableId' | 'versionId' | 'digest'>[]): Set<string> {
   const version = db.prepare('SELECT 1 FROM standard_table_versions WHERE table_id = ? AND version_id = ? AND digest = ?');
-  return pins.some(pin => !version.get(pin.tableId, pin.versionId, pin.digest));
+  return new Set(pins.filter(pin => !version.get(pin.tableId, pin.versionId, pin.digest)).map(pin => pin.tableId));
 }
 
 export const STRENGTH = { national: '国家规范（应改）', dictionary: '辞书推荐（建议改）', house: '本社要求（按本社体例改）' };

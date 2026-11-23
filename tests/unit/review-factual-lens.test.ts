@@ -138,6 +138,17 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
   return { root, surface, status, unexpected, api, searchSettings, goToText, ...calls };
 }
 
+it.each([1, 2])('shows the frozen local rule version %i in technical results (#1717)', async version => {
+  setTechnicalLayerVisible(true);
+  const page = workspace(RUN, 'settled', 0);
+  const count = { version, checked: 1, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 1 };
+  page.run!.localCheck = { planDigest: PIN.digest, state: 'materialized', paragraphs: 1, counts: { V01: count }, excluded: [],
+    options: { punctuation: 'off', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, doubledEllipsisBlockIds: [], excludedRanges: [] } };
+  const view = mount('settled', 0, null, false, () => page);
+  await flush();
+  expect(view.root.querySelector('[data-local-check="materialized"]')?.textContent).toContain(`V01/v${version}：检查 1 段`);
+});
+
 describe('review triage (#1525)', () => {
   it('restores the selected run and filters after the surface is left and reopened', async () => {
     const first = mount(); await flush();

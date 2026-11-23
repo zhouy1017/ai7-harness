@@ -32,6 +32,11 @@ export interface LocalRuleCounts {
   checked: number; exempt: number; skipped: number; error: number; findings: number;
   disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number;
 }
+export function versionedLocalCounts(plan: AnyLocalCheckPlan, result: AnyLocalCheckResult | null | undefined) {
+  if (!result) return null;
+  const counts: Readonly<Record<string, LocalRuleCounts>> = result.counts;
+  return Object.fromEntries(plan.rules.map(({ id, version }) => [id, { ...counts[id]!, version }] as const));
+}
 export interface LocalCheckResult {
   readonly schema: 'ai7.review.local-result/1'; readonly planDigest: string;
   readonly paragraphs: number; readonly candidates: readonly LocalCandidate[];
@@ -203,6 +208,27 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
   const counts = { P01: emptyCounts(), P02: emptyCounts(), P03: emptyCounts(), N01: emptyCounts(), N02: emptyCounts(), H01: emptyCounts(), C01: emptyCounts(), C02: emptyCounts(), V01: emptyCounts(), T01: emptyCounts() };
   const candidates: AnyLocalCandidate[] = [];
   const excluded: { candidateId: string; reason: string }[] = [];
+  const commonTableIds = new Set(library ? plan.standardTables.filter(pin => pin.kind === 'common-words').map(pin => pin.tableId) : []);
+  const advisorySlots: number[] = [];
+  function overLimit(candidate: AnyLocalCandidate) {
+    counts[candidate.ruleId].error++;
+    if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
+  }
+  function retain(candidate: AnyLocalCandidate, advisory = false) {
+    if (candidates.length < 10000) {
+      if (advisory) advisorySlots.push(candidates.length);
+      candidates.push(candidate);
+    } else {
+      // An advisory may occupy unused capacity, but must yield it to a later ordinary finding.
+      const slot = advisory ? undefined : advisorySlots.pop();
+      if (slot === undefined) { overLimit(candidate); return; }
+      const displaced = candidates[slot]!;
+      counts[displaced.ruleId].findings--;
+      overLimit(displaced);
+      candidates[slot] = candidate;
+    }
+    counts[candidate.ruleId].findings++;
+  }
   const emitted = new Set<string>();
   const frozenGraphemes = new Map<string, readonly string[]>();
   const basis = numeralBasis(plan.options);
@@ -216,16 +242,12 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
       basis: id.startsWith('N') && basis === 'editor-convention' ? 'editor-convention' : 'national-standard' };
     if (emitted.has(candidate.id)) return;
     emitted.add(candidate.id);
-    if (candidates.length >= 10000 || candidate.quote.length > 65536) {
-      counts[id].error++;
-      if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
-      return;
-    }
+    if (candidate.quote.length > 65536) { overLimit(candidate); return; }
     if (!candidateHasFrozenAnchor(plan, candidate, parts, block)) {
       // Counted in full; the listed reasons stay within the artifact's 256-entry bound.
       counts[id].error += 1; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' }); return;
     }
-    candidates.push(candidate); counts[id].findings += 1;
+    retain(candidate);
   };
   const stack: Opener[] = [];
   const discardedClosers = new Map<string, number>();
@@ -391,13 +413,10 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
               const candidate: HouseCandidate = { id: houseCandidateId(house, entry.entryId, block.blockId, from, to), ruleId: 'H01', version: 1,
                 blockId: block.blockId, from, to, quote: entry.literal, observation: HOUSE_RULE.title, basis: 'house-word-list',
                 houseWordList: house.houseWordList!.pin, entryId: entry.entryId };
-              if (candidates.length >= 10000) {
-                counts.H01.error++;
-                if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
-              } else if (!candidateHasFrozenAnchor(house, candidate, graphemes, block)) {
+              if (!candidateHasFrozenAnchor(house, candidate, graphemes, block)) {
                 counts.H01.error++;
                 if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' });
-              } else { candidates.push(candidate); counts.H01.findings++; }
+              } else retain(candidate);
             }
             offset = text.indexOf(entry.literal, offset + 1);
           }
@@ -427,8 +446,8 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
         const candidate: TableCandidate = { id: tableCandidateId(plan, id, block.blockId, from, to), ruleId: id, version: tableVersion(plan, id), blockId: block.blockId, from, to, quote, ...match, ...(entries ? { entries } : {}) };
         if (emitted.has(candidate.id)) return;
         emitted.add(candidate.id);
-        if (candidates.length >= 10000 || candidate.observation.length > 2000 || candidate.quote.length > 65536) { counts[id].error++; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' }); }
-        else { candidates.push(candidate); counts[id].findings++; }
+        if (candidate.observation.length > 2000 || candidate.quote.length > 65536) { overLimit(candidate); return; }
+        retain(candidate, entries?.some(entry => commonTableIds.has(entry.tableId)));
       };
       if (library) for await (const hit of options.libraryCheck!(block.text, () => checkpoint('matches'))) {
         const from = indexAt.get(hit.start), to = indexAt.get(hit.start + hit.literal.length);
