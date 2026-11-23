@@ -96,6 +96,56 @@ describe('provider-free local ReviewRun', () => {
     expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
     expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
   });
+  it('keeps common-word findings advisory, excludes disabled tables and preserves deleted evidence (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书词表核查');
+    const options: LocalCheckOptions = { ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] } };
+    const target = replaceFirst(book, '苹裹。按纳。苹果。');
+    const scope = { kind: 'selection', fromChapterBlockId: target, toChapterBlockId: target } as const;
+    const db = database();
+    try {
+      const prepared = prepare(book,policy,options,scope);
+      db.exec("UPDATE standard_tables SET enabled = 0 WHERE kind = 'common-words'");
+      authorize(book,prepared);
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+      await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+      const findings = () => store.inspectReviewWorkspace(book.bookId,prepared.run.reviewRunId).run!.findings;
+      const advisory = findings().find(f => f.quote === '苹裹');
+      expect(advisory).toMatchObject({ output: 'annotation', replacement: null, note: expect.stringContaining('可能是不常用的写法，请核对') });
+      expect(advisory?.note).toContain('辞书推荐（建议改）');
+      expect(findings().find(f => f.quote === '按纳')).toMatchObject({ output: 'change-suggestion', replacement: '按捺', note: expect.stringContaining('国家规范（应改）') });
+      const disabled = prepare(book,policy,options,scope);
+      authorize(book,disabled);
+      const second = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+      await second.drive(disabled.run.reviewRunId); await second.dispose();
+      expect(store.inspectReviewWorkspace(book.bookId,disabled.run.reviewRunId).run!.findings.some(f => f.quote === '苹裹')).toBe(false);
+      db.exec("UPDATE standard_tables SET enabled = 1 WHERE kind = 'common-words'");
+      const deleted = prepare(book,policy,options,scope);
+      db.exec(`BEGIN;
+        DELETE FROM standard_table_entries WHERE version_id IN (SELECT current_version_id FROM standard_tables WHERE kind='common-words');
+        DELETE FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE kind='common-words');
+        DELETE FROM standard_tables WHERE kind='common-words'; COMMIT`);
+      expect(() => authorize(book,deleted)).toThrow(/字表已删除/);
+      expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
+      expect(findings().find(f => f.quote === '按纳')?.note).not.toContain('已删除');
+    } finally { db.close(); }
+  });
+  it('counts advisory notes on the unedited admitted sample1 (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书词表核查');
+    const prepared = prepare(book, await resolveSourceCheckoutLaunchPolicy(roots.codeRoot), {
+      ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] },
+    });
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+    await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const db = database();
+    try {
+      const count = db.prepare("SELECT count(*) n FROM review_findings WHERE review_run_id = ? AND output = 'annotation' AND note LIKE '%可能是不常用的写法，请核对%'").get(prepared.run.reviewRunId);
+      expect(count?.n).toBe(47);
+    } finally { db.close(); }
+  });
   it('names every Run whose findings cover the whole batch, newest first by Run ordinal, whichever finished first (#1654)', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '再审同一批公开样书');

@@ -10,7 +10,7 @@ export type ProcedureStageType = (typeof PROCEDURE_STAGE_TYPES)[number];
 
 /** Closed local formats; declaring v2 does not select or activate it. */
 export type LocalCheckProcedureVersion = 1 | 2 | 3;
-export type LocalCheckPlanSchema = 'ai7.review.local-plan/1' | 'ai7.review.local-plan/2' | 'ai7.review.local-plan/3' | 'ai7.review.local-plan/4';
+export type LocalCheckPlanSchema = 'ai7.review.local-plan/1' | 'ai7.review.local-plan/2' | 'ai7.review.local-plan/3' | 'ai7.review.local-plan/4' | 'ai7.review.local-plan/5';
 export type LocalCheckResultSchema = 'ai7.review.local-result/1' | 'ai7.review.local-result/2' | 'ai7.review.local-result/3';
 export type LocalCheckArtifactSchema = 'ai7.review.local-stage-artifact/1' | 'ai7.review.local-stage-artifact/2' | 'ai7.review.local-stage-artifact/3';
 
@@ -35,6 +35,7 @@ export interface BookTermEntry {
 export interface LocalCheckTables {
   readonly characters: boolean;
   readonly variantWords: boolean;
+  readonly tableIds?: readonly string[];
   readonly bookTerms: readonly BookTermEntry[];
   readonly houseWordList: import('./house-word-list.js').HouseWordListPin | null;
 }

@@ -824,6 +824,7 @@ export interface ReviewRunProjection {
   /** Existing repeat preparation input for optional references before authorization. */
   referenceInput?: Omit<PrepareReviewRunInput, 'bookId'>;
   localCheck?: {
+    strengths?: readonly { label: string; count: number }[];
     planDigest: string;
     options: import('./procedures.js').LocalCheckOptions;
     state: string;
@@ -909,6 +910,7 @@ export interface ReviewWorkspaceProjection {
   /** Own ranges of the current coverage units, without manuscript text. */
   scopeUnitCounts?: { whole: number; units: ReadonlyArray<{ startPosition: number; endPosition: number }> };
   /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
+  standardTables?: readonly { tableId: string; kind: string; name: string; label: string }[];
   localBookTerms?: readonly import('./procedures.js').BookTermEntry[];
   listPages?: TaskPlanProjection['listPages'];
   /** Eligible local references offered separately from manuscript scope (Issue #428). */

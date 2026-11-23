@@ -6,7 +6,7 @@ import { reviewLaunchEdits, type ReviewLaunchOptions } from './review-launch-opt
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
-import { reviewFindingHasGuessedAnchor } from '../../shared/review-basis.js';
+import { reviewFindingHasGuessedAnchor, standingBatchSuggestions } from '../../shared/review-basis.js';
 import type { BookFindingProjection } from '../../shared/protocol/review.js';
 import { RUN_SYNTHESIS_CATEGORY, RUN_SYNTHESIS_ENTRY } from './run-synthesis-kind.js';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisInput } from './run-synthesis-contract.js';
@@ -21,7 +21,9 @@ import { compositeReviewRun, type CompositeReviewRun } from '../procedures/compo
 import { procedureContent } from '../procedures/execution.js';
 import { compositeMembers, readProcedurePlanView, resolveProcedureForKind } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
-import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
+import { enabledStandardTables, loadLibraryCheck, missingLibraryPins, selectedStandardTables, STRENGTH, type LibraryPin } from './deterministic/library-check.js';
+import { preinstalledTableId } from '../standard-tables.js';
+import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV5, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
 import { exactLocalCandidateIds, checkLocalPlan, anyLocalCandidateNote, mechanicalReplacement, validateLocalResultV3, type AnyLocalCheckResult } from './deterministic/checker.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE, LOCAL_CHECK_LIMITATION, LOCAL_TABLE_LIMITATION, LOCAL_RULE_IDS } from './deterministic/rules.js';
 import { HouseWordLists } from './house-word-list.js';
@@ -53,7 +55,7 @@ import {
   reviewCategoryKindId,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
-  MAX_REVIEW_FINDINGS_PER_PAGE,
+  MAX_REVIEW_FINDINGS_PER_PAGE, MAX_BATCH_APPLY_SUGGESTIONS,
   MAX_REVIEW_RUN_SUMMARIES,
   REVIEW_COVERAGE_STATE_LABELS,
   REVIEW_FINDING_ID_PATTERN,
@@ -827,6 +829,8 @@ export function unreadWalkCutNote(cut: UnreadWalkCut): string | null {
 
 /** A located finding ready to be written with the mark it becomes. */
 interface MaterializedFinding {
+  readonly standardTableIds?: string[];
+  readonly standardStrengths?: string[];
   readonly output?: 'annotation' | 'change-suggestion';
   readonly kindRef: string;
   readonly severity: ReviewFindingSeverity;
@@ -862,6 +866,7 @@ interface SuggestionVersionView {
 }
 
 interface FindingView {
+  readonly standardStrengths?: (keyof typeof STRENGTH)[];
   readonly findingId: string;
   readonly categoryId: string;
   readonly ordinal: number;
@@ -942,7 +947,7 @@ function runViewStateLabel(view: Pick<RunView, 'state' | 'authorization' | 'canC
 export interface ReviewRunPlanFacts {
   /** The composite version the Run executes (Issue #1173), named on the Task as one procedure. */
   readonly composite?: { readonly procedure: ProcedureDefinitionPin; readonly title: string };
-  readonly localPlan?: { readonly digest: string; readonly options: LocalCheckOptions; readonly paragraphs: number; readonly blocks: readonly LocalCheckBlock[] };
+  readonly localPlan?: { readonly schema: AnyLocalCheckPlan['schema']; readonly standardTables?: readonly LibraryPin[]; readonly digest: string; readonly options: LocalCheckOptions; readonly paragraphs: number; readonly blocks: readonly LocalCheckBlock[] };
   readonly waitingIdle?: boolean;
   /** Each category that reads 本社审阅偏好 with the version it reads; empty when the selected rule is closed to them. */
   readonly housePreferences?: ReadonlyArray<{ readonly categoryLabel: string; readonly preference: HouseReviewPreferenceUse }>;
@@ -1204,9 +1209,12 @@ export class ReviewRunStore {
     const frozen = { procedure: resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, version).pin, source: localSource(head),
       bookImportId: this.#localBookImport(input.bookId), scope: scope.kind, options: input.localCheck, blocks: this.#localBlocks(head.branchId, scope) };
     const pin = input.localCheck.tables?.houseWordList ?? null;
-    const localPlan = localRefusal(() => version === 1 ? freezeLocalPlan(frozen) : selected !== null
-      ? freezeLocalPlanV4({ ...frozen, procedure: selected, procedureDefinition: resolveProcedurePin(this.#db, selected), houseWordList: pin === null ? null : { pin, document: new HouseWordLists(this.#db).selectCurrent(pin) } })
-      : freezeLocalPlanV3({ ...frozen, houseWordList: pin === null ? null : { pin, document: new HouseWordLists(this.#db).selectCurrent(pin) } }));
+    const procedure = selected ?? frozen.procedure;
+    const localPlan = localRefusal(() => version === 1 ? freezeLocalPlan(frozen) : freezeLocalPlanV5({
+      ...frozen, procedure, procedureDefinition: resolveProcedurePin(this.#db, procedure),
+      standardTables: selectedStandardTables(this.#db, input.localCheck!.tables!),
+      houseWordList: pin === null ? null : { pin, document: new HouseWordLists(this.#db).selectCurrent(pin) },
+    }));
     const entry = version === 1 ? LOCAL_REVIEW_CATEGORY : LOCAL_REVIEW_CATEGORY_V3;
     const category: SnapshotCategory = { position: 1, categoryId: LOCAL_CHECK_CATEGORY, executor: 'local-text-check', entry,
       basisStatement: localBasisStatement(entry, localPlan.options), selectedRange: scope.selectedRange, task: null };
@@ -1242,7 +1250,9 @@ export class ReviewRunStore {
     requireReview(kind !== 'changed' && (kind === 'whole' || scope.selectedRange !== null), 'LOCAL_SCOPE_INVALID', '本地文字检查请选择全书、选章或当前选区。');
     const options = input.localCheck!;
     const pin = options.tables?.houseWordList ?? null;
-    const localPlan = localRefusal(() => freezeLocalPlanV3({ procedure: resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, 3).pin, source: localSource(head),
+    const procedure = resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, 3).pin;
+    const localPlan = localRefusal(() => freezeLocalPlanV5({ procedure, procedureDefinition: resolveProcedurePin(this.#db, procedure),
+      standardTables: selectedStandardTables(this.#db, options.tables!), source: localSource(head),
       bookImportId: this.#localBookImport(input.bookId), scope: kind, options, blocks: this.#localBlocks(head.branchId, scope),
       houseWordList: pin === null ? null : { pin, document: new HouseWordLists(this.#db).selectCurrent(pin) } }));
     return { localPlan, category: { position: 1, categoryId: LOCAL_CHECK_CATEGORY, executor: 'local-text-check', entry: LOCAL_REVIEW_CATEGORY_V3,
@@ -1253,6 +1263,8 @@ export class ReviewRunStore {
     const plan = snapshot.localPlan;
     requireReview(plan !== undefined, 'LOCAL_PLAN_INVALID', '本地检查计划缺失。');
     localRefusal(() => validateAnyLocalPlan(plan));
+    if (plan.schema === 'ai7.review.local-plan/5') requireReview(!missingLibraryPins(this.#db, plan.standardTables),
+      'LOCAL_TABLE_MISSING', '依据的字表已删除，请重新准备本地检查。');
     requireReview(plan.bookImportId === this.#localBookImport(snapshot.bookId), 'LOCAL_IMPORTED_AUTHORITY', '导入的审阅记录只供查看；请在本机新建本地文字检查。');
     const head = this.#head(snapshot.bookId);
     requireReview(head !== null && canonicalJson(localSource(head)) === canonicalJson(plan.source), 'LOCAL_SOURCE_MOVED', '稿件修订或范围已变化；本地检查没有继续，请重新准备。');
@@ -1306,7 +1318,9 @@ export class ReviewRunStore {
       this.#requireLocalSource(snapshot);
       if (last?.state !== 'completed') {
         this.#recordLocal(snapshot, attemptId, 'started', null, '正在本机检查冻结正文。');
-      const result = await checkLocalPlan(snapshot.localPlan, { cancelled: () => stopping() || this.#db.prepare('SELECT state FROM review_local_stage_artifacts WHERE review_run_id = ? ORDER BY sequence DESC LIMIT 1').get(reviewRunId)?.state === 'cancelled' });
+        const plan = snapshot.localPlan;
+        const result = await checkLocalPlan(plan, { ...(plan.schema === 'ai7.review.local-plan/5'
+          ? { libraryCheck: loadLibraryCheck(this.#db, plan.standardTables, plan.options.tables!.bookTerms) } : {}), cancelled: () => stopping() || this.#db.prepare('SELECT state FROM review_local_stage_artifacts WHERE review_run_id = ? ORDER BY sequence DESC LIMIT 1').get(reviewRunId)?.state === 'cancelled' });
         this.#requireLocalSource(snapshot);
         this.#recordLocal(snapshot, attemptId, 'completed', result, `已检查 ${result.paragraphs} 个段落，待生成批注。`);
         last = readLocalStageArtifacts(this.#db, reviewRunId).at(-1)!.record;
@@ -1324,7 +1338,9 @@ export class ReviewRunStore {
         return { kindRef: `loc_${(isLocalTablePlan(snapshot.localPlan!) ? sha256Hex(snapshot.localPlan!.digest + candidate.id) : candidate.id).slice(0, 56)}`,
           output: replacement === null ? 'annotation' : 'change-suggestion', severity: 'note', blockId: candidate.blockId, fromGrapheme: candidate.from, toGrapheme: candidate.to,
           pinnedText: candidate.quote, quote: candidate.quote, note, replacement, clauseId: null,
-          stateLine: `${candidate.ruleId}/v1 · ${replacement === null ? '请编辑复核' : '机械修正'}`, body: note,
+          ...('entries' in candidate && candidate.entries ? { standardTableIds: [...new Set(candidate.entries.map(entry => entry.tableId))],
+            standardStrengths: [...new Set(candidate.entries.map(entry => entry.strength))] } : {}),
+          stateLine: `${candidate.ruleId}/v${candidate.version} · ${replacement === null ? '请编辑复核' : '机械修正'}`, body: note,
           basis: [{ label: note, blockId: null, fromGrapheme: null, toGrapheme: null, quote: null }] };
       });
       this.#writeFindings(snapshot, snapshot.categories[0]!, findings, { runRecordId: null, resultSetRevisionId: null, excludedCount: result.excluded.length + result.candidates.length - findings.length,
@@ -1336,7 +1352,7 @@ export class ReviewRunStore {
       const interrupted = stopping();
       // A shutdown during the atomic mark write rolls that write back; the completed stage remains consumable.
       if (interrupted && current?.state === 'completed') return;
-      this.#recordLocal(snapshot, current?.attemptId ?? attemptId, interrupted ? 'interrupted' : code === 'LOCAL_SOURCE_MOVED' || code === 'LOCAL_IMPORTED_AUTHORITY' ? 'refused' : 'failed', null,
+      this.#recordLocal(snapshot, current?.attemptId ?? attemptId, interrupted ? 'interrupted' : code === 'LOCAL_SOURCE_MOVED' || code === 'LOCAL_IMPORTED_AUTHORITY' || code === 'LOCAL_TABLE_MISSING' ? 'refused' : 'failed', null,
         interrupted ? '服务已停止；本地检查未完成。' : code === 'LOCAL_SOURCE_MOVED' ? '稿件已变化；请重新准备本地检查。' : '本地检查未完成；请重新准备。');
     }
   }
@@ -2252,7 +2268,8 @@ export class ReviewRunStore {
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
       ...(snapshot.composite === undefined ? {} : { composite: { procedure: snapshot.composite.procedure, title: snapshot.composite.document.title } }),
-      ...(snapshot.localPlan === undefined ? {} : { localPlan: { digest: snapshot.localPlan.digest, options: snapshot.localPlan.options, paragraphs: snapshot.localPlan.blocks.length, blocks: snapshot.localPlan.blocks } }),
+      ...(snapshot.localPlan === undefined ? {} : { localPlan: { schema: snapshot.localPlan.schema,
+        ...(snapshot.localPlan.schema === 'ai7.review.local-plan/5' ? { standardTables: snapshot.localPlan.standardTables } : {}), digest: snapshot.localPlan.digest, options: snapshot.localPlan.options, paragraphs: snapshot.localPlan.blocks.length, blocks: snapshot.localPlan.blocks } }),
       ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : taskMaterialSettled(reading)) }),
       ...(snapshot.housePreferences === undefined ? {} : { housePreferences: snapshot.categories.filter(category => category.entry.synthesisKey === undefined).flatMap((category) => {
@@ -2465,7 +2482,7 @@ export class ReviewRunStore {
     if (record.localPlan !== undefined) {
       validateAnyLocalPlan(record.localPlan);
       requireReview((record.composite !== undefined || record.categories.length === 1) && record.categories[0]?.executor === 'local-text-check' && record.categories[0].task === null &&
-        (record.localPlan.schema === 'ai7.review.local-plan/4' || canonicalJson(record.localPlan.procedure) === canonicalJson(resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, record.localPlan.procedure.version).pin)), 'REVIEW_RECORD_INVALID', '本地检查工序绑定无效。');
+        (record.localPlan.schema === 'ai7.review.local-plan/4' || record.localPlan.schema === 'ai7.review.local-plan/5' || canonicalJson(record.localPlan.procedure) === canonicalJson(resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, record.localPlan.procedure.version).pin)), 'REVIEW_RECORD_INVALID', '本地检查工序绑定无效。');
     }
     if (record.composite !== undefined) {
       const { procedure, document } = record.composite;
@@ -3803,6 +3820,7 @@ export class ReviewRunStore {
             clauseId: finding.clauseId,
             stateLine: finding.stateLine,
             basis: finding.basis,
+            ...(finding.standardTableIds ? { standardTableIds: finding.standardTableIds, standardStrengths: finding.standardStrengths } : {}),
             ...((finding.referencedRuleVersions?.length ?? 0) === 0 ? {} : { referencedRuleVersions: finding.referencedRuleVersions }),
             markId,
             carried: carried[index] !== null,
@@ -4176,6 +4194,7 @@ export class ReviewRunStore {
     const run = opened === null ? null : this.#runProjection(views.get(opened.reviewRunId)!, readings, chapters, page);
     const workspace: ReviewWorkspaceProjection = {
       bookId,
+      standardTables: enabledStandardTables(this.#db).map(({ tableId, kind, name, label }) => ({ tableId, kind, name, label })),
       localBookTerms: (() => {
         const row = this.#db.prepare("SELECT * FROM review_runs WHERE book_id = ? AND json_type(canonical_json, '$.localPlan.options.tables') = 'object' ORDER BY ordinal DESC LIMIT 1").get(bookId) as SqlRow | undefined;
         return row === undefined ? [] : this.#snapshotOf(row).localPlan?.options.tables?.bookTerms ?? [];
@@ -5382,6 +5401,8 @@ export class ReviewRunStore {
     // mark, never the finding's own record. The paragraph numbers come in one pass over the pages.
     const placeOf = (view: typeof views[number]): string => view.mark.markId !== null && view.mark.blockId !== null ? view.mark.blockId : text(view.row.finding_block);
     const positions = positionsOfBlocks(this.#db, branchId, views.map(placeOf));
+    const surviving = new Set(this.#db.prepare('SELECT table_id FROM standard_tables').all().map(row => row.table_id));
+    const legacyIds = { 'C01/v1': preinstalledTableId('tgh-2013'), 'C02/v1': preinstalledTableId('tgh-2013-annex-1'), 'V01/v1': preinstalledTableId('gf-1001-2001') };
     return views.map(({ row, mark }): FindingView => {
       const originMarkId = nullableText(row.mark_id);
       const ignoreReason = nullableText(row.ignore_reason);
@@ -5395,6 +5416,10 @@ export class ReviewRunStore {
         decision: decision === null || decision === 'withdrawn' ? null : decision as 'accepted' | 'accepted-with-edit' | 'rejected',
         convertedTo: mark.convertedTo,
       });
+      const legacy = Object.entries(legacyIds).find(([rule]) => nullableText(row.state_line)?.startsWith(rule))?.[1];
+      const evidence = text(row.canonical_json).includes('"standardTableIds"') ? recordOf(text(row.canonical_json),text(row.sha256)) : null;
+      const tableIds = evidence?.standardTableIds as string[] | undefined ?? (legacy ? [legacy] : []);
+      const missing = tableIds.some(id => !surviving.has(id));
       return {
         findingId: text(row.finding_id),
         categoryId: text(row.category_id),
@@ -5407,7 +5432,8 @@ export class ReviewRunStore {
         fromGrapheme: markId === null || mark.from === null ? integer(row.from_grapheme) : mark.from,
         toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
-        note: text(row.note),
+        note: text(row.note) + (missing ? ' · 依据的字表已删除' : ''),
+        ...(evidence ? { standardStrengths: evidence.standardStrengths as (keyof typeof STRENGTH)[] } : {}),
         referencedRuleVersions: text(row.canonical_json).includes('"referencedRuleVersions"')
           ? (recordOf(text(row.canonical_json), text(row.sha256)).referencedRuleVersions ?? []) as ReadonlyArray<ReferencedRuleVersion> : [],
         learningDecisionId: nullableText(row.learning_decision_id),
@@ -5627,7 +5653,12 @@ export class ReviewRunStore {
           const last = readLocalStageArtifacts(this.#db, snapshot.reviewRunId).at(-1)?.record;
           const result = last?.result;
           const valid = result === undefined || result === null ? new Set<string>() : exactLocalCandidateIds(snapshot.localPlan!, result.candidates);
-          return { planDigest: snapshot.localPlan!.digest, options: snapshot.localPlan!.options, state: last?.state ?? 'prepared', paragraphs: snapshot.localPlan!.blocks.length,
+          const batch = standingBatchSuggestions(view.findings.filter(f => f.categoryId === LOCAL_CHECK_CATEGORY && f.output === 'change-suggestion' && f.status === 'pending'), true)
+            .slice(0, MAX_BATCH_APPLY_SUGGESTIONS);
+          const strengths = (Object.keys(STRENGTH) as (keyof typeof STRENGTH)[]).map(strength => ({
+            label: STRENGTH[strength], count: batch.filter(f => f.standardStrengths?.includes(strength)).length,
+          })).filter(row => row.count);
+          return { strengths, planDigest: snapshot.localPlan!.digest, options: snapshot.localPlan!.options, state: last?.state ?? 'prepared', paragraphs: snapshot.localPlan!.blocks.length,
             counts: result?.counts ?? null, excluded: [...(result?.excluded ?? []), ...(result?.candidates.filter((candidate) => !valid.has(candidate.id)).slice(0, 256).map((candidate) => ({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' })) ?? [])] };
         })() }),
         reviewRunId: snapshot.reviewRunId,

@@ -1296,13 +1296,17 @@ async function main() {
     // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
     at('local-check-exact-sample1');
     await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
-    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
+    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'本地检查…保留原文。苹裹。'); })()`, 'local-tester-edit');
     await settled(renderer, 'local-edit-durable');
-    await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。'); })()`, 'local-frozen-words-kept');
+    await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。苹裹。'); })()`, 'local-frozen-words-kept');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-review-entry');
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'local-explicit-entry-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'local-entry-click');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-local-check-options]')?.hidden===false`, 'local-options-open');
+    await assertRenderer(renderer, `(() => {
+      const tables = [...document.querySelectorAll('dialog.review-sheet input[data-local-table]')];
+      return tables.length === 4 && tables.every(input => input.checked) && tables.some(input => input.parentElement.textContent.includes('现代汉语常用词表'));
+    })()`, 'local-enabled-library-tables-selected');
     try {
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
         at(viewport.width === 1280 ? 'dispatch-review-wide' : 'dispatch-review-gate');
@@ -1321,6 +1325,11 @@ async function main() {
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
+    await assertRenderer(renderer, `(async () => {
+      const run = (await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run;
+      const note = run.findings.find(f => f.blockId === window.__j05LocalBlock && f.quote === '苹裹');
+      return note?.output === 'annotation' && note.replacement === null && note.note.includes('辞书推荐（建议改）') && note.note.includes('可能是不常用的写法，请核对');
+    })()`, 'local-common-word-advisory');
     // Q1 / Issue #1410 item 5: 批量采纳机械修正 applies at once, and 撤销本批应用 stands beside the result.
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');

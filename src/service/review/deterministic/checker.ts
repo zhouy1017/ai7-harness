@@ -6,6 +6,8 @@ import { APPENDIX_WORDS, CHARACTER_FORMS, STANDARD_CHARACTERS, TABLE_RULE_IDS, V
 import { HOUSE_RULE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, LOCAL_RULES, type LocalRuleId, type LocalRuleIdV2 } from './rules.js';
 import { houseAnnotationDetail, type HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
 
+import { libraryDetail, type EntryEvidence, type LibraryHit } from './library-check.js';
+
 export interface LocalCandidate {
   readonly id: string; readonly ruleId: LocalRuleId; readonly version: 1;
   readonly blockId: string; readonly from: number; readonly to: number; readonly quote: string;
@@ -15,7 +17,8 @@ export interface HouseCandidate extends Omit<LocalCandidate, 'ruleId' | 'basis'>
   readonly ruleId: 'H01'; readonly basis: 'house-word-list'; readonly houseWordList: HouseWordListPin; readonly entryId: string;
 }
 export type LocalCandidateV2 = LocalCandidate | HouseCandidate;
-export interface TableCandidate extends Omit<LocalCandidate, 'ruleId' | 'basis'> {
+export interface TableCandidate extends Omit<LocalCandidate, 'ruleId' | 'basis' | 'version'> {
+  readonly version: 1 | 2; readonly entries?: EntryEvidence[];
   readonly ruleId: TableRuleId; readonly basis: 'standard-table' | 'book-term-table';
   readonly replacement: string | null;
 }
@@ -40,6 +43,7 @@ export interface LocalCheckResultV2 extends Omit<LocalCheckResult, 'schema' | 'c
   readonly counts: Readonly<Record<LocalRuleIdV2, LocalRuleCounts>>;
 }
 export interface LocalCheckExecutionOptions {
+  readonly libraryCheck?: (text: string, checkpoint: () => Promise<void>) => AsyncIterable<LibraryHit>;
   readonly cancelled?: () => boolean;
   readonly checkpoint?: (phase: 'scan' | 'matches') => Promise<void>;
 }
@@ -53,14 +57,18 @@ const OTHER_SIGN = /[＋－±∓﹢﹣]/u;
 const emptyCounts = (): LocalRuleCounts => ({ checked: 0, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 0 });
 const WORD_FORMS = new Map([...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => [literal, entry] as const)));
 function tableCandidateId(plan: LocalCheckTablePlan, rule: TableRuleId, blockId: string, from: number, to: number): string {
-  return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, rule, version: 1, blockId, from, to }));
+  return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, rule, version: tableVersion(plan, rule), blockId, from, to }));
 }
-function tableMatch(plan: LocalCheckTablePlan, rule: TableRuleId, quote: string): Pick<TableCandidate, 'basis' | 'observation' | 'replacement'> | null {
+function tableVersion(plan: LocalCheckTablePlan, rule: unknown) {
+  return plan.schema === 'ai7.review.local-plan/5' && rule !== 'T01' ? 2 : 1;
+}
+function tableMatch(plan: LocalCheckTablePlan, rule: TableRuleId, quote: string, entries?: EntryEvidence[]): Pick<TableCandidate, 'basis' | 'observation' | 'replacement'> | null {
   const tables = plan.options.tables!;
   if (rule === 'T01') {
     const entry = tables.bookTerms.find((entry) => entry.variants.includes(quote));
     return entry === undefined ? null : { basis: 'book-term-table', observation: `本书${entry.kind === 'person' ? '人名' : entry.kind === 'place' ? '地名' : '术语'}表指定“${entry.preferred}”；核对所列异写。`, replacement: entry.preferred };
   }
+  if (plan.schema === 'ai7.review.local-plan/5') return libraryDetail(plan.standardTables, rule, quote, entries);
   if (rule === 'V01' && tables.variantWords) {
     const entry = WORD_FORMS.get(quote);
     if (entry === undefined) return null;
@@ -84,7 +92,7 @@ export function mechanicalReplacement(candidate: AnyLocalCandidate): string | nu
   return null;
 }
 export function anyLocalCandidateNote(plan: AnyLocalCheckPlan, candidate: AnyLocalCandidate): string {
-  if ('replacement' in candidate) return `${candidate.ruleId}/v1 · ${candidate.observation}`;
+  if ('replacement' in candidate) return candidate.version === 2 ? candidate.observation : `${candidate.ruleId}/v1 · ${candidate.observation}`;
   if (candidate.ruleId === 'H01') {
     if (plan.schema === 'ai7.review.local-plan/1' || plan.houseWordList === null) throw new LocalCheckError('LOCAL_PLAN_INVALID', '本社词表快照缺失。');
     const entry = plan.houseWordList.document.entries.find((entry) => entry.entryId === candidate.entryId)!;
@@ -102,14 +110,14 @@ export function validateLocalResultV3(value: unknown, plan: LocalCheckTablePlan)
   const ids = new Set<string>();
   for (const candidate of value.candidates) {
     requireV2(isRecord(candidate) && hasExactKeys(candidate, ['id', 'ruleId', 'version', 'blockId', 'from', 'to', 'quote', 'observation', 'basis',
-      ...(candidate.ruleId === 'H01' ? ['houseWordList', 'entryId'] : TABLE_RULE_IDS.some((id) => id === candidate.ruleId) ? ['replacement'] : [])]) &&
+      ...(candidate.ruleId === 'H01' ? ['houseWordList', 'entryId'] : TABLE_RULE_IDS.some((id) => id === candidate.ruleId) ? ['replacement', ...(candidate.version === 2 ? ['entries'] : [])] : [])]) &&
       typeof candidate.id === 'string' && DIGEST_PATTERN.test(candidate.id) && !ids.has(candidate.id) &&
-      [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].some((id) => id === candidate.ruleId) && candidate.version === 1 &&
+      [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].some((id) => id === candidate.ruleId) && candidate.version === (TABLE_RULE_IDS.some(id => id === candidate.ruleId) ? tableVersion(plan, candidate.ruleId) : 1) &&
       typeof candidate.blockId === 'string' && BLOCK_ID_PATTERN.test(candidate.blockId) && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) && Number(candidate.from) >= 0 && Number(candidate.to) > Number(candidate.from) &&
       typeof candidate.quote === 'string' && candidate.quote.length > 0 && candidate.quote.length <= 65536 && typeof candidate.observation === 'string' && candidate.observation.length <= 2000);
     const typed = candidate as unknown as AnyLocalCandidate;
     if ('replacement' in typed) {
-      const expected = tableMatch(plan, typed.ruleId, typed.quote);
+      const expected = tableMatch(plan, typed.ruleId, typed.quote, typed.entries);
       requireV2(expected !== null && typed.basis === expected.basis && typed.observation === expected.observation && typed.replacement === expected.replacement);
     } else if (typed.ruleId === 'H01') requireV2(typed.basis === 'house-word-list' && typeof typed.entryId === 'string' && UUID_PATTERN.test(typed.entryId) && canonicalJson(typed.houseWordList) === canonicalJson(plan.houseWordList?.pin));
     else requireV2(typed.basis === 'national-standard' || typed.basis === 'editor-convention');
@@ -144,8 +152,8 @@ function candidateHasFrozenAnchor(plan: AnyLocalCheckPlan, candidate: AnyLocalCa
   }
   if ('replacement' in candidate) {
     if (!isLocalTablePlan(plan)) return false;
-    const expected = tableMatch(plan, candidate.ruleId, candidate.quote);
-    return expected !== null && candidate.version === 1 && candidate.basis === expected.basis && candidate.observation === expected.observation &&
+    const expected = tableMatch(plan, candidate.ruleId, candidate.quote, candidate.entries);
+    return expected !== null && candidate.version === tableVersion(plan, candidate.ruleId) && candidate.basis === expected.basis && candidate.observation === expected.observation &&
       candidate.replacement === expected.replacement && candidate.id === tableCandidateId(plan, candidate.ruleId, candidate.blockId, candidate.from, candidate.to) &&
       block !== undefined && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) && candidate.from >= 0 && candidate.to > candidate.from &&
       (graphemes === undefined ? sliceGraphemes(block.text, candidate.from, candidate.to) : graphemes.slice(candidate.from, candidate.to).join('')) === candidate.quote;
@@ -184,6 +192,8 @@ export function checkLocalPlan(plan: LocalCheckTablePlan, options?: LocalCheckEx
 export function checkLocalPlan(plan: AnyLocalCheckPlan, options?: LocalCheckExecutionOptions): Promise<AnyLocalCheckResult>;
 export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalCheckExecutionOptions = {}): Promise<AnyLocalCheckResult> {
   validateAnyLocalPlan(plan);
+  const library = plan.schema === 'ai7.review.local-plan/5';
+  if (library && !options.libraryCheck) throw new LocalCheckError('LOCAL_TABLE_MISSING', '缺少计划固定的字表与词表。');
   const house = plan.schema !== 'ai7.review.local-plan/1' && plan.houseWordList !== null ? plan : null;
   const checkpoint = async (phase: 'scan' | 'matches' = 'scan'): Promise<void> => {
     if (options.cancelled?.()) throw new LocalCheckError('LOCAL_CHECK_CANCELLED', '本地检查已取消。');
@@ -398,24 +408,34 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
     }
     if (isLocalTablePlan(plan)) {
       const tables = plan.options.tables!;
-      const tableEnabled = (id: TableRuleId) => id === 'C01' || id === 'C02' ? tables.characters : id === 'V01' ? tables.variantWords : tables.bookTerms.length > 0;
+      const tableEnabled = (id: TableRuleId) => {
+        if (id === 'T01') return tables.bookTerms.length > 0;
+        if (!library) return id === 'V01' ? tables.variantWords : tables.characters;
+        return plan.standardTables.some(pin => id === 'C01' ? pin.kind === 'standard-characters'
+          : id === 'C02' ? pin.kind === 'character-forms' : pin.kind === 'word-forms' || pin.kind === 'common-words');
+      };
       const before = Object.fromEntries(TABLE_RULE_IDS.map((id) => [id, counts[id].findings + counts[id].error + counts[id].skipped]));
       for (const id of TABLE_RULE_IDS) {
         if (tableEnabled(id)) { counts[id].checked++; if (hasExclusion) counts[id].exempt++; }
         else counts[id].disabled++;
       }
       if (house === null) counts.H01.disabled++;
-      const emitTable = (id: TableRuleId, from: number, to: number): void => {
+      const emitTable = (id: TableRuleId, from: number, to: number, entries?: EntryEvidence[]): void => {
         if (!exact(from, to)) { counts[id].skipped++; return; }
-        const quote = graphemes.slice(from, to).join(''); const match = tableMatch(plan, id, quote);
+        const quote = graphemes.slice(from, to).join(''); const match = tableMatch(plan, id, quote, entries);
         if (match === null) return;
-        const candidate: TableCandidate = { id: tableCandidateId(plan, id, block.blockId, from, to), ruleId: id, version: 1, blockId: block.blockId, from, to, quote, ...match };
+        const candidate: TableCandidate = { id: tableCandidateId(plan, id, block.blockId, from, to), ruleId: id, version: tableVersion(plan, id), blockId: block.blockId, from, to, quote, ...match, ...(entries ? { entries } : {}) };
         if (emitted.has(candidate.id)) return;
         emitted.add(candidate.id);
-        if (candidates.length >= 10000) { counts[id].error++; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' }); }
+        if (candidates.length >= 10000 || candidate.observation.length > 2000 || candidate.quote.length > 65536) { counts[id].error++; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' }); }
         else { candidates.push(candidate); counts[id].findings++; }
       };
-      if (tables.characters) for (let index = 0; index < graphemes.length; index++) {
+      if (library) for await (const hit of options.libraryCheck!(block.text, () => checkpoint('matches'))) {
+        const from = indexAt.get(hit.start), to = indexAt.get(hit.start + hit.literal.length);
+        if (from === undefined || to === undefined) counts[hit.rule].skipped++;
+        else emitTable(hit.rule, from, to, hit.entries);
+      }
+      if (!library && tables.characters) for (let index = 0; index < graphemes.length; index++) {
         if (index % 2048 === 0) await checkpoint('matches');
         const char = graphemes[index]!;
         if (Array.from(char).length !== 1 || !/\p{Unified_Ideograph}/u.test(char)) continue;
@@ -423,7 +443,7 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
         else if (!STANDARD_CHARACTERS.has(char)) emitTable('C01', index, index + 1);
       }
       const literals: Array<{ id: 'V01' | 'T01'; literal: string }> = [
-        ...(tables.variantWords ? [...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => ({ id: 'V01' as const, literal }))) : []),
+        ...(!library && tables.variantWords ? [...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => ({ id: 'V01' as const, literal }))) : []),
         ...tables.bookTerms.flatMap((entry) => entry.variants.map((literal) => ({ id: 'T01' as const, literal }))),
       ];
       let work = 0;
