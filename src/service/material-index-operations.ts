@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError, UUID_PATTERN, requireStore, sha256 } from './store-records.js';
+import { retrieveWithFlash, type RetrievalAssist } from './retrieval/flash-assist.js';
 import {
   type ServiceOperationMap,
   type LibraryMaterialProjection,
@@ -178,13 +179,13 @@ export function internalLayerActivity(host: MaterialIndexOperationsHost, materia
 }
 
 /**
- * 相似段落检索 in an item's 查看索引 (since R5-F2c): R5-F2a's lexical ranker over the item's current build, its paragraphs
+ * 相似段落检索 in an item's 查看索引: the local ranker with optional Flash assistance over the item's pinned build, its paragraphs
  * read in one statement. No explicit transaction is opened and no writer lock is taken: each statement reads in SQLite's own
  * read snapshot, and a build and its segments are append-only, so reads made one after another cannot see a mixed build. The
  * index pump takes the writer lock only inside its own write of a new build; a new build or a replaced store makes the second
  * read differ, and the search then answers nothing rather than a paragraph of another build. Best chunk per paragraph.
  */
-export async function searchLibraryMaterialVectors(host: MaterialIndexOperationsHost, input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
+export async function searchLibraryMaterialVectors(host: MaterialIndexOperationsHost, input: ServiceOperationMap['queryMaterialVectors']['input'], assist: RetrievalAssist | null = null): Promise<MaterialVectorSearchProjection> {
   requireStore(typeof input.materialId === 'string' && UUID_PATTERN.test(input.materialId) && typeof input.text === 'string' &&
     input.text.trim().length > 0 && input.text.isWellFormed() && Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= MAX_MATERIAL_VECTOR_CANDIDATES,
   'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效：请写要找的字词。');
@@ -199,7 +200,7 @@ export async function searchLibraryMaterialVectors(host: MaterialIndexOperations
     return { digest: now.indexDigest, segments: now.paragraphs.map((paragraph) => ({ segmentOrdinal: paragraph.ordinal, text: paragraph.text })) };
   } }]);
   try {
-    const found = await index.retrieve(input.text, RETRIEVAL_MAX_CANDIDATES, ['material']);
+    const found = await retrieveWithFlash(index, input.text, RETRIEVAL_MAX_CANDIDATES, assist);
     // A long paragraph is ranked in chunks: it answers once, where its best chunk ranks.
     const ordinals = new Set<number>();
     const best = found.filter((candidate) => !ordinals.has(candidate.anchor.segmentOrdinal!) && ordinals.add(candidate.anchor.segmentOrdinal!));
