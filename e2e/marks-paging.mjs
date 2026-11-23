@@ -13,7 +13,7 @@ const READ_WINDOW = `(async () => {
   let page=await window.ai7.getManuscriptWindowAt(at); const first=page, marks=[...page.marks];
   while (page.marksPage?.nextOrdinal!=null) { page=await window.ai7.getManuscriptWindowAt({...at,marks:{afterOrdinal:page.marksPage.nextOrdinal,digest:page.marksPage.digest}}); marks.push(...page.marks); }
   globalThis.__marksPaging={...binding,start};
-  return {shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey,from:mark.fromGrapheme,to:mark.toGrapheme,source:mark.sourceKind}))};
+  return {start,shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey,from:mark.fromGrapheme,to:mark.toGrapheme,source:mark.sourceKind}))};
 })()`;
 
 /** Where the editor stands: the text's scroll position, the first block in view and its top, the selected card and the focused card. */
@@ -262,8 +262,11 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await assertCommentsHeader(renderer,check,waitFor,'marks-paging-header-before',{remember:true});
   // The text on screen carries more marks than one answer: the first 400, and the sentence says so.
   // The Book's reads answer once the screen has settled after the way in (they are not registered while it changes).
-  await waitFor(renderer, `(async () => { try { globalThis.__marksFacts=await (${READ_WINDOW}); return true; } catch { return false; } })()`, 'marks-paging-window-read', 60_000);
-  const facts = await renderer.evaluate('globalThis.__marksFacts');
+  const readWindow = async () => {
+    await waitFor(renderer, `(async () => { try { globalThis.__marksFacts=await (${READ_WINDOW}); return true; } catch { return false; } })()`, 'marks-paging-window-read', 60_000);
+    return renderer.evaluate('globalThis.__marksFacts');
+  };
+  const facts = await readWindow();
   check(facts.total > 400 && facts.shown === 400, 'marks-paging-dense-window', { shown: facts.shown, total: facts.total });
   await waitFor(renderer,`(() => {const count=document.querySelector('[data-comments-book-pending]'),heading=document.querySelector('.manuscript-comments-heading'),c=count.getBoundingClientRect(),h=heading.getBoundingClientRect();return /[0-9]{3,}/.test(count.textContent)&&c.width>=24&&c.left>=h.left&&c.right<=h.right&&c.top>=h.top&&c.bottom<=h.bottom;})()`,'marks-paging-long-book-count');
   const sentence = `已显示 400 · 本段共 ${facts.total} 条`;
@@ -300,11 +303,20 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await waitFor(renderer, `document.querySelector('.review-workspace-card')!==null`, 'marks-paging-left');
   await pointerClick(renderer, waitFor, '[data-nav-book-section="manuscript"]', 'marks-paging-return');
   await opened();
-  await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence-again');
+  // The saved reading place can reopen a different window around the same dense paragraph.
+  const returned = await readWindow();
+  const denseBlockId = await renderer.evaluate('window.__j05TriageBlock');
+  const denseSuggestions = (window) => window.marks.filter((mark) => mark.blockId === denseBlockId && mark.kind === 'change-suggestion').map((mark) => mark.markId);
+  const originalIds = denseSuggestions(facts);
+  const returnedIds = new Set(denseSuggestions(returned));
+  check(originalIds.length > 400 && originalIds.length === returnedIds.size && originalIds.every((id) => returnedIds.has(id)), 'marks-paging-dense-suggestions-again');
+  check(returned.shown === 400 && (returned.start !== facts.start || returned.total === facts.total), 'marks-paging-first-page-again');
+  const returnedSentence = `已显示 400 · 本段共 ${returned.total} 条`;
+  await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(returnedSentence)}`, 'marks-paging-sentence-again');
   // The caret in the paragraph after the last mark's, by a real click: the step then goes back to that mark. The caret stands in the
   // middle of the window, so reading the mark's place does not carry the text past the window's end into the next window.
   const LAST = `Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).at(-1)`;
-  const lastMark = facts.marks.filter((mark) => mark.status === 'open' && mark.kind === 'change-suggestion').at(-1);
+  const lastMark = returned.marks.filter((mark) => mark.status === 'open' && mark.kind === 'change-suggestion').at(-1);
   const after = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"] > [data-block-id="${lastMark.blockId}"]')?.nextElementSibling?.dataset.blockId??'${lastMark.blockId}'`);
   const BLOCK = `[data-testid="manuscript-editor"] > [data-block-id="${after}"]`;
   await pointerClick(renderer, waitFor, BLOCK, 'marks-paging-caret-click');
