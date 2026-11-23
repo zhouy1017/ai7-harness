@@ -14,6 +14,7 @@ import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.
 import type { DefaultExecutionRulesProjection, ExemplarBookProjection, ExemplarsProjection, KnowledgeProceduresProjection } from '../shared/protocol.js';
 import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
+import { mountStandardTables } from './standard-tables.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import { mountFeedbackHistory } from './feedback-history.js';
@@ -103,6 +104,17 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     }
     const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
     const page = navigation.read(content);
+    if (tab === 'standard-tables') {
+      setStatus('正在读取字表与词表…', 'busy');
+      try {
+        await mountStandardTables({ root: panelNode, api: rendererApi,
+          setStatus: (message, tone) => { if (page.isCurrent()) setStatus(message, tone); }, errorMessage: rendererErrorMessage }).load();
+        if (page.isCurrent()) setStatus('字表与词表已打开');
+      } catch (error) {
+        if (page.isCurrent()) setStatus(rendererErrorMessage(error, '无法读取字表与词表。'), 'error');
+      }
+      return;
+    }
     // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
     if (tab === 'memory') {
       try {

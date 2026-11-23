@@ -27,7 +27,7 @@ import { MAINTENANCE_WITHDRAWN } from '../shared/maintenance-wording.js';
  * versions they used; nothing here is edited in place.
  */
 
-export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'house-words' | 'external';
+export type KnowledgeBaseTab = 'guidelines' | 'standard-tables' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'house-words' | 'external';
 
 export interface KnowledgeBaseTabView {
   readonly tab: KnowledgeBaseTab;
@@ -47,6 +47,12 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
     tab: 'guidelines',
     label: '审阅规范文件',
     holds: '审阅依据的规范文件与编号条款。',
+    pending: null,
+  },
+  {
+    tab: 'standard-tables',
+    label: '字表与词表',
+    holds: '规范字、字形对照、异形词与常用词表，供「规范用语核查」选用。',
     pending: null,
   },
   {
