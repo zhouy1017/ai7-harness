@@ -590,7 +590,7 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
   it('answers both AI 助手 kinds on the Pro model when only a Pro model is chosen (#1620)', async () => {
     store.selectMainRoleModel(binding.route, 'glm-5.3');
     const main = store.getConfiguredModelRoleBinding('main-editorial')!;
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
+    expect(store.getConfiguredModelRoleBinding('foreground-flash')).toEqual(main);
     policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
     store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
       live: { scope: 'ordinary-production', ...binding, model: main.model, credentialReference, runBudgetCeiling: 'unset' } });
@@ -606,7 +606,7 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
   it('answers both AI 助手 kinds on the Flash model when Pro and Flash are different models of one channel (#1620)', async () => {
     store.selectFastRoleModel(binding.route, binding.model);
     store.selectMainRoleModel(binding.route, 'glm-5.3');
-    const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('foreground-flash')!;
     expect([main.model, flash.model]).toEqual(['glm-5.3', binding.model]);
     policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
     store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,

@@ -362,7 +362,7 @@ it('runs polish, conflict regeneration and a scoped edit on the Pro model when n
   const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].route;
   const connection = store.saveModelServiceConnection('只选 Pro 的连接', null, 'ready', route);
   store.selectMainRoleModel(route, 'pro-only-model');
-  const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('fast-interaction')!;
+  const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('foreground-flash')!;
   expect(flash).toEqual(main);
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
   const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference };
@@ -452,7 +452,7 @@ it('freezes separate scoped launch bindings and replays a command after role set
   const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
   const connection = store.saveModelServiceConnection('局部修改连接', null, 'ready', binding.route);
   store.selectFastRoleModel(binding.route, binding.model, 'medium');
-  const defaults = store.getConfiguredModelRoleBinding('fast-interaction')!;
+  const defaults = store.getConfiguredModelRoleBinding('foreground-flash')!;
   const configured = { ...binding, credentialReference: connection.credentialReference };
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured, defaults);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
@@ -474,7 +474,7 @@ it('freezes separate scoped launch bindings and replays a command after role set
     const one = fast.scopedEdit(book.bookId, input);
     const two = fast.scopedEdit(second.bookId, { ...scopedEditJourneyInput(store, second, store.inspectAiEditLocks(second).digest),
       clientCommandId: randomUUID(), executionConfig: { modelId: 'scoped-choice-two', reasoningEffort: 'low' } });
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(defaults);
+    expect(store.getConfiguredModelRoleBinding('foreground-flash')).toEqual(defaults);
     store.selectFastRoleModel(binding.route, binding.model, 'off');
     await fast.settled();
     const first = fast.inspectScopedEdit(book.bookId, one.requestId), other = fast.inspectScopedEdit(second.bookId, two.requestId);

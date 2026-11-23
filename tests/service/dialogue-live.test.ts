@@ -576,7 +576,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const connection = store.saveModelServiceConnection('只选 Pro', null, 'ready', route);
     store.selectMainRoleModel(route, 'pro-only-dialogue-model');
     const main = store.getConfiguredModelRoleBinding('main-editorial')!;
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
+    expect(store.getConfiguredModelRoleBinding('foreground-flash')).toEqual(main);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
     const calls: StubCall[] = [];
     const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },

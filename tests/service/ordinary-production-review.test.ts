@@ -507,7 +507,7 @@ async function sharedCapacityScenario() {
   void working.catch(() => undefined);
   const bodies = await Promise.all([held.at(1), held.at(2), held.at(3)]); const application = await ready.promise;
   const firstExecution = latestReviewExecution(application.store);
-  const reference = application.store.getConfiguredModelRoleBinding('fast-interaction')!.credentialReference;
+  const reference = application.store.getConfiguredModelRoleBinding('foreground-flash')!.credentialReference;
   const resolver = { resolve: async () => 'public-synthetic-placeholder' };
   const { dialogues, streamEntered, finishStream } = heldGlobalAnswer(application, reference);
   const fastEntered = deferred(); const probeEntered = deferred();
