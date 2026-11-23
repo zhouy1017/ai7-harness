@@ -400,13 +400,27 @@ describe('comments command parity and refresh continuity', () => {
     colors[0]!.focus(); (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowRight' }); expect(document.activeElement).toBe(colors[1]);
     (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowLeft' }); expect(document.activeElement).toBe(colors[0]);
   });
-  it('pins the unchanged AI menu group for the same selection and no house procedures (#1689 R6)', async () => {
+  it('offers exactly three explained AI entries and keeps locks separate (#1539 I-1b)', async () => {
     const ui = mount(card, [], { scopedAiEdit: { host: {}, sectionOf: () => undefined } }); await paint(); const menu = openSelectionMenu(ui);
     const items = Array.from(menu.querySelectorAll<HTMLElement>('[aria-label="AI7 任务"] [role="menuitem"]'));
-    expect(items.map(node => [node.dataset['markAction'], node.querySelector('.menu-caption')?.textContent, (node as HTMLButtonElement).disabled])).toEqual([
-      ['task-on-selection','就这段发起任务…',true],['ask-on-selection','就这段提问…对话，不改稿件',true],['preset-polish','润色这段常用工序 · 生成修改建议',true],
-      ['scoped-ai-edit','就选中部分让 AI 修改…',false],['ai-lock-selection','🔒 锁定所选范围（AI 不修改）',false],
+    expect(items.map(node => [node.dataset['markAction'], node.querySelector('.menu-caption span')?.textContent, node.querySelector('small')?.textContent, (node as HTMLButtonElement).disabled])).toEqual([
+      ['scoped-ai-edit','让 AI 修改','润色、改写或按要求修改选中文字。',false],
+      ['task-on-selection','审阅选中内容','专项审阅选中段落，给出修改建议或批注。',true],
+      ['ask-on-selection','问 AI 助手','带着选中文字提问或讨论，不直接改稿。',true],
     ]);
+    expect(menu.querySelector('[data-mark-action="preset-polish"]')).toBeNull();
+    expect(items.every(node => node.querySelector('.menu-shortcut') === null)).toBe(true);
+    expect(menu.querySelector<HTMLButtonElement>('[aria-label="保护文字"] [data-mark-action="ai-lock-selection"]')?.disabled).toBe(false);
+  });
+  it('keeps saved procedures behind the review entry and carries the selected words to its existing composer (#1539 I-1b)', async () => {
+    const compose = vi.fn();
+    const procedures = vi.fn(async () => [{ value: 'procedure:saved', label: '按已保存的工序审阅' }]);
+    const ui = mount(card, [], { startTaskOnSelection: { bookTitle: '合成图书', procedures, compose } });
+    await paint(); const menu = openSelectionMenu(ui);
+    expect(menu.querySelectorAll('[aria-label="AI7 任务"] [role="menuitem"]')).toHaveLength(3);
+    expect(menu.querySelector('[data-mark-action="procedure:saved"]')).toBeNull();
+    menu.querySelector<HTMLButtonElement>('[data-mark-action="task-on-selection"]')!.click(); await paint();
+    expect(compose).toHaveBeenCalledWith(expect.objectContaining({ span: expect.objectContaining({ blockId: 'block', fromGrapheme: 0, toGrapheme: 2 }) }));
   });
   it.each(['annotation','editor-note'])('says the header reason with no selection (%s, #1689 R6)', async kind => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click();
@@ -1863,6 +1877,7 @@ describe('comments command parity and refresh continuity', () => {
     mounted!.composeScopedAiEdit(); await paint();
     const scopes = ui.scroll.querySelectorAll<HTMLInputElement>('[data-scoped-ai-edit-scope]');
     expect(Array.from(scopes, (radio) => [radio.dataset['scopedAiEditScope'], radio.checked])).toEqual([['selected', true], ['section', false], ['document', false]]);
+    expect(ui.scroll.querySelector('[data-scoped-ai-edit="polish"]')?.textContent).toBe('润色文字');
     ui.setRange('none'); miniDocument.body.dispatchEvent({ type: 'selectionchange' });
     expect(entry.textContent).toBe('让 AI 修改本节…'); expect(entry.title).toBe('本节未锁定的段落');
   });

@@ -19,7 +19,8 @@ import {
  * `data-ai-locked="true"`, and reloads its window and marks when `refresh` is called, so the applied cards and their ✎ 已改
  * badges show. What the service applies is already guarded there; nothing here decides what may change.
  */
-export const SCOPED_AI_EDIT_MENU_LABEL = '就选中部分让 AI 修改…';
+export const SCOPED_AI_EDIT_MENU_LABEL = '让 AI 修改';
+export const SCOPED_AI_EDIT_MENU_HINT = '润色、改写或按要求修改选中文字。';
 export const AI_LOCK_SELECTION_LABEL = '🔒 锁定所选范围（AI 不修改）';
 export const AI_UNLOCK_SELECTION_LABEL = '解锁所选范围';
 export const AI_LOCK_SECTION_LABEL = '🔒 锁定本节';
@@ -35,6 +36,8 @@ export const SCOPED_AI_EDIT_WORDS = {
   document: '全文未锁定的段落',
   instruction: '修改要求',
   placeholder: '例如：把这几段改得更紧凑，保留核心数据',
+  polish: '润色文字',
+  polishInstruction: '润色文字，使表达自然流畅，保留原意和事实。',
   submit: '让 AI 修改',
   cancel: '取消',
   note: '只有修改范围内、未锁定的文字会被改动；其余段落保持原样。改动会写入稿件并留下修订卡片，可以逐段撤销。',
@@ -208,6 +211,13 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   instruction.dataset['scopedAiEdit'] = 'instruction';
   field.append(instruction);
   form.append(field);
+  const presets = el('div', 'button-row');
+  const polish = el('button', 'btn quiet', SCOPED_AI_EDIT_WORDS.polish);
+  polish.type = 'button';
+  polish.dataset['scopedAiEdit'] = 'polish';
+  polish.title = '按当前修改范围直接润色，改动可撤销。';
+  presets.append(polish);
+  form.append(presets);
   const planStatement = el('p', 'field-note', SCOPED_AI_EDIT_WORDS.note);
   const actions = el('div', 'button-row');
   const submit = el('button', 'btn primary', SCOPED_AI_EDIT_WORDS.submit);
@@ -245,6 +255,14 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     event.preventDefault();
     void run();
   });
+  polish.addEventListener('click', () => {
+    if (submit.disabled) return;
+    if (instruction.value !== SCOPED_AI_EDIT_WORDS.polishInstruction) {
+      instruction.value = SCOPED_AI_EDIT_WORDS.polishInstruction;
+      resetCommand();
+    }
+    void run();
+  });
   const chosen = (): ScopedAiEditScope => {
     const value = radios.find((radio) => radio.checked)?.value ?? choices[0]!.value;
     if (value === 'selected' && options.selection !== null) return { mode: 'selected-only', span: selectionPins(options.selection) };
@@ -256,7 +274,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     const words = instruction.value.trim();
     if (words.length === 0) { host.setStatus(SCOPED_AI_EDIT_WORDS.empty, 'error'); instruction.focus(); return; }
     if ([...words].length > MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS) { host.setStatus(SCOPED_AI_EDIT_WORDS.tooLong, 'error'); return; }
-    submit.disabled = cancel.disabled = instruction.disabled = true;
+    submit.disabled = cancel.disabled = instruction.disabled = polish.disabled = true;
     const controls = [...radios, ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button')]
       .map(control => ({ control, disabled: control.disabled }));
     for (const { control } of controls) control.disabled = true;
@@ -282,7 +300,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
       // A coded business refusal proves this command did not start. Transport failures keep the pin for idempotent replay.
       if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && !error.code.startsWith('SERVICE_')) resetCommand();
       host.setStatus(host.errorMessage(error, SCOPED_AI_EDIT_WORDS.failed), 'error');
-      submit.disabled = cancel.disabled = instruction.disabled = false;
+      submit.disabled = cancel.disabled = instruction.disabled = polish.disabled = false;
       for (const { control, disabled } of controls) control.disabled = disabled;
       return;
     }
