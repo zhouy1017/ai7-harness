@@ -1,3 +1,4 @@
+import { guidelineClauses } from './fast-role/flash-task-contract.js';
 import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
 import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
@@ -1068,6 +1069,11 @@ export type DraftPreparation =
     readonly request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds: ReadonlyArray<string> };
     readonly intentDraft: DraftPromotion;
   };
+
+interface EditorialStoreGuidelineFormatter {
+  model: () => string | null;
+  format: (paragraphs: readonly string[]) => Promise<import('./fast-role/flash-task-contract.js').FlashTaskResult<string[]>>;
+}
 
 export class EditorialStore {
   readonly #importRetentionOperationsHost: importRetentionOperations.ImportRetentionOperationsHost = this.#importRetentionOperationsHostOf();
@@ -2532,14 +2538,14 @@ export class EditorialStore {
     const { clientCommandId, ...request } = input;
     try {
       return launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'scoped-ai-edit', input: request },
-        () => this.#launchChoice('fast-interaction', input.executionConfig ?? {}, input.rememberedChoice), choice => create(choice.binding));
+        () => this.#launchChoice('foreground-flash', input.executionConfig ?? {}, input.rememberedChoice), choice => create(choice.binding));
     } catch (error) {
       if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }
 
-  #launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
+  #launchChoice(role: 'main-editorial' | 'foreground-flash' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
     let notice: string | undefined;
     if (remembered && Object.keys(override).length > 0) {
       const connection = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, { ...(override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }) }).connection;
@@ -2656,7 +2662,7 @@ export class EditorialStore {
   }
 
   scopedAiEditLaunchChoice(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput) {
-    return this.#launchChoice('fast-interaction', input.executionConfig ?? {}, input.rememberedChoice);
+    return this.#launchChoice('foreground-flash', input.executionConfig ?? {}, input.rememberedChoice);
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
@@ -5371,8 +5377,15 @@ export class EditorialStore {
     return capturedProcedureOperations.inspectKnowledgeProcedures(this.#capturedProcedureHost);
   }
 
+  #guidelineFormatter: EditorialStoreGuidelineFormatter | null = null;
+  #guidelineOffer: { documentId: string; digest: string; model: string } | null = null;
+
+  useGuidelineFormatter(formatter: EditorialStoreGuidelineFormatter): void {
+    this.#guidelineFormatter = formatter;
+  }
+
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
+  async previewReviewGuidelineVersion(documentId: string, path: string | undefined, formatConfirmed = false): Promise<ReviewGuidelinePreviewProjection> {
     this.#assertAvailable();
     if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
     let read: Awaited<ReturnType<typeof readGuidelineFile>>;
@@ -5382,7 +5395,28 @@ export class EditorialStore {
       if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
       throw error;
     }
-    return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
+    const previous = this.#guidelineOffer;
+    this.#guidelineOffer = null;
+    if (formatConfirmed) requireStore(previous?.documentId === documentId && previous.digest === read.source.sha256 &&
+      previous.model === this.#guidelineFormatter?.model(), 'REVIEW_GUIDELINE_CHANGED', '文件或所选模型已变化，请重新选择。');
+    try {
+      return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
+    } catch (error) {
+      if (!(error instanceof StoreError) || error.code !== 'REVIEW_GUIDELINE_NO_CLAUSES' || !this.#guidelineFormatter) throw error;
+      const model = this.#guidelineFormatter.model();
+      if (!model) throw error;
+      const bytes = Buffer.byteLength(guidelineClauses.message(read.paragraphs));
+      if (bytes > guidelineClauses.budget.maxInputBytes) throw new StoreError('REVIEW_GUIDELINE_TOO_LARGE', '文件超过一次整理的范围，请分为较小的规范文件。');
+      if (!formatConfirmed) {
+        this.#guidelineOffer = { documentId, digest: read.source.sha256, model };
+        throw new StoreError('REVIEW_GUIDELINE_FORMAT_OFFER', `文件没有编号。可将选定文件的 ${read.paragraphs.length} 段（约 ${Math.ceil(bytes / 1024)} KB）发给底层 Flash（${model}）整理。预计一次请求，结果可逐条核对后导入。`);
+      }
+      const result = await this.#guidelineFormatter.format(read.paragraphs);
+      if (result.state !== 'checked') throw new StoreError('REVIEW_GUIDELINE_FORMAT_UNAVAILABLE', result.reason);
+      const clauses = result.value;
+      return { ...this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId,
+        { source: read.source, paragraphs: clauses.map((clause, index) => `${index + 1}. ${clause}`) })), modelFormatted: true };
+    }
   }
 
   /** 确认导入: the previewed version recorded, and the page as it now reads. */
@@ -7872,7 +7906,11 @@ export class EditorialStore {
   /** The four roles with their effective model and its source (Issue #1620). */
   getModelRoles(): ModelRoleResolutionProjection[] { return modelSearchSettings.getModelRoles(this.#modelSearchSettingsHost); }
   clearFlashModel(): void { modelSearchSettings.clearFlashModel(this.#modelSearchSettingsHost); }
+  selectForegroundFlashModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+    modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, 'foreground-flash', reasoningEffort);
+  }
   selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'fast', reasoningEffort); }
+  selectUnderlyingModel(input: Parameters<typeof modelSearchSettings.selectUnderlyingModel>[1]): void { modelSearchSettings.selectUnderlyingModel(this.#modelSearchSettingsHost, input); }
   selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'main', reasoningEffort); }
   selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
     this.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);

@@ -550,7 +550,16 @@ export function registerReviewGuidelineVersionHandlers(context: {
           }
           const path = await chooseGuidelineFile(owned);
           if (path === undefined) return null;
-          return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path });
+          try {
+            return await service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path });
+          } catch (error) {
+            if (!(error instanceof ServiceCallError) || error.code !== 'REVIEW_GUIDELINE_FORMAT_OFFER') throw error;
+            const choice = await dialog.showMessageBox({ type: 'question', message: error.message,
+              buttons: ['取消', '发送并预览条款'], defaultId: 0, cancelId: 0 });
+            if (choice.response !== 1) return null;
+            requireAuthority();
+            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path, formatConfirmed: true });
+          }
         });
       }),
   );

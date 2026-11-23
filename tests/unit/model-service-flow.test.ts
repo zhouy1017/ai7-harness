@@ -31,6 +31,7 @@ function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & Preferen
   return {
     saveModelServiceCredential: vi.fn(async () => answer),
     removeModelServiceCredential: vi.fn(async () => answer),
+    selectUnderlyingModel: vi.fn(async () => answer),
     selectProModel: vi.fn(async () => answer),
     selectFlashModel: vi.fn(async () => answer),
     clearFlashModel: vi.fn(async () => answer),
@@ -87,6 +88,16 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
+  it('saves the selected channel and effort to the underlying role and can restore its inherited choice', async () => {
+    const { node, calls } = flow(settings(['anthropic-claude']));
+    setEffort(node, 'main', 'high');
+    button(node, 'select-underlying-pro').click();
+    await vi.waitFor(() => expect(calls.selectUnderlyingModel).toHaveBeenCalledWith(expect.objectContaining({
+      roleId: 'underlying-pro', route: 'anthropic-claude', reasoningEffort: 'high' })));
+    button(node, 'inherit-underlying-pro').click();
+    await vi.waitFor(() => expect(calls.selectUnderlyingModel).toHaveBeenCalledWith({ roleId: 'underlying-pro', inherit: true }));
+  });
+
   it('still draws the page, with the reason and a retry, when 设置 cannot read the model service (#1522)', async () => {
     setTechnicalLayerVisible(false);
     const calls = api(completeSettings());

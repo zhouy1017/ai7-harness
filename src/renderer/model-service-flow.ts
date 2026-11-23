@@ -15,7 +15,7 @@ import { CONFIGURED_ROUTE_REASONING, CONFIGURED_MODEL_REASONING } from '../share
 import { modelServiceRuntimeBinding } from '../shared/protocol/model-service.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
-export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectProModel' | 'selectFlashModel' | 'clearFlashModel' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
+export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectUnderlyingModel' | 'selectProModel' | 'selectFlashModel' | 'clearFlashModel' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
 
 export interface ModelServiceFlowOptions {
   readonly api: ModelServiceFlowApi;
@@ -489,7 +489,39 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     catch (error) { clear.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   optional.append(clear);
-  if (technicalLayerVisible) actions.append(test, roleButtons[0]!);
+  if (technicalLayerVisible) {
+    actions.append(test, roleButtons[0]!);
+    for (const [roleId, label, tier] of [['underlying-pro', '用于底层 Pro（学习归纳）', 'main'], ['underlying-flash', '用于底层 Flash（转换与整理）', 'fast']] as const) {
+      const button = el('button', 'secondary', label);
+      button.type = 'button';
+      button.dataset['action'] = 'select-' + roleId;
+      button.disabled = !ready;
+      button.addEventListener('click', () => void (async () => {
+        const model = tier === 'main' ? checked : flashModel();
+        if (model === null || channel.route === null) return;
+        button.disabled = true;
+        try {
+          options.render(await options.api.selectUnderlyingModel({ roleId, route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(tier) }));
+          options.setStatus(label + '：' + modelLabelWords(model), 'success');
+        } catch (error) { options.setStatus(options.errorMessage(error, '无法保存角色模型。'), 'error'); }
+        finally { button.disabled = !ready; }
+      })());
+      const role = projection.modelRoles.find(entry => entry.roleId === roleId);
+      const target = tier === 'main' ? actions : optional;
+      const current = role?.binding;
+      const summary = el('p', 'field-note', `${role?.roleLabel ?? label}：${current ? current.providerLabel + ' / ' + modelLabelWords(current) : '尚未设置'} · ${current?.reasoningEffort ?? '模型默认强度'}`);
+      const inherit = el('button', 'quiet', tier === 'main' ? '跟随前台 Pro' : '跟随前台 Flash');
+      inherit.type = 'button';
+      inherit.dataset['action'] = 'inherit-' + roleId;
+      inherit.addEventListener('click', () => void (async () => {
+        inherit.disabled = true;
+        try { options.render(await options.api.selectUnderlyingModel({ roleId, inherit: true })); }
+        catch (error) { options.setStatus(options.errorMessage(error, '无法恢复角色默认模型。'), 'error'); }
+        finally { inherit.disabled = false; }
+      })());
+      target.append(summary, button, inherit);
+    }
+  }
   // A manual model ID is the developer layer's (Issue #1431 item 97); ordinary settings choose from the searchable catalogue.
   step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), effortLabels[0]!, effortNote, actions, modelServiceSummary(projection, channel), optional);
   const testStep = el('div', 'model-service-flow-test');

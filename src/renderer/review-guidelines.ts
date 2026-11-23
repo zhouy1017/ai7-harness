@@ -325,7 +325,11 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       // The file chosen in the system's own dialog is the import (Issue #1410 item 25): the service checks it, and it is
       // recorded as the next version at once; a refusal says why and records nothing.
       busy = false;
-      await commit(read);
+      if (read.modelFormatted) {
+        preview = read;
+        setStatus('请核对整理后的条款。', 'success');
+        paint('[data-guideline-action="confirm"]');
+      } else await commit(read);
     } catch (error) {
       busy = false;
       const message = errorMessage(error, GUIDELINE_STATUS.failed);

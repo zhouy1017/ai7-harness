@@ -1,3 +1,5 @@
+import { learningCurationRule } from './analysis/live-kind-admission.js';
+import { learningTidying } from './fast-role/flash-task-contract.js';
 import { appendOnly } from './append-only.js';
 import { one } from './store-operation-support.js';
 import { dialogueMemoryContext } from './learning/editorial-memory.js';
@@ -1591,17 +1593,19 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
   const launch = host.baselineAnalysis.launch;
   const policy = launch.policy;
   const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
-  const live = launch.live;
-  const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
+  const live = launch.learningBinding ? launch.learningBinding('underlying-pro') : launch.live;
+  const flash = launch.learningBinding ? launch.learningBinding('underlying-flash') : launch.live;
   if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-    policy?.integrityState !== 'verified' || (identity?.providerProcessingVersion !== 'v31' && (identity?.providerProcessingVersion !== 'v32' && identity?.providerProcessingVersion !== 'v33' && identity?.providerProcessingVersion !== 'v34' && identity?.providerProcessingVersion !== 'v35')) || rule?.enabledLearningEnvelope === undefined ||
-    rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
+      flash?.scope !== 'ordinary-production' || identity?.providerProcessingVersion !== 'v36' ||
+      learningCurationRule(policy, live) === null || learningCurationRule(policy, flash, 'learning-sample-tidying') === null) return null;
+  const pin = (role: typeof live): EnabledLearningEnvelope['binding'] => ({ route: role.route, model: role.model, endpoint: role.endpoint,
+    credentialSlot: role.credentialSlot, credentialReference: role.credentialReference,
+    ...(role.reasoningEffort === undefined ? {} : { reasoningEffort: role.reasoningEffort }) });
   return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
-    binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference,
-      ...(live.reasoningEffort === undefined ? {} : { reasoningEffort: live.reasoningEffort }) },
+    binding: pin(live), tidying: { binding: pin(flash), contractDigest: learningTidying.promptContractDigest },
     sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
     supervisionDigest: host.memoryFacade().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
-    disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+    disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${flash.route} · ${flash.model} 预整理，再由 ${live.route} · ${live.model} 归纳。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
 }
 
 export function prepareLearningCuration(host: EditorialLearningStoreHost, bookId: string, signalIds: readonly string[]): LearningCurationBundle {

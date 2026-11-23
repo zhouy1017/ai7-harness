@@ -133,6 +133,8 @@ export interface SearchBackendBinding {
 export interface EgressBindingFacts {
   readonly reasoningEffort?: string | null;
   readonly factualClaimScope?: { readonly stage: 'claim-extraction' | 'web-verification'; readonly current: () => boolean };
+  /** Exact user packet built by a bounded Flash contract or its Pro learning continuation. */
+  readonly structuredTaskMessageDigest?: string;
   readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
@@ -603,6 +605,13 @@ export function evaluateEgress(
     return refuse('payload-out-of-scope', '请求思考强度与冻结的执行配置不一致；未发送任何内容。');
   if ((payload.system ?? '') !== binding.systemPrompt)
     return refuse('system-prompt-mismatch', '系统提示与冻结的任务契约不一致；未发送任何内容。');
+  if (binding.structuredTaskMessageDigest !== undefined) {
+    if (!binding.ruleOutboundCategories?.has(binding.outboundDataCategory))
+      return refuse('outbound-category-mismatch', '处理规则不包含此任务的数据类别。');
+    const packet = payload.messages.length === 1 && payload.messages[0]!.role === 'user' ? messageText(payload.messages[0]!) : null;
+    if (packet === null || sha256Hex(packet) !== binding.structuredTaskMessageDigest)
+      return refuse('payload-out-of-scope', '结构化请求与已经核对的输入不一致。');
+  }
   const last = payload.messages.at(-1);
   if (last?.source.kind === 'tool' && scope.breakerState?.() === 'tripped')
     return refuse('circuit-breaker-tripped', '联网核查未完成：工具往返已达到熔断上限；未发送任何内容。');

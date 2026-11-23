@@ -34,10 +34,7 @@ export function modelTierOf(role: ModelRoleId): ModelTier {
 }
 
 /**
- * The role each task kind belongs to (ADR 0107 §1–§2). Two kinds the ADR does not name run behind the scenes on the Pro tier,
- * so they are 底层 Pro until R5-F1 decides: `material-index` and `review-reduction`. A kind not listed here is a 前台 Pro kind
- * (`editorial-review/*`, `custom-analysis/*`, `writing`, …). No product code reads this map yet: every launch still names
- * `Main Editorial Role` or `Fast Interaction Role`, and R5-F1 rewires each call site to its role.
+ * The role of each task (ADR 0107). Unlisted editorial tasks default to foreground Pro.
  */
 export const MODEL_ROLE_OF_TASK_KIND: Readonly<Record<string, ModelRoleId>> = {
   'editorial-dialogue': 'foreground-flash',
@@ -60,8 +57,7 @@ export const MODEL_ROLE_OF_TASK_KIND: Readonly<Record<string, ModelRoleId>> = {
 };
 
 /** The kinds ADR 0107 §1–§2 names that no launch-policy rule runs yet (R5-F1 and later slices add them). */
-export const MODEL_ROLE_KINDS_NOT_YET_LAUNCHED: ReadonlySet<string> = new Set(['standards-table-formatting', 'learning-sample-tidying',
-  'retrieval-query-expansion', 'retrieval-rerank', 'guideline-clause-formatting', 'learning-synthesis']);
+export const MODEL_ROLE_KINDS_NOT_YET_LAUNCHED: ReadonlySet<string> = new Set(['learning-synthesis']);
 
 export function modelRoleOfTaskKind(kind: string): ModelRoleId {
   return Object.hasOwn(MODEL_ROLE_OF_TASK_KIND, kind) ? MODEL_ROLE_OF_TASK_KIND[kind]! : 'foreground-pro';
@@ -116,6 +112,8 @@ export interface ModelTierSelectionInput extends Pick<RuntimeExecutionConfig, 'r
   route: import('./model-service.js').ModelServiceRouteId;
   modelId: string;
 }
+
+export type UnderlyingModelSelection = { roleId: 'underlying-pro' | 'underlying-flash' } & (ModelTierSelectionInput | { inherit: true });
 
 export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
 

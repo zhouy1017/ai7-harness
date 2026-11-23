@@ -146,6 +146,25 @@ function typosDocument(projection: ReviewGuidelinesProjection) {
   return projection.documents.find((document) => document.documentId === TYPOS_DOCUMENT)!;
 }
 
+it('confirms the exact unnumbered source before formatting and keeps the result in preview until accepted', async () => {
+  const session = await openStore();
+  const format = vi.fn(async (paragraphs: readonly string[]) => ({ state: 'checked' as const, value: [...paragraphs] }));
+  try {
+    session.store.useGuidelineFormatter({ model: () => 'synthetic', format });
+    const path = file('guidelines.txt', '核对图题。');
+    const preview = (confirmed = false) => session.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, path, confirmed);
+    await expect(preview()).rejects.toMatchObject({ code: 'REVIEW_GUIDELINE_FORMAT_OFFER' });
+    file('guidelines.txt', '核对表题。');
+    await expect(preview(true)).rejects.toMatchObject({ code: 'REVIEW_GUIDELINE_CHANGED' });
+    expect(format).not.toHaveBeenCalled();
+    await expect(preview()).rejects.toMatchObject({ code: 'REVIEW_GUIDELINE_FORMAT_OFFER' });
+    const draft = await preview(true);
+    expect(draft).toMatchObject({ modelFormatted: true, clauses: [{ number: 1, text: '核对表题。' }] });
+    expect(format).toHaveBeenCalledTimes(1);
+    session.store.importReviewGuidelineVersion(draft.previewId);
+  } finally { await close(session); }
+});
+
 it('pages every historical version without skipping the built-in root', async () => {
   const session = await openStore();
   try {

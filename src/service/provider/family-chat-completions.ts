@@ -16,7 +16,7 @@ import { sseFrames, streamFailure } from './stream-frames.js';
  * only for a model whose profile declares `json-object`, and that declaration needs the live evidence the profile table
  * demands (Issue #306).
  */
-export function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload): string {
+export function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload, maxOutputTokens?: number): string {
   const structuredOutput = model.capabilities.structuredOutput;
   if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   const tools = payload.tools ?? [];
@@ -32,6 +32,7 @@ export function chatCompletionsBody(model: ProviderModelProfile, payload: Assemb
     model: model.model,
     messages,
     stream: false,
+    ...(maxOutputTokens === undefined ? {} : { max_tokens: maxOutputTokens }),
     ...(reasoningEffort !== null
       ? { ...(modelReasoningControl(model) === 'deepseek-thinking' ? { thinking: { type: 'enabled' } } : {}), reasoning_effort: reasoningEffort }
       : {}),

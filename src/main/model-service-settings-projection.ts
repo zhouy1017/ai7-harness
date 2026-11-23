@@ -15,7 +15,7 @@ import {
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 
 /** The settings requests that choose a model and answer with the settings projection (Issues #1225, #1620). */
-export const MODEL_SELECTION_OPERATIONS = ['selectFastRoleModel', 'selectMainRoleModel', 'selectBothRoleModels', 'selectProModel', 'selectFlashModel', 'clearFlashModel'] as const;
+export const MODEL_SELECTION_OPERATIONS = ['selectFastRoleModel', 'selectMainRoleModel', 'selectBothRoleModels', 'selectUnderlyingModel', 'selectProModel', 'selectFlashModel', 'clearFlashModel'] as const;
 
 /**
  * 设置 › 模型服务's projection, from the service's stored state and the connections main has confirmed against the Protected

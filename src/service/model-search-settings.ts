@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import {
   readSearchBackendConnections,
@@ -335,22 +336,38 @@ export function getModelRoles(host: ModelSearchSettingsHost): ModelRoleResolutio
   });
 }
 
-/** Clear the Flash model (Issue #1620): the Flash roles follow 前台 Pro again. */
+/** Restore the foreground Flash default without changing an explicit underlying choice. */
 export function clearFlashModel(host: ModelSearchSettingsHost): void {
   host.assertAvailable();
   host.transaction(host.authority, () => {
     host.authority.prepare(`UPDATE model_service_connections SET updated_at = ? WHERE connection_id IN
       (SELECT connection_id FROM model_role_choices WHERE role_id = 'foreground-flash')`).run(new Date().toISOString());
     writeModelRoleChoice(host.authority, 'foreground-flash', null);
-    writeModelRoleChoice(host.authority, 'underlying-flash', null);
   });
 }
 
-export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
+export function selectUnderlyingModel(host: ModelSearchSettingsHost, input: import('../shared/protocol.js').ServiceOperationMap['selectUnderlyingModel']['input']): void {
+  host.assertAvailable();
+  if ('inherit' in input) {
+    writeModelRoleChoice(host.authority, input.roleId, null);
+    return;
+  }
+  const tier = input.roleId === 'underlying-pro' ? 'main' : 'fast';
+  const refusal = modelServiceRouteRefusal(input.route, input.modelId, tier);
+  requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
+  requireStore(modelServiceRuntimeBinding(input.route, input.modelId, tier) !== undefined, 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
+  const connection = host.getModelServiceRouteConnection(input.route);
+  requireStore(connection?.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
+  requireStore(input.reasoningEffort === undefined || validReasoningEffort(input.reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
+  writeModelRoleChoice(host.authority, input.roleId, { connectionId: connection.connectionId, modelId: input.modelId,
+    ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }) });
+}
+
+export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'foreground-flash' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
   requireStore(reasoningEffort === undefined || validReasoningEffort(reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
-  const roles = role === 'both' ? ['main', 'fast'] as const : [role];
+  const roles = role === 'both' ? ['main', 'fast'] as const : [role === 'foreground-flash' ? 'fast' as const : role];
   const refusal = roles.map((item) => modelServiceRouteRefusal(route, modelId, item)).find((reason) => reason !== null) ?? null;
   requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
@@ -370,8 +387,7 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
       writeModelRoleChoice(host.authority, item === 'main' ? 'foreground-pro' : 'foreground-flash', {
         connectionId: saved.connectionId, modelId, ...(selectedModel.reasoningEffort === undefined ? {} : { reasoningEffort: selectedModel.reasoningEffort }),
       });
-      // Legacy Flash requests still mean the model both Flash roles use (#1650); R5-F1 revisits this rule.
-      if (item === 'fast') writeModelRoleChoice(host.authority, 'underlying-flash', null);
+      if (item === 'fast' && role !== 'foreground-flash') writeModelRoleChoice(host.authority, 'underlying-flash', null);
     }
   });
 }
@@ -406,7 +422,7 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
     facts.credentialReference === connection.credentialReference && modelServiceChannelOf(facts.route) === connection.binding.providerId &&
-    facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33' || (facts.policyVersion === 'v34' || facts.policyVersion === 'v35'))) &&
+    facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33' || (facts.policyVersion === 'v34' || supportsEditorialMemoryPolicy(facts.policyVersion)))) &&
     allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
     (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
     (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),

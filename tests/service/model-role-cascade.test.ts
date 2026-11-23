@@ -241,13 +241,13 @@ it('keeps an unavailable underlying Flash choice while following foreground Flas
   expect(binding('fast-interaction')?.model).toBe('glm-5.3-flash');
 });
 
-it('legacy Flash selection clears the underlying override, and clear clears both (#1650; F1 revisits)', () => {
-  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
-  choose('underlying-flash', 'claude-fable-5-1');
-  store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5');
-  expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
-  choose('underlying-flash', 'claude-fable-5-1');
+it('keeps the advanced underlying Flash choice across changes to foreground Flash', () => {
+  store.saveModelServiceConnection('Synthetic test', null, 'ready', 'opencode-go');
+  store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'glm-5.3-flash', reasoningEffort: 'low' });
+  store.selectForegroundFlashModel('opencode-go', 'deepseek-v4.1-flash');
   store.clearFlashModel();
+  expect(binding('fast-interaction')).toMatchObject({ model: 'glm-5.3-flash', reasoningEffort: 'low' });
+  store.selectUnderlyingModel({ roleId: 'underlying-flash', inherit: true });
   expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
 });
 

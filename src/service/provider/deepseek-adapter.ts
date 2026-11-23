@@ -97,6 +97,8 @@ export interface ProviderRouteProfile {
    * declaring `null` refuses to assemble rather than inventing a number.
    */
   readonly maxOutputTokens: number | null;
+  /** Explicit cap of a bounded structured task. Omitted on retained request shapes. */
+  readonly taskOutputTokenLimit?: number;
   readonly statelessReasoning?: boolean;
   readonly reasoning?: { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string };
   /**
@@ -163,7 +165,7 @@ export interface ProviderRequestContext {
 function providerRequestBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload, stream: boolean): string {
   switch (model.capabilities.requestShape) {
     case 'openai-chat-completions': {
-      const body = chatCompletionsBody(model, payload);
+      const body = chatCompletionsBody(model, payload, profile.taskOutputTokenLimit);
       return stream ? chatCompletionsStreamBody(body) : body;
     }
     case 'anthropic-messages': {

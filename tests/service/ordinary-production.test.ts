@@ -1,3 +1,4 @@
+import { STRUCTURED_FLASH_TASKS } from '../../src/service/fast-role/flash-task-contract.js';
 import * as egressGate from '../../src/service/provider/egress-gate.js';
 import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -1045,7 +1046,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v35');
+    expect(selected.providerProcessing.version).toBe('v36');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -1169,7 +1170,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
     // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
     for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' && rule.ruleId !== 'ordinary-production-learning-curation')) {
-      if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
+      if (Object.hasOwn(STRUCTURED_FLASH_TASKS, rule.taskKinds[0]!)) {
+        const kind = rule.taskKinds[0] as keyof typeof STRUCTURED_FLASH_TASKS;
+        expect(rule.outboundDataCategories).toEqual([STRUCTURED_FLASH_TASKS[kind].productionCategory]);
+      } else if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
         expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'book-metadata-and-synopsis']));
         expect(rule.outboundDataCategories).not.toContain('unpublished-full-content');
       } else expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
@@ -1179,7 +1183,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v35' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v36' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -1196,8 +1200,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v36' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v36' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
@@ -1432,6 +1436,29 @@ describe('schema 72 (Issue #811)', () => {
 
 
 describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
+  it('validates each new underlying Flash answer on the configured route without replaying an earlier result', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic formatter', null, 'ready', 'openai-platform');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'synthetic-formatter', reasoningEffort: 'low' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, binding);
+    const bodies: Array<Record<string, unknown>> = [];
+    const replies = ['["核对图题。"]', '["修改原文。"]'];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return responsesTransport([], replies.shift()!)(url, init);
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    try {
+      const contract = STRUCTURED_FLASH_TASKS['guideline-clause-formatting'];
+      const source = ['核对图题。'];
+      expect(await owner.execute(contract, source, 'preview')).toEqual({ state: 'checked', value: source });
+      expect(await owner.execute(contract, source, 'preview')).toMatchObject({ state: 'fallback', value: null });
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]).toMatchObject({ model: 'synthetic-formatter', max_output_tokens: contract.budget.maxOutputTokens });
+    } finally { owner.dispose(); }
+  });
+
   it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Fast effort', null, 'ready', 'openai-platform');
@@ -1521,7 +1548,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(result.kind).toBe('translated');
       if (result.kind !== 'translated') throw new Error('production translation failed');
       expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
-        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v35',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v36',
           usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
       expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
         { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
@@ -1544,7 +1571,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const record = JSON.parse(String(translations[0]!.canonical_json));
         expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
           endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
-          policyVersion: 'v35', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+          policyVersion: 'v36', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
         expect(record.label).toBe('来源译文');
         expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
       } finally { database.close(); }
@@ -1593,15 +1620,15 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
     const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v35' } });
+    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v36' } });
     store.close();
-    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v24']) {
+    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v35', 'v24']) {
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
         database.prepare("UPDATE model_service_connections SET connection_test = ? WHERE provider_id = 'openai-platform'")
           .run(JSON.stringify({ ...status, provenance: { ...status.provenance, policyVersion } }));
       } finally { database.close(); }
-      if (!['v25', 'v26', 'v27', 'v32', 'v33', 'v34'].includes(policyVersion)) {
+      if (!['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v35'].includes(policyVersion)) {
         await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('连接测试来历无效。');
         continue;
       }

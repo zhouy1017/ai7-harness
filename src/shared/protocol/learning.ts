@@ -231,6 +231,7 @@ export type ChangeEditorialLearningInput =
 export interface LearningCurationBudget { maxPasses: number; totalTokens: number; perPassTokens: number }
 export interface EnabledLearningEnvelope {
   schema: 'ai7.enabled-learning-envelope/1';
+  tidying?: { binding: EnabledLearningEnvelope['binding']; contractDigest: string };
   budget: LearningCurationBudget;
   contractDigest: string;
   policy: import('../protocol.js').SelectedPolicyIdentity;

@@ -617,10 +617,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectFastRoleModel':
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
+    case 'selectUnderlyingModel':
     case 'selectProModel':
     case 'selectFlashModel':
     case 'testModelServiceConnection': {
-      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && isRecord(value.input) && value.input.inherit === true) {
+        const input = requireInput(value.input, ['roleId', 'inherit'], tentativeId);
+        if (input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
+        break;
+      }
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : value.op === 'selectUnderlyingModel' ? ['reasoningEffort', 'roleId'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
       if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
@@ -1050,7 +1057,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // The picker path starts a preview; an exact preview ID reads another bounded clause page.
     case 'previewReviewGuidelineVersion': {
-      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage', 'formatConfirmed'], tentativeId);
+      if (input.formatConfirmed !== undefined && (input.formatConfirmed !== true || Object.hasOwn(input, 'previewId'))) throw new ProtocolError(tentativeId);
       const validSource = Object.hasOwn(input, 'previewId')
         ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
           (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))

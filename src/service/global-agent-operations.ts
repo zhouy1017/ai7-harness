@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
 import type { ResolvedModelRole } from './model-search-settings.js';
 import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
@@ -62,7 +63,7 @@ export interface GlobalAgentOperationsHost {
   memoryFacade: () => EditorialMemoryFacade;
   localFixtureCatalog: LocalFixturePolicyCatalog | null;
   transaction: <T>(db: DatabaseSync, operation: () => T) => T;
-  getConfiguredModelRoleBinding: (role: 'main-editorial' | 'fast-interaction') => ConfiguredProviderBinding | null;
+  getConfiguredModelRoleBinding: (role: 'main-editorial' | 'foreground-flash') => ConfiguredProviderBinding | null;
   getManuscriptWindow: (manuscriptId: string, branchId: string, cursor: string | null) => ManuscriptWindowProjection;
   globalAgentAttempt: (input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now?: Date, preview?: boolean, qualification?: QualifiedGlobalAttemptMetadata) => DialogueTurnStart | string;
   globalAgentModelConnection: () => { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection };
@@ -93,7 +94,7 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
       ...facts.legacy.map(entry => ({ itemId: entry.itemId, revisionId: entry.versionId, kind: 'memory' as const, title: redact(entry.title), text: redact(entry.title) })),
       ...supervisionSourceCandidates(basis.directives).map(entry => ({ ...entry, text: redact(entry.text) })),
     ];
-    const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('fast-interaction') === null
+    const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('foreground-flash') === null
       ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
     return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
       scopedDialogueState: scopedAdmitted ? 'available' : blocked, procedures: internalGlobalAgentProcedures(host),
@@ -179,7 +180,7 @@ export function localFixtureRuntime(host: GlobalAgentOperationsHost): LocalFixtu
 
 export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperationsHost): boolean {
   const policy = host.baselineAnalysis.launch.policy;
-  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34' && policy?.providerProcessing.version !== 'v35')) return false;
+  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34' && !supportsEditorialMemoryPolicy(policy?.providerProcessing.version))) return false;
   requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
     selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
@@ -187,8 +188,8 @@ export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperations
 }
 
 export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
-  const resolved = host.resolveModelRole('underlying-flash');
-  const binding = host.getConfiguredModelRoleBinding('fast-interaction');
+  const resolved = host.resolveModelRole('foreground-flash');
+  const binding = host.getConfiguredModelRoleBinding('foreground-flash');
   const used = resolved.usedChoice;
   const connection = resolved.connection;
   requireStore(used !== null && binding !== null && connection !== null && connection.credentialOperationState === 'ready' &&
@@ -199,7 +200,7 @@ export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { b
     'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
   const policy = resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production',
     host.getConfiguredModelRoleBinding('main-editorial'), binding);
-  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || policy.providerProcessing.version === 'v35'))) &&
+  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || supportsEditorialMemoryPolicy(policy.providerProcessing.version)))) &&
     canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(host.baselineAnalysis.launch.policy?.selectedPolicyIdentity),
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
   return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };

@@ -1559,7 +1559,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35', 'v36'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }

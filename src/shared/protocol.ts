@@ -884,6 +884,7 @@ export const IPC_CHANNELS = {
   selectFastRoleModel: 'ai7:model-service:select-fast-model',
   selectMainRoleModel: 'ai7:model-service:select-main-model',
   selectBothRoleModels: 'ai7:model-service:select-both-models',
+  selectUnderlyingModel: 'ai7:model-service:select-underlying-model',
   selectProModel: 'ai7:model-service:select-pro-model', selectFlashModel: 'ai7:model-service:select-flash-model', clearFlashModel: 'ai7:model-service:clear-flash-model',
   refreshModelServiceModels: 'ai7:model-service:refresh-models',
   testModelServiceConnection: 'ai7:model-service:test-connection',
@@ -1529,10 +1530,14 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
 export type ActivePolicySetVersion = 'no-policy-lock' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+
+export function supportsEditorialMemoryPolicy(version: unknown): version is 'v35' | 'v36' {
+  return version === 'v35' || version === 'v36';
+}
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
@@ -1555,13 +1560,13 @@ export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cef
 export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
   if (scope === 'development-ci') return version === 'v1' || version === 'v29';
   if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
-  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35', 'v36'].some((entry) => entry === version);
   return false;
 }
 
 /** Identity of the actual verified selected documents; this metadata grants no execution authority. */
 export interface SelectedPolicyIdentity {
-  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
   readonly providerProcessingSha256: string;
   readonly activePolicySetVersion: 'no-policy-lock' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
@@ -1616,7 +1621,7 @@ export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
 /** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
 export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
-  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35'].includes(String(value['providerProcessingVersion'])) &&
+  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35', 'v36'].includes(String(value['providerProcessingVersion'])) &&
       value['providerProcessingSha256'] === '0'.repeat(64) && value['activePolicySetSha256'] === '0'.repeat(64))
     return value as unknown as SelectedPolicyIdentity;
   const version = value['providerProcessingVersion'];
@@ -1712,7 +1717,7 @@ const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArr
   'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
     ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26'].map((set) => ['v24', set] as const)],
   'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
-    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26']],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26'], ['v36', 'no-policy-lock']],
 };
 
 /** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
@@ -1917,6 +1922,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * research.
  */
 export type OutboundDataCategoryId =
+  | 'qualified-learning-example-bundle'
   | 'editorial-learning-example'
   | 'editor-task-instruction'
   | 'house-review-guideline-clause'
@@ -4116,7 +4122,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   /** 导入新版本's reading of the file main's picker returned: nothing is recorded until it is confirmed. */
   previewReviewGuidelineVersion: {
-    input: { documentId: string; path?: string; previewId?: string; clausePage?: number };
+    input: { documentId: string; path?: string; formatConfirmed?: true; previewId?: string; clausePage?: number };
     output: ReviewGuidelinePreviewProjection;
   };
   /** 确认导入: the previewed clauses become the document's next version, issued by the house. */
@@ -4794,6 +4800,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
   selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
+  selectUnderlyingModel: { input: import('./protocol/model-roles.js').UnderlyingModelSelection; output: void };
   selectProModel: { input: ModelTierSelectionInput; output: void }; selectFlashModel: { input: ModelTierSelectionInput; output: void }; clearFlashModel: { input: Record<string, never>; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
@@ -5366,6 +5373,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectUnderlyingModel(input: import('./protocol/model-roles.js').UnderlyingModelSelection): Promise<ModelServiceSettingsProjection>;
   selectProModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectFlashModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
   clearFlashModel(): Promise<ModelServiceSettingsProjection>;

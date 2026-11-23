@@ -42,7 +42,7 @@ describe('material-bearing live kind admission (#809)', () => {
   it.each(ORDINARY_PRODUCTION_ALLOWED_BINDINGS)('keeps material admission on the configured production route $route after restacking #811', async (productionBinding) => {
     const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production',
       { ...productionBinding, credentialReference: '33333333-3333-4333-8333-333333333333' });
-    expect(policy.providerProcessing.version).toBe('v35');
+    expect(policy.providerProcessing.version).toBe('v36');
     for (const definition of [wrap(review), wrap(initial), wrap(report), writing()]) {
       expect(liveKindAdmission(policy, definition, productionBinding)).not.toBeNull();
       const memory = composeEditorialMemoryBlock([{ versionId: 'synthetic-rule', ordinal: 1, lineIndex: 0, text: '保留合成短句。',

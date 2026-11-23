@@ -196,7 +196,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
     expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'no-policy-lock' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v35', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
+      version: 'v36', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 

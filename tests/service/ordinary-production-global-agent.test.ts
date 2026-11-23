@@ -165,7 +165,7 @@ describe('v30 Book-less Global Agent', () => {
     transport = async () => response();
     const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
     await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
-    expect(continued.qualification?.providerProcessingVersion).toBe('v35');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v36');
     expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
     // Retained dialogue fields stay authentic; the new turn separately reads current enabled memory.
     const sent = JSON.parse(calls[1]!.body);
@@ -180,7 +180,7 @@ describe('v30 Book-less Global Agent', () => {
     const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
     const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
-      selectedPolicyIdentity: { providerProcessingVersion: 'v35', activePolicySetVersion: 'no-policy-lock' } });
+      selectedPolicyIdentity: { providerProcessingVersion: 'v36', activePolicySetVersion: 'no-policy-lock' } });
     expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
     const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
@@ -582,7 +582,7 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
     store.selectFastRoleModel(binding.route, binding.model);
     const pro = store.getConfiguredModelRoleBinding('main-editorial')!;
     const configured = store.getConfiguredModelRoleBinding.bind(store);
-    vi.spyOn(store, 'getConfiguredModelRoleBinding').mockImplementation((role, override) => role === 'fast-interaction' ? pro : configured(role, override));
+    vi.spyOn(store, 'getConfiguredModelRoleBinding').mockImplementation((role, override) => role === 'foreground-flash' ? pro : configured(role, override));
     expect(() => store.globalAgentModelConnection()).toThrowError(expect.objectContaining({ code: 'GLOBAL_AGENT_POLICY_BLOCKED' }));
     expect(calls).toHaveLength(0);
   });

@@ -872,6 +872,126 @@
       "platformTools": null,
       "localTools": 1,
       "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-standards-table-formatting",
+      "taskKinds": [
+        "standards-table-formatting"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "frozen-material-reference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-guideline-clause-formatting",
+      "taskKinds": [
+        "guideline-clause-formatting"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "house-review-guideline-clause"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-retrieval-query-expansion",
+      "taskKinds": [
+        "retrieval-query-expansion"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "frozen-material-reference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-retrieval-rerank",
+      "taskKinds": [
+        "retrieval-rerank"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "frozen-material-reference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-learning-sample-tidying",
+      "taskKinds": [
+        "learning-sample-tidying"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "qualified-learning-example-bundle"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false,
+      "enabledLearningEnvelope": {
+        "pins": [
+          "eligibleSourceAndCategoryContract",
+          "scope",
+          "supervision",
+          "model",
+          "provider",
+          "policy",
+          "mandatoryBudget",
+          "disableAndExclusionConsequences"
+        ],
+        "missingStaleRevokedOrExceededResult": "refuse",
+        "extraPerPassClickRequired": false,
+        "disableStopsLaterDispatchAndUse": true
+      }
     }
   ],
   "developer": [

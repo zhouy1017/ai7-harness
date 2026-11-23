@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { editorialMemoryDefinition, editorialMemoryDigest, editorialMemoryPrompt } from '../learning/editorial-memory.js';
 import { RUN_SYNTHESIS_PROMPT, RUN_SYNTHESIS_PROMPT_DIGEST } from '../review/run-synthesis-contract.js';
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
@@ -30,15 +31,15 @@ export interface LiveKindRule {
 }
 
 /** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
-export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
+export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding, kind: 'learning-curation' | 'learning-sample-tidying' = 'learning-curation'): AdmittedProviderRule | null {
   if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
-    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34' && policy.providerProcessing.version !== 'v35')) || policy.providerProcessing.decision !== 'eligible-only' ||
+    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34' && !supportsEditorialMemoryPolicy(policy.providerProcessing.version))) || policy.providerProcessing.decision !== 'eligible-only' ||
     policy.providerProcessing.liveTransmissionAllowed !== true) return null;
-  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
+  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-' + kind) ?? [];
   const rule = rules.length === 1 ? rules[0]! : null;
   return rule?.enabledLearningEnvelope?.disableStopsLaterDispatchAndUse === true && rule.taskKinds.length === 1 &&
-    rule.taskKinds[0] === 'learning-curation' && rule.outboundDataCategories.includes('editorial-learning-example') &&
-    rule.modelRole === 'Main Editorial Role' && rule.route === binding.route && rule.endpoint === binding.endpoint &&
+    rule.taskKinds[0] === kind && rule.outboundDataCategories.includes(kind === 'learning-curation' ? 'editorial-learning-example' : 'qualified-learning-example-bundle') &&
+    rule.modelRole === (kind === 'learning-curation' ? 'Main Editorial Role' : 'Fast Interaction Role') && rule.route === binding.route && rule.endpoint === binding.endpoint &&
     rule.model === binding.model && rule.credentialSlot === binding.credentialSlot ? rule : null;
 }
 
@@ -229,7 +230,7 @@ export function liveKindAdmission(
  ): LiveKindRule | null {
   const memory = editorialMemoryDefinition(definition);
   if (memory !== null) {
-    if (policy?.providerProcessing.version !== 'v35' || liveKindRule(policy, definition.kind, ['house-review-preference-excerpt']) === null ||
+    if (!supportsEditorialMemoryPolicy(policy?.providerProcessing.version) || liveKindRule(policy, definition.kind, ['house-review-preference-excerpt']) === null ||
       definition.promptContractDigest !== editorialMemoryDigest(memory.base.promptContractDigest, memory.memory) ||
       definition.systemPrompt !== editorialMemoryPrompt(memory.base.systemPrompt, memory.memory)) return null;
     return liveKindAdmission(policy, memory.base, binding);
