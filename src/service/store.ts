@@ -5671,8 +5671,7 @@ export class EditorialStore {
         bookId,
         stableIdentity,
         title,
-        internalNumber,
-        people: this.#peopleCall(() => this.#bookPeople.summary(bookId)),
+        ...this.#peopleCall(() => this.#bookPeople.libraryFacts(bookId)),
         manuscriptState: projectedManuscriptState,
         manuscriptStateLabel: projectedManuscriptState === 'empty' ? '尚无稿件' as const : '已有主稿件' as const,
         reimportLineageSourceVersionIds: lineagePage.items,
@@ -8401,7 +8400,7 @@ export class EditorialStore {
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
-    return this.#boundedCall(() => this.#bounded.listPriorWork());
+    return this.#boundedCall(() => this.#bounded.listPriorWork()).map(item => ({ ...item, library: this.#peopleCall(() => this.#bookPeople.libraryFacts(item.bookId)) }));
   }
 
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
