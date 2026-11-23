@@ -1389,6 +1389,14 @@ async function main() {
         await triageClick(renderer,'.review-new-actions > details > summary');
         await triageClick(renderer,'[data-review-action="new-local-check"]');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'review-triage-start-ready');
+        // This keyboard walk uses A on a change suggestion. The preceding Run exercised the default
+        // common-word advisories; leave those out of this Run so the seeded punctuation decisions stay consecutive.
+        const commonTable = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace =>
+          workspace.standardTables.find(table => table.kind === 'common-words')?.tableId ?? null)`);
+        requireJourney(commonTable !== null, 'review-triage-common-table-offered');
+        const commonChoice = 'dialog.review-sheet input[data-local-table="' + commonTable + '"]';
+        await triageClick(renderer, commonChoice);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(commonChoice)})?.checked === false`, 'review-triage-common-table-deselected');
         await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
         try {
           await waitFor(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewRunId!==undefined && card.dataset.reviewRunId!==${JSON.stringify(before)} && card.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3; })()`, 'review-triage-findings');
