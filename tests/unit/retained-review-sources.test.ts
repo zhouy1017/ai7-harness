@@ -10,6 +10,11 @@ import type { RendererApi, SourceIdentityInput } from '../../src/shared/protocol
 import type { RetainedReviewFixture } from '../support/retained-review-fixture.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { findingRetainedSources } from '../../src/renderer/research-evidence.js';
+import { randomUUID } from 'node:crypto';
+
+const configuration = (store: EditorialStore) => ({ connections: store.getModelServiceConnections(),
+  main: store.getConfiguredModelRoleBinding('main-editorial'), fast: store.getConfiguredModelRoleBinding('fast-interaction'),
+  search: store.getSearchBackendSettings() });
 
 async function verifySurface(store: EditorialStore, fixture: RetainedReviewFixture, developer: boolean) {
   const restore = installMiniDom(); setTechnicalLayerVisible(developer);
@@ -66,13 +71,20 @@ async function verifySurface(store: EditorialStore, fixture: RetainedReviewFixtu
   }
 }
 
-it('keeps retained web controls after the later verification write fails, through the real store and review workspace', async () => {
+it.each([false, true])('keeps retained web controls after verification failure, preserving pre-existing configuration=%s', async (populated) => {
   const roots = await createServiceTestRoots('ai7-retained-review-');
   const reader = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   try {
+    if (populated) {
+      reader.saveModelServiceConnection('Existing J04 connection', randomUUID(), 'ready');
+      reader.selectFastRoleModel('deepseek-open-platform', 'account-future-model', 'off');
+    }
+    const before = configuration(reader);
     await seedRetainedReviewFallback(roots, async (_writer, fixture) => {
       expect(fixture.retainedBeforeFailure).toBe(3); expect(fixture.verificationResults).toBe(0);
       for (const developer of [false, true]) await verifySurface(reader, fixture, developer);
     });
+    if (populated) expect(configuration(reader)).toEqual(before);
+    else expect(reader.getModelServiceConnection()?.credentialOperationState).toBe('missing');
   } finally { reader.close(); await roots.dispose(); }
 }, 60_000);

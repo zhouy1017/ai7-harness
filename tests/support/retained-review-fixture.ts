@@ -19,7 +19,8 @@ export async function seedRetainedReviewFallback(roots: Pick<ServiceTestRoots, '
   try {
     const book = await importSample1Book(store, roots.codeRoot, '留存来源回归');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
-    recordMissingCredentialConnection(store, '合成连接');
+    // J04 may already have enrolled this connection; its reference, state and choices belong to that flow.
+    if (store.getModelServiceConnection() === null) recordMissingCredentialConnection(store, '合成连接');
     let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
     while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
     const run = work.projection!.run!;
