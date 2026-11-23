@@ -15,6 +15,7 @@ import {
   REIMPORT_GROUP_VERB_LABELS,
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
+  type ImportEditingChoices,
 } from '../shared/protocol.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
@@ -49,6 +50,12 @@ const REIMPORT_VERB_ACTIONS: Readonly<Record<ReimportGroupProjection['verbs'][nu
   rewrite: '改写与新增 · 标记跟随保留的文字',
   delete: '删除 · 标记不跟随',
   merge: '并入 · 标记跟随文字',
+};
+const REIMPORT_VERB_EXPLANATIONS: Readonly<Record<ReimportGroupProjection['verbs'][number], string>> = {
+  split: '把旧稿这一处拆成新稿的多段，原有标记跟随对应文字。',
+  rewrite: '用新稿改写这一处或加入新段落，原有标记只跟随保留的文字。',
+  delete: '删去旧稿这一处，原有标记不带入新稿。',
+  merge: '把旧稿的多段并成新稿这一处，原有标记跟随对应文字。',
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -174,8 +181,10 @@ export function createImportReview(options: ImportReviewOptions) {
     relationshipSelection: ImportRelationshipChoice | null = null,
     reuseSourceVersionId: string | null | undefined = undefined,
     reimportLineageChoice: ReimportLineageChoice | undefined = undefined,
+    editingChoices?: ImportEditingChoices,
   ): void {
     const formKey = `${staged.draftId}:${staged.draftVersion}`;
+    const freshForm = currentForm?.key !== formKey;
     if (currentForm?.key === formKey) {
       const title = currentForm.content.querySelector<HTMLInputElement>('[id="book-title"]');
       if (title) savedForm.title = title.value;
@@ -185,7 +194,7 @@ export function createImportReview(options: ImportReviewOptions) {
       }));
       const fold = currentForm.content.querySelector<HTMLDetailsElement>('.fidelity-details');
       if (fold) savedForm.fidelityOpen = fold.open;
-    } else { savedForm = { controls: [] }; chosenRelationship = relationshipSelection; }
+    } else { savedForm = { controls: [], ...(editingChoices?.title == null ? {} : { title: editingChoices.title }) }; chosenRelationship = relationshipSelection; }
     if (selectedChoiceId === null) {
       const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
       const origin = document.querySelector('#screen')?.firstElementChild;
@@ -732,6 +741,22 @@ export function createImportReview(options: ImportReviewOptions) {
       if (row.contains(cancelImport)) { row.classList.add('compact-actions'); actionBar.append(row); }
     }
     content.append(actionBar);
+    // Returned choices seed the editable controls once; subsequent paging keeps the editor's changes.
+    if (freshForm) {
+      const structure = editingChoices?.structure ?? staged.savedStructureChoice;
+      for (const control of content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls)) {
+        const candidate = control.dataset['structureCandidate'];
+        const level = control.dataset['structureLevel'];
+        if (candidate !== undefined && structure) (control as HTMLInputElement).checked = structure.headings.some((heading) => heading.position === Number(candidate));
+        if (level !== undefined && structure) {
+          const heading = structure.headings.find((item) => item.position === Number(level));
+          if (heading) control.value = String(heading.level);
+        }
+        if (control.dataset['longParagraphChoice'] !== undefined && structure) (control as HTMLInputElement).checked = control.dataset['longParagraphChoice'] === structure.longParagraphs;
+        if (control.dataset['textBoxDisposition'] !== undefined && editingChoices?.textBoxDisposition) (control as HTMLInputElement).checked = control.dataset['textBoxDisposition'] === editingChoices.textBoxDisposition;
+        control.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
     const titleControl = content.querySelector<HTMLInputElement>('[id="book-title"]');
     if (titleControl && savedForm.title !== undefined) titleControl.value = savedForm.title;
     for (const control of content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls)) {
@@ -825,6 +850,55 @@ export function createImportReview(options: ImportReviewOptions) {
       list.append(row);
     }
     return list;
+  }
+
+  function returnToEditingAction(review: Pick<ReviewBeforeImportProjection, 'draftId' | 'draftVersion'>, recoveryReturn?: RecoveryReturnContext): HTMLButtonElement {
+    const back = button('返回修改', 'secondary', async () => {
+      const follow = shellNavigation.route();
+      const controls = Array.from(back.closest('.page-content')!.querySelectorAll<HTMLButtonElement>('button'), control => ({ control, disabled: control.disabled }));
+      for (const { control } of controls) control.disabled = true;
+      setStatus('正在返回导入设置…', 'busy');
+      try {
+        const input = { draftId: review.draftId, expectedDraftVersion: review.draftVersion };
+        let returned;
+        try { returned = await rendererApi.returnImportToEditing(input); }
+        catch (error) {
+          if (!hasErrorCode(error, 'REVIEW_CHANGED')) throw error;
+          const continued = await rendererApi.continueImportDraft(input);
+          if (!follow.isCurrent()) return;
+          if (continued.state === 'target-review-required') {
+            currentForm = undefined;
+            renderTargetChoice(continued.staged, null, continued.notice, recoveryReturn);
+          } else await initializeStartup();
+          return;
+        }
+        if (!follow.isCurrent()) return;
+        currentForm = undefined;
+        if (returned.state === 'reimport') {
+          renderManuscriptReimportReview({ ...returned.review, draftVersion: returned.draftVersion }, undefined, recoveryReturn);
+        } else {
+          const { editingChoices: choices } = returned;
+          const staged = { ...returned.staged, draftVersion: returned.draftVersion };
+          if (staged.wordTrackedChanges?.compatibility === 'ready' && choices.trackedChanges) staged.wordTrackedChanges = { ...staged.wordTrackedChanges, savedChoice: choices.trackedChanges };
+          const targetId = choices.target.kind === 'new-book' ? staged.targetChoices.find((target) => target.kind === 'new-book')!.id : `existing-book:${choices.target.bookId}`;
+          while (!staged.targetChoices.some((target) => target.id === targetId) && staged.nextBookCursor) {
+            const page = await rendererApi.listBooks({ after: staged.nextBookCursor });
+            staged.nextBookCursor = page.nextCursor;
+            staged.targetChoices = [...staged.targetChoices, ...page.items.map((book) => ({ kind: 'existing-book' as const,
+              id: `existing-book:${book.bookId}`, bookId: book.bookId, label: book.title, internalNumber: book.internalNumber,
+              manuscriptState: book.manuscriptState, reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
+              reimportLineagePageAfter: null, reimportLineagePreviousCursor: null, reimportLineageNextCursor: book.reimportLineageNextCursor, selected: false as const }))];
+          }
+          if (!follow.isCurrent()) return;
+          renderTargetChoice(staged, targetId, undefined, recoveryReturn, choices.relationship, undefined, undefined, choices);
+        }
+      } catch (error) {
+        for (const { control, disabled } of controls) control.disabled = disabled;
+        setStatus(rendererErrorMessage(error, '暂时无法返回修改，请重试。'), 'error');
+      }
+    });
+    back.dataset['returnImportToEditing'] = review.draftId;
+    return back;
   }
 
   function renderSourceImportReview(
@@ -931,7 +1005,7 @@ export function createImportReview(options: ImportReviewOptions) {
       'primary',
       async () => {
         const follow = shellNavigation.route();
-        commitButton.disabled = true;
+        for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
         setStatus(technicalWords('正在原子提交来源材料记录…', '正在添加资料…'), 'busy');
         try {
           const result = await rendererApi.commitSourceImport({
@@ -951,7 +1025,7 @@ export function createImportReview(options: ImportReviewOptions) {
             if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
-          commitButton.disabled = false;
+          for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false;
           setStatus(rendererErrorMessage(error, '来源材料导入未完成，请重试。'), 'error');
         }
       },
@@ -960,6 +1034,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const actions = element('div', 'button-row compact-actions');
     actions.append(
       commitButton,
+      returnToEditingAction(review, recoveryReturn),
       button('取消导入', 'quiet', () =>
         abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn)),
     );
@@ -987,7 +1062,6 @@ export function createImportReview(options: ImportReviewOptions) {
     recoveryNotice?: string,
     recoveryReturn?: RecoveryReturnContext,
     mappingAfter: number | null = null,
-    commitNow = false,
   ): void {
     const content = panel();
     content.dataset['importReviewKind'] = 'reimport';
@@ -1020,7 +1094,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '文件'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
       element('dt', undefined, technicalWords('暂存文件名', '文件名')), element('dd', undefined, review.source.displayName),
       element('dt', undefined, technicalWords('暂存格式', '格式')), element('dd', undefined, review.source.format),
-      element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
+      ...(technicalLayerVisible ? [element('dt', undefined, '文件大小'), element('dd', undefined, String(review.source.sourceBytes))] : []),
       ...(technicalLayerVisible ? [element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel)] : []),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
@@ -1045,41 +1119,33 @@ export function createImportReview(options: ImportReviewOptions) {
 
     const summary = element('section', 'review-section');
     summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
+    const summaryLine = element('p');
+    const updateSummary = (): void => {
+      summaryLine.textContent = `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
+        ? technicalWords('每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。', '请逐处选择拆分、改写与新增、删除或并入。')
+        : technicalWords('稿件逐块一致，提交只记录未发现变化，不创建空修订版。', '与当前稿件相同，没有需要更新的内容。')}`;
+      summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
+      summary.dataset['reimportGroups'] = String(review.comparison.groups);
+      summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
+      content.dataset['reimportCommitReady'] = String(review.commitReady);
+      content.dataset['reimportDraftVersion'] = String(review.draftVersion);
+      content.dataset['reimportReviewDigest'] = review.reviewDigest;
+      content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
+    };
     summary.append(
       element('h3', undefined, '比较摘要'),
-      element('p', undefined, `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
-        ? technicalWords('每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。', '请逐处选择拆分、改写与新增、删除或并入。')
-        : technicalWords('稿件逐块一致，提交只记录未发现变化，不创建空修订版。', '与当前稿件相同，没有需要更新的内容。')}`),
+      summaryLine,
     );
-    summary.dataset['reimportGroups'] = String(review.comparison.groups);
-    summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
+    updateSummary();
     content.append(summary);
 
     const fidelity = element('section', 'review-section');
     fidelity.append(element('h3', undefined, reimportFidelityHeading(review.fidelity)));
     fidelity.append(...renderFidelityReview(review.fidelity, review.source.conversion, { kind: 'none' }).elements);
     if (review.degradationDecision.state === 'required-unselected') {
-      // Accepting the listed degradations and committing are one step (Issue #1410 item 32C).
       fidelity.append(element('p', 'attention-note', '提交本次重新导入即接受上面列出的全部降级。'));
-      const accept = button(review.comparison.changed ? '接受降级并提交稿件重新导入' : '接受降级并记录', 'primary', async () => {
-        accept.disabled = true;
-        setStatus('正在持久化重新导入降级接受…', 'busy');
-        try {
-          const refreshed = await rendererApi.acceptReimportDegradation({
-            draftId: review.draftId,
-            expectedDraftVersion: review.draftVersion,
-          });
-          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter, true);
-          setStatus('完整降级集合已明确接受', 'success');
-        } catch (error) {
-          accept.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法接受重新导入降级集合。'), 'error');
-        }
-      });
-      accept.dataset['acceptReimportDegradation'] = review.draftId;
-      fidelity.append(accept);
     } else if (review.degradationDecision.state === 'accepted-complete-set') {
-      fidelity.append(element('p', 'success-note', '已明确接受完整降级集合'));
+      fidelity.append(element('p', 'success-note', '已同意按上面列出的方式导入'));
     } else {
       fidelity.append(element('p', 'success-note', '未发现需要接受的降级'));
     }
@@ -1089,17 +1155,37 @@ export function createImportReview(options: ImportReviewOptions) {
     mappingsHost.dataset['reimportMappings'] = 'loading';
     mappingsHost.append(element('h3', undefined, '章节对应 · 正在读取…'));
     content.append(mappingsHost);
-    void Promise.resolve().then(async () => {
+    let busy = false;
+    const setBusy = (value: boolean): void => {
+      busy = value;
+      for (const control of content.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice], [data-reimport-previous-page], [data-reimport-next-page]')) control.disabled = value;
+      abandon.disabled = value;
+      back.disabled = value;
+      updateCommit();
+    };
+    const loadMappings = async (after: number | null, jump = false): Promise<void> => {
+      setBusy(true);
+      mappingsHost.dataset['reimportMappings'] = 'loading';
       try {
         const page = await rendererApi.getReimportMappingPage({
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
-          after: mappingAfter,
+          after,
         });
         if (!mappingsHost.isConnected) return;
         const list = element('div', 'comparison-list');
-        const resolve = async (group: ReimportGroupProjection, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
-          for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = true;
+        mappingAfter = after;
+        const focusUnresolved = (afterOrdinal = 0): boolean => {
+          const rows = Array.from(list.querySelectorAll<HTMLElement>('article[data-reimport-group-verb=""]'));
+          const row = rows.find(candidate => Number(candidate.dataset['reimportGroupOrdinal']) > afterOrdinal) ?? rows[0];
+          const next = row?.querySelector<HTMLButtonElement>('[data-reimport-verb-choice]');
+          if (!next) return false;
+          next.scrollIntoView({ block: 'nearest' }); next.focus(); return true;
+        };
+        const resolve = async (group: ReimportGroupProjection, row: HTMLElement, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
+          if (busy) return;
+          setBusy(true);
+          let cancelResolution: HTMLButtonElement | undefined;
           try {
             const initial = await rendererApi.resolveReimportMapping({
               draftId: review.draftId,
@@ -1107,8 +1193,8 @@ export function createImportReview(options: ImportReviewOptions) {
               groupId: group.groupId,
               verb,
             });
-            const cancelResolution = button('取消当前操作', 'quiet', async () => {
-              cancelResolution.disabled = true;
+            cancelResolution = button('取消当前操作', 'quiet', async () => {
+              cancelResolution!.disabled = true;
               await rendererApi.cancelServiceJob({ jobId: initial.jobId });
             });
             cancelResolution.dataset['cancelReimportResolution'] = initial.jobId;
@@ -1116,34 +1202,40 @@ export function createImportReview(options: ImportReviewOptions) {
             cancelResolution.dataset['jobProgressTotal'] = String(initial.progress.total);
             control.after(cancelResolution);
             const completed = await awaitServiceJob(initial, (job) => {
-              cancelResolution.dataset['jobProgressCompleted'] = String(job.progress.completed);
-              cancelResolution.dataset['jobProgressTotal'] = String(job.progress.total);
+              cancelResolution!.dataset['jobProgressCompleted'] = String(job.progress.completed);
+              cancelResolution!.dataset['jobProgressTotal'] = String(job.progress.total);
               const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
-              setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+              setStatus(`正在保存这一处的选择… ${progress}`, job.state === 'failed' ? 'error' : 'busy');
             });
             if (completed.state === 'cancelled') {
               cancelResolution.remove();
-              for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
-              setStatus('这一处的选择已取消；复核未变化。', 'success');
+              setStatus('这一处的选择已取消，保留原来的选择。', 'success');
               return;
             }
             if (completed.kind !== 'reimport-resolution') throw new Error('对应行解决任务未返回复核结果。');
             const refreshed = completed.result;
-            if (refreshed === null || !('draftId' in refreshed)) throw new Error('对应行解决任务未返回复核结果。');
+            if (refreshed === null || !('row' in refreshed)) throw new Error('未能取得这一处的新选择。');
             cancelResolution.remove();
-            renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
-            setStatus(`第 ${group.ordinal} 处已按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定；复核摘要已更新`, 'success');
+            review = { ...refreshed, comparison: { ...refreshed.comparison, unresolvedGroups: refreshed.unresolvedGroups } };
+            if (!content.isConnected) return;
+            drawRow(refreshed.row, row);
+            updateSummary();
+            setBusy(false);
+            setStatus(`第 ${group.ordinal} 处已选择「${REIMPORT_GROUP_VERB_LABELS[verb]}」，还剩 ${refreshed.unresolvedGroups} 处待选择。`, 'success');
+            if (!focusUnresolved(group.ordinal) && refreshed.unresolvedGroups > 0) await loadMappings(page.nextCursor, true);
           } catch (error) {
             if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
               await initializeStartup();
               return;
             }
-            for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
             setStatus(rendererErrorMessage(error, '无法记录这一处的选择。'), 'error');
+          } finally {
+            cancelResolution?.remove();
+            setBusy(false);
           }
         };
-        for (const group of page.items) {
-          const row = element('article', 'comparison-item reimport-group');
+        const drawRow = (group: ReimportGroupProjection, row = element('article', 'comparison-item reimport-group')): HTMLElement => {
+          row.replaceChildren();
           row.dataset['reimportGroupId'] = group.groupId;
           row.dataset['reimportGroupOrdinal'] = String(group.ordinal);
           row.dataset['reimportGroupVerb'] = group.verb ?? '';
@@ -1167,33 +1259,38 @@ export function createImportReview(options: ImportReviewOptions) {
             return host;
           };
           row.append(side('当前', group.current), side('新文件', group.staged));
-          if (group.verb === null) {
-            const choices = element('div', 'button-row compact-actions reimport-verbs');
-            for (const verb of group.verbs) {
-              const choice = button(REIMPORT_VERB_ACTIONS[verb], 'secondary', async () => {
-                setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
-                await resolve(group, verb, choice);
-              });
-              choice.dataset['reimportVerbChoice'] = verb;
-              choice.dataset['reimportGroupId'] = group.groupId;
-              choices.append(choice);
-            }
-            row.append(choices);
-          } else {
+          const choices = element('div', 'button-row compact-actions reimport-verbs');
+          for (const verb of group.verbs) {
+            const choice = button(REIMPORT_VERB_ACTIONS[verb], 'secondary', async () => {
+              setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
+              await resolve(group, row, verb, choice);
+            });
+            choice.dataset['reimportVerbChoice'] = verb;
+            choice.dataset['reimportGroupId'] = group.groupId;
+            choice.setAttribute('aria-pressed', String(group.verb === verb));
+            const option = element('div', 'reimport-verb-option');
+            const explanation = element('p', 'field-note', REIMPORT_VERB_EXPLANATIONS[verb]);
+            explanation.id = `reimport-${group.ordinal}-${verb}-explanation`;
+            choice.setAttribute('aria-describedby', explanation.id);
+            option.append(choice, explanation); choices.append(option);
+          }
+          row.append(choices);
+          if (group.verb !== null) {
             row.append(element('p', 'success-note', `已选择：${REIMPORT_GROUP_VERB_LABELS[group.verb]}`));
           }
-          list.append(row);
-        }
+          return row;
+        };
+        for (const group of page.items) list.append(drawRow(group));
         const navigation = element('div', 'button-row compact-actions');
         if (page.previousCursor !== null || mappingAfter !== null) {
           const previous = windowStep(button('上一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor)), 'before', "向前浏览");
+            loadMappings(page.previousCursor)), 'before', "向前浏览");
           previous.dataset['reimportPreviousPage'] = String(page.previousCursor ?? 0);
           navigation.append(previous);
         }
         if (page.nextCursor !== null) {
           const next = windowStep(button('下一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor)), 'after', "向后浏览");
+            loadMappings(page.nextCursor)), 'after', "向后浏览");
           next.dataset['reimportNextPage'] = String(page.nextCursor);
           navigation.append(next);
         }
@@ -1201,14 +1298,19 @@ export function createImportReview(options: ImportReviewOptions) {
         mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
         mappingsHost.replaceChildren(element('h3', undefined, `章节对应${page.items.length === 0 ? ' · 没有需要你确定的变化。' : ''}`),
           ...(page.items.length === 0 ? [] : [list]), navigation);
+        setBusy(false);
+        if (jump && !focusUnresolved() && review.comparison.unresolvedGroups > 0) await loadMappings(page.nextCursor, true);
       } catch (error) {
         mappingsHost.dataset['reimportMappings'] = 'failed';
         mappingsHost.replaceChildren(
           element('h3', undefined, '章节对应'),
           element('p', 'attention-note', rendererErrorMessage(error, '无法读取章节对应。')),
         );
+      } finally {
+        setBusy(false);
       }
-    });
+    };
+    void Promise.resolve().then(() => loadMappings(mappingAfter));
 
     if (technicalLayerVisible) {
       const grid = element('div', 'review-grid');
@@ -1218,77 +1320,81 @@ export function createImportReview(options: ImportReviewOptions) {
     const actions = element('div', 'button-row compact-actions');
     const abandon = button('取消导入', 'quiet', () =>
       abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn));
-    if (review.commitReady) {
-      let activeCommitJob: ServiceJobProjection | null = null;
-      const cancelCommit = button('取消当前提交', 'secondary', async () => {
-        if (activeCommitJob === null) return;
-        cancelCommit.disabled = true;
-        try {
-          activeCommitJob = await rendererApi.cancelServiceJob({ jobId: activeCommitJob.jobId });
-          setStatus(activeCommitJob.progress.label, 'success');
-        } catch (error) {
-          setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+    const back = returnToEditingAction({ get draftId() { return review.draftId; }, get draftVersion() { return review.draftVersion; } }, recoveryReturn);
+    let activeCommitJob: ServiceJobProjection | null = null;
+    const cancelCommit = button('取消当前提交', 'secondary', async () => {
+      if (activeCommitJob === null) return;
+      cancelCommit.disabled = true;
+      try {
+        activeCommitJob = await rendererApi.cancelServiceJob({ jobId: activeCommitJob.jobId });
+        setStatus('正在取消提交…', 'busy');
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+      }
+    });
+    cancelCommit.dataset['cancelReimportCommit'] = 'true';
+    cancelCommit.hidden = true;
+    const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
+      if (busy || review.comparison.unresolvedGroups > 0) return;
+      const follow = shellNavigation.route();
+      setBusy(true);
+      setStatus('正在保存新稿…', 'busy');
+      try {
+        activeCommitJob = await rendererApi.commitManuscriptReimport({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest,
+          commitAttemptId: review.commitAttemptId,
+          ...(review.degradationDecision.state === 'required-unselected' ? { acceptDegradation: true } : {}),
+        });
+        cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
+        cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
+        cancelCommit.hidden = false;
+        cancelCommit.disabled = false;
+        const completed = await awaitServiceJob(activeCommitJob, (job) => {
+          activeCommitJob = job;
+          cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
+          cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
+          const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+          setStatus(`正在保存新稿… ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          activeCommitJob = null;
+          cancelCommit.hidden = true;
+          setStatus('重新导入提交已取消，稿件没有改变。', 'success');
+          return;
         }
-      });
-      cancelCommit.dataset['cancelReimportCommit'] = 'true';
-      cancelCommit.hidden = true;
-      const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
-        const follow = shellNavigation.route();
-        commit.disabled = true;
-        abandon.disabled = true;
-        setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
-        try {
-          activeCommitJob = await rendererApi.commitManuscriptReimport({
-            draftId: review.draftId,
-            expectedDraftVersion: review.draftVersion,
-            reviewDigest: review.reviewDigest,
-            commitAttemptId: review.commitAttemptId,
-          });
-          cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
-          cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
-          cancelCommit.hidden = false;
-          cancelCommit.disabled = false;
-          const completed = await awaitServiceJob(activeCommitJob, (job) => {
-            activeCommitJob = job;
-            cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
-            cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
-            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
-            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
-          });
-          if (completed.state === 'cancelled') {
-            activeCommitJob = null;
-            cancelCommit.hidden = true;
-            commit.disabled = false;
-            abandon.disabled = false;
-            setStatus('重新导入提交已取消；复核与稿件权威未变化。', 'success');
-            return;
-          }
-          const result = completed.result;
-          if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
-            throw new Error('重新导入提交任务未返回完成记录。');
-          }
-          await presentImportCompletion(result, recoveryReturn, follow);
-        } catch (error) {
-          if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
-            hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
-            if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
-            return;
-          }
-          commit.disabled = false;
-          abandon.disabled = false;
-          setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+        const result = completed.result;
+        if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
+          throw new Error('重新导入提交任务未返回完成记录。');
         }
-      });
-      commit.dataset['commitManuscriptReimport'] = review.target.bookId;
-      actions.append(commit, cancelCommit);
-      // Reached from 接受降级并提交: the commit follows in the same step.
-      if (commitNow) queueMicrotask(() => commit.click());
-    }
-    actions.append(abandon);
-    // The sticky `.commit-bar` the other two reviews use, so this review's commit and cancel stay
-    // reachable below the fidelity table and the block mappings (V2-UX-LAYER-005). It carries the
-    // action row alone: the atomic-commit sentence its siblings show is copy, and this change is
-    // position only.
+        await presentImportCompletion(result, recoveryReturn, follow);
+      } catch (error) {
+        if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
+          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
+          if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+          return;
+        }
+        setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+      } finally {
+        activeCommitJob = null;
+        cancelCommit.hidden = true;
+        setBusy(false);
+      }
+    });
+    commit.dataset['commitManuscriptReimport'] = review.target.bookId;
+    const updateCommit = (): void => {
+      const accept = review.degradationDecision.state === 'required-unselected';
+      commit.textContent = accept ? review.comparison.changed ? '接受降级并提交稿件重新导入' : '接受降级并记录'
+        : review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化';
+      if (accept) commit.dataset['acceptReimportDegradation'] = review.draftId;
+      else delete commit.dataset['acceptReimportDegradation'];
+      commit.disabled = busy || !(review.commitReady || accept && review.comparison.unresolvedGroups === 0);
+    };
+    updateCommit();
+    actions.append(commit, cancelCommit);
+    actions.append(back, abandon);
+    // Keep the final action reachable below the comparison rows (V2-UX-LAYER-005).
     const commitBar = element('section', 'commit-bar');
     commitBar.append(actions);
     content.append(commitBar);
@@ -1375,7 +1481,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const explanation = element('p', undefined, commitNote(acceptedDegradation));
       const commitButton = button(finalActionLabel, 'primary', async () => {
         const follow = shellNavigation.route();
-        commitButton.disabled = true;
+        for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
         setStatus(technicalWords(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', '正在导入…'), 'busy');
         try {
           const result = await rendererApi.commitNewBookImport({
@@ -1395,13 +1501,14 @@ export function createImportReview(options: ImportReviewOptions) {
             if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
-          commitButton.disabled = false;
+          for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false;
           setStatus(rendererErrorMessage(error, '导入未完成，请重试。'), 'error');
         }
       });
       const actions = element('div', 'button-row compact-actions');
       actions.append(
         commitButton,
+        returnToEditingAction(review, recoveryReturn),
         button('取消导入', 'quiet', () =>
           abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
         ),
@@ -1411,6 +1518,7 @@ export function createImportReview(options: ImportReviewOptions) {
     } else {
       const actions = element('div', 'button-row');
       actions.append(
+        returnToEditingAction(review, recoveryReturn),
         button('取消导入', 'quiet', () =>
           abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
         ),
