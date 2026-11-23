@@ -111,6 +111,34 @@ it('polls a synchronous J-13 predicate until its value becomes truthy', async ()
   }
 });
 
+it.each(['late', 'pending', 'clock-advanced'])('enforces the J-13 deadline for a %s renderer response', async (scenario) => {
+  vi.useFakeTimers();
+  try {
+    const renderer = {
+      evaluate: async () => {
+        if (scenario === 'clock-advanced') {
+          vi.setSystemTime(Date.now() + 20);
+          return true;
+        }
+        return new Promise<boolean>(resolve => {
+          if (scenario === 'late') setTimeout(resolve, 93, true);
+        });
+      },
+    };
+    let outcome = 'waiting';
+    void journeyWaitBoundary('13')(renderer, 'true', 'deadline', 10).then(
+      () => { outcome = 'matched'; },
+      (error: Error) => { outcome = error.message; },
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    expect(outcome).toBe('deadline');
+    await vi.advanceTimersByTimeAsync(93);
+    expect(outcome).toBe('deadline');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('never starts the background-review fixture when its plan preview does not disable models', async () => {
   const {startDraftBackgroundRefresh}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   const renderer={evaluate:vi.fn(async()=>({scopeReady:true,prepared:true,localOnly:false,itemId:'fixture-task',runId:'fixture-run'})),send:vi.fn()};
@@ -487,8 +515,7 @@ it.each([{top:747.796875,covered:false,moving:false},{top:94.953125,covered:fals
   const focused=top<150?{kind:'composer-field'}:editor;
   const document={activeElement:focused,querySelector:(selector:string)=>selector==='.editor-window'?scroll:anchor,elementFromPoint:()=>covered?{}:editor};
   const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(()=>{if(++frames>=4)scroll.dataset.scrolling=undefined;callback();}),1008,681),send:async(_method:string,event:{type:string;deltaY?:number})=>{events.push(event);if(event.type==='mouseMoved'&&moving&&scroll.dataset.scrolling==='true')offset+=20;if(event.type==='mouseWheel'){if(scroll.dataset.scrolling==='true')throw Error('wheel-before-scroll-idle');offset+=event.deltaY!;if(moving){frames=0;scroll.dataset.scrolling='true';}};}};
-  const j05Source=top<150||top===747.796875?readFileSync(new URL('../../e2e/run-j05.mjs',import.meta.url),'utf8').match(/async function waitFor\(renderer,[\s\S]*?\n\}/u)?.[0]:null;
-  const wait=j05Source?Function('journeyCheckFailure',`return (${j05Source})`)((_journey:string,name:string)=>Error(name)):j08WaitBoundary();
+  const wait = journeyWaitBoundary(top < 150 || top === 747.796875 ? '05' : '08');
   const result=draftWheelToAnchor(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'.anchor','return-place');
   if(covered){await expect(result).rejects.toThrow('return-place-wheel-hit');expect(events).toEqual([]);}
   else {await expect(result).resolves.toBeUndefined();const r=anchor.getBoundingClientRect();expect(r.top).toBeGreaterThanOrEqual(150);expect(r.bottom).toBeLessThanOrEqual(660);expect(events.every(event=>event.type==='mouseMoved'||event.type==='mouseWheel')).toBe(true);if(top===300)expect(events).toEqual([]);else expect(events.some(event=>event.type==='mouseWheel')).toBe(true);}
