@@ -7,6 +7,7 @@ import type {
   RunBudgetCeilingState,
   TaskPlanKind,
   TaskPlanProjection,
+  TaskWorkProjection,
   TaskPlanRunControlProjection,
   ResumableStopReason,
   TaskPlanStartReadiness,
@@ -154,7 +155,7 @@ export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 export function taskPlanCeilingLine(plan: TaskPlanProjection): string | null {
   // The ceiling's figure, read in the service's words or as serviceWords shows them.
   const ceiling = plan.service.usage.match(/(?:达到|至多) ([\d,]+)/u)?.[1];
-  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} 后不再发送`);
+  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, '已设用量上限，用到上限时任务会暂停');
 }
 
 /**
@@ -181,7 +182,8 @@ export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<rea
     .replace(/^不/u, '')).join('、').replace('抄范例、抄资料', '抄范例资料');
   return [
     ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
-    ['发送', `${sends ? '发往模型，' : '不发送，'}${usage}。`],
+    ['发送', technicalLayerVisible ? `${sends ? '发往模型，' : '不发送，'}${usage}。` : sends ? '发往本次选择的模型。' : '只在本机处理。'],
+    ...(plan.estimate === undefined ? [] : [['预计', plan.estimate.sentence] as const]),
     ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
     ...(technicalLayerVisible ? [['不会', `不${nonEffects}。`] as const] : []),
     ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
@@ -1229,14 +1231,20 @@ export function taskStatusDuration(elapsedMs: number): string {
   return minutes < 60 ? `${minutes} 分 ${seconds % 60} 秒` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
 }
 
+/** The same working stretches and completion count in the drawer, Book panel and overview (I-12). */
+export function taskWorkLine(work: TaskWorkProjection | null | undefined, nowMs: number): string | null {
+  if (work == null) return null;
+  const elapsed = work.workedMs + (work.workingSince === null ? 0 : Math.max(0, nowMs - Date.parse(work.workingSince)));
+  const requests = work.finished?.requests;
+  return `用时 ${taskStatusDuration(elapsed)}${requests == null ? '' : ` · ${groupedCount(requests)} 次模型调用`}`;
+}
+
 /**
- * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and thinking effort, the processing time
- * its Run Report measured once it ended, and what it formed. `outcome` is `null` until that row was read.
+ * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and what it formed.
+ * Working time and completion counts come directly from the plan. `outcome` is `null` until the row was read.
  */
 export interface TaskStatusFacts {
   readonly modelLabel: string | null;
-  /** The Run Report's processing time of a Task that ended; `null` when the Task has no report. */
-  readonly processedMs: number | null;
   readonly outcome: null | { readonly kind: 'result'; readonly what: string } | { readonly kind: 'none'; readonly reason: string | null };
 }
 
@@ -1276,7 +1284,7 @@ export interface TaskStatusLines {
   readonly sentence: string | null;
   /** LIVE-003's warning, present only while the step in flight has run longer than this Run's own steps did. */
   readonly stale: string | null;
-  /** The stage while the Run is under way; the processing time of a Task that ended. */
+  /** The working time and completion count, alongside the stage while running. */
   readonly line: string | null;
   /** What the Run Budget Ceiling does, when the plan froze one and the Run is not over. */
   readonly ceiling: string | null;
@@ -1284,21 +1292,6 @@ export interface TaskStatusLines {
   readonly model: string | null;
   /** Whether 查看结果 has a result to open: the Task ended and formed one. */
   readonly resultReady: boolean;
-}
-
-/**
- * 处理用时, the finished card's time (Issue #1527): the processing time the Run Report measured — the sum of its stages' wall time. It is
- * not elapsed time: work done in parallel counts more than once and gaps between steps are left out, so the label says 处理用时 and not
- * 用时. A Task without a report shows no figure.
- *
- * The running card shows no time, because no fact the plan or the 任务总览 carries is the start of the stretch a Run is executing now:
- * the row's `at` of an executing Run is when the Run was recorded, and `activity.lastTransitionAt` moves with every request the Run
- * admits, not only with its entry into executing; a review run carries no activity at all. The liveness warning and the step's own
- * time in the 计划 view say whether it moves. One measure of working time for both states needs the projection to carry accumulated
- * working time — round #1539.
- */
-export function taskStatusProcessed(ended: boolean, facts: TaskStatusFacts): string | null {
-  return ended && facts.processedMs !== null ? `处理用时 ${taskStatusDuration(facts.processedMs)}` : null;
 }
 
 /** The one sentence of a Task that ended: what it formed when its row says, otherwise only that it ended. */
@@ -1325,14 +1318,16 @@ function taskStatusSentence(plan: TaskPlanProjection, facts: TaskStatusFacts): s
 export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts, nowMs: number): TaskStatusLines {
   const control = plan.runControl;
   const activity = control?.activity ?? null;
-  const model = facts.modelLabel === null ? null : `模型 ${facts.modelLabel}`;
+  const modelLabel = plan.work?.finished ? plan.work.finished.modelLabel : facts.modelLabel;
+  const model = modelLabel === null ? null : `模型 ${modelLabel}`;
+  const work = taskWorkLine(plan.work, nowMs);
   const ceiling = taskPlanCeilingLine(plan);
   const share = (settled: number, total: number): string => `已完成约 ${total === 0 ? 0 : Math.floor((settled / total) * 100)}%`;
   if (activity !== null) {
     return {
       progress: { settled: activity.unitsSettled, total: activity.unitsTotal, text: activity.stage === 'units' ? share(activity.unitsSettled, activity.unitsTotal) : '正在整理结果' },
       sentence: null, stale: taskPlanActivityIsStale(activity, nowMs) ? TASK_PLAN_ACTIVITY_STALE : null,
-      line: RUN_LIVENESS_STAGE_LABELS[activity.stage], ceiling, model, resultReady: false,
+      line: [RUN_LIVENESS_STAGE_LABELS[activity.stage], work].filter(Boolean).join(' · '), ceiling, model, resultReady: false,
     };
   }
   const kept = control?.continuation ?? plan.budgetStop;
@@ -1340,11 +1335,11 @@ export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts
   const progress = settled === null || kept === null ? null : { settled, total: kept.unitsTotal, text: share(settled, kept.unitsTotal) };
   if (control !== null) {
     // A Run no execution holds says so; every other stopped Run leaves its sentence to the bar's note.
-    return { progress, sentence: control.continuation === null && taskBarView(plan).note === null ? TASK_PLAN_ACTIVITY_UNREPORTED : null, stale: null, line: null, ceiling, model, resultReady: false };
+    return { progress, sentence: control.continuation === null && taskBarView(plan).note === null ? TASK_PLAN_ACTIVITY_UNREPORTED : null, stale: null, line: work, ceiling, model, resultReady: false };
   }
   const ended = taskStatusEnded(plan);
   return {
-    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: taskStatusProcessed(ended, facts), ceiling: ended ? null : ceiling, model,
+    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: work, ceiling: ended ? null : ceiling, model,
     resultReady: ended && facts.outcome?.kind === 'result',
   };
 }

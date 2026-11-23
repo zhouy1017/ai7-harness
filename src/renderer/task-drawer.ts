@@ -984,7 +984,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const row = statusRow(next, false);
     return {
       modelLabel: statusRow(next, true)?.attention.modelLabel ?? null,
-      processedMs: row !== null && taskStatusRowEnded(row) ? row.usage?.elapsed ?? null : null,
       outcome: row === null || !taskStatusRowEnded(row) ? null : taskStatusOutcome(row, next.kind),
     };
   }
@@ -1310,9 +1309,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         ...(!technicalLayerVisible ? [
-          // A ceiling read as what it does; its exact count stays in the developer layer (Issue #1431 item 49).
-          ...(next.edit.budget === null ? [] : [[TASK_PLAN_SERVICE_TERMS[5], next.edit.budget.ceiling === 'unset' ? '未设上限' : '已设上限，用到上限时任务会暂停'] as const]),
-          ['预计用时', next.service.duration] as const,
+          ['预计', next.estimate?.sentence ?? '用时暂无可靠估计。'] as const,
         ] : [
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
         [TASK_PLAN_SERVICE_TERMS[1], next.service.provider],
@@ -2569,9 +2566,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function scheduleActivityClock(next: TaskPlanProjection): void {
     if (activityClock !== undefined) window.clearInterval(activityClock);
     activityClock = undefined;
-    if (!['running', 'pausing', 'cancelling'].includes(next.state.key)) return;
+    if (next.work?.workingSince == null && next.runControl?.activity == null) return;
     activityClock = window.setInterval(() => {
-      if (root.hidden || view !== 'plan' || interrupted || plan?.runControl?.activity == null) {
+      if (root.hidden || view !== 'plan' || interrupted || plan === null || (plan.work?.workingSince == null && plan.runControl?.activity == null)) {
         window.clearInterval(activityClock);
         activityClock = undefined;
         return;

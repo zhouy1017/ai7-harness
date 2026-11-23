@@ -1,4 +1,4 @@
-import { createLaunchBarPresentation, mountLaunchBar, syncLaunchModelSettings, type LaunchBar, type LaunchBarApi, type MountLaunchBarOptions, type TaskLaunchRequest } from './components/launch-bar.js';
+import { createLaunchBarPresentation, launchEstimateLines, mountLaunchBar, syncLaunchModelSettings, type LaunchBar, type LaunchBarApi, type MountLaunchBarOptions, type TaskLaunchRequest } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RendererApi, TaskLaunchPreviewInput, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import type { TaskPlanRelaunchProjection, TaskRelaunchCancellation } from '../shared/protocol/task-plan.js';
@@ -196,7 +196,7 @@ function mountReviewRelaunch(options: MountRelaunchOptions, relaunch: Extract<Ta
       if (stopped || version !== previewVersion) return;
       const steps = el('ol'); for (const step of shown.steps) steps.append(el('li', undefined, step));
       usage.replaceChildren(el('p', undefined, `处理范围：${shown.scope}`), steps, ...shown.reference.map(line => el('p', undefined, `允许参考：${line}`)),
-        el('p', undefined, `会发送：${shown.send}`), el('p', undefined, shown.usage), ...shown.adaptations.map(line => el('p', undefined, line)));
+        el('p', undefined, `会发送：${shown.send}`), ...launchEstimateLines(shown), ...shown.adaptations.map(line => el('p', undefined, line)));
     } catch (error) { if (!stopped && version === previewVersion) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = stopped || launching; }
   };
