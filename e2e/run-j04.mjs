@@ -2961,7 +2961,9 @@ async function main() {
     requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
     await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('input[name="review-category"][value="factual-review"]')?.disabled===false`, 'review-search-ordinary-category-available');
 
-    await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
+    await pointerClick(renderer, waitFor, 'input[name="review-category"][value="factual-review"]', 'review-search-category');
+    await waitFor(renderer, `document.querySelector('input[name="review-category"][value="factual-review"]')?.checked===true && document.querySelector('[data-review-action="open-search-settings"]')?.hidden===false`, 'review-search-category-selected');
+    await reviewAction(renderer, '[data-review-action="open-search-settings"]', 'review-search-settings-action');
     await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
     await openReviewDestination(renderer, 'review-search-return');
 

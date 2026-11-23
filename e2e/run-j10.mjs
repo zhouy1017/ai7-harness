@@ -1948,7 +1948,11 @@ async function main() {
     const reviewPaused = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
     const pausedWorkspace = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(reviewRef)}})`);
     requireJourney(reviewPaused.runControl?.runRecordId===reviewStarted.runControl?.runRecordId && reviewPaused.runControl?.continuation?.unitsSettled===1 &&
-      pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
+      pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint', {
+        sameRun: reviewPaused.runControl?.runRecordId===reviewStarted.runControl?.runRecordId,
+        unitsSettled: reviewPaused.runControl?.continuation?.unitsSettled,
+        categories: pausedWorkspace.run?.categories?.map(({ categoryId, state }) => ({ categoryId, state })),
+      });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
