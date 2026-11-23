@@ -332,7 +332,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       adaptations.append(element('li', undefined, `${technicalWords(`第 ${adaptation.unitOrdinal} 个阅读范围`, `正文第 ${adaptation.unitOrdinal} 部分`)}安全重试一次 · ${localInstantLabel(adaptation.recordedAt)}`));
     }
     for (const clarification of report.modelClarifications ?? []) {
-      adaptations.append(element('li', 'analysis-run-report-clarification', clarification.line));
+      adaptations.append(element('li', 'analysis-run-report-clarification', serviceWords(clarification.line)));
     }
     const sample = report.assurance;
     const sampleReading = sample.state === 'not-run' || sample.size === 0
@@ -1324,7 +1324,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const goal = element('input');
       goal.type = 'hidden';
       goal.id = 'j04-analysis-goal';
-      goal.value = BASELINE_ANALYSIS_TASK_GOAL;
+      goal.value = serviceWords(BASELINE_ANALYSIS_TASK_GOAL);
       goal.readOnly = true;
       const actions = element('div', 'button-row analysis-actions');
       const cancel = analysisCancelButton();
@@ -1347,7 +1347,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(
         element('h4', undefined, projection.taskOutcome.label),
-        element('p', undefined, `${projection.taskOutcome.safeNextAction}`),
+        element('p', undefined, serviceWords(projection.taskOutcome.safeNextAction)),
         runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
         technicalDetails('analysis-facts',
           element('dt', undefined, '任务结果'),

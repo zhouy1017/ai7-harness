@@ -214,7 +214,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       if (task.modelLabel) line.append(` · ${task.modelLabel}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
-      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
+      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', serviceWords(task.refusal)));
       line.title = line.textContent ?? '';
       const row = el('div', 'button-row');
       // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
@@ -347,7 +347,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const [synopsisTerm, evaluationTerm, exemplarTerm, materialTerm, bookTerm] = WRITING_REFERENCE_TERMS;
     references.append(
       el('dt', undefined, synopsisTerm), el('dd', undefined, page.references.synopsis),
-      el('dt', undefined, evaluationTerm), el('dd', undefined, page.references.evaluation),
+      el('dt', undefined, evaluationTerm), el('dd', undefined, serviceWords(page.references.evaluation)),
       el('dt', undefined, exemplarTerm), el('dd', 'writing-exemplars', chosen === null ? WRITING_EXEMPLAR_PICK_TYPE : chosen.exemplars.statement),
       el('dt', undefined, materialTerm), materialsNode(page, state),
       el('dt', undefined, bookTerm), el('dd', undefined, page.references.book),
@@ -436,7 +436,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (!busy && api.searchReferableMaterials !== undefined) node.append(similarMaterialsField({ searchReferableMaterials: api.searchReferableMaterials }, page.bookId, offer.items, new Set(state.materialIds), (id) => {
       state.materialIds.push(id); state.problem = null; paint(null);
     }));
-    const statement = el('p', 'writing-materials-statement', offer.statement.replace(/。$/u, offer.more > 0 ? '' : '。'));
+    const statement = el('p', 'writing-materials-statement', serviceWords(offer.statement).replace(/。$/u, offer.more > 0 ? '' : '。'));
     if (offer.more > 0) statement.append(el('span', 'writing-materials-more', `；${writingMaterialsMore(offer.more)}`));
     node.append(statement);
     // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
@@ -477,7 +477,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         label.htmlFor = id;
         row.append(box, label);
         if (reasonText !== null) {
-          const reason = el('span', 'writing-material-reason', reasonText);
+          const reason = el('span', 'writing-material-reason', serviceWords(reasonText));
           reason.id = uid('material-reason');
           box.setAttribute('aria-describedby', reason.id);
           label.append(reason);

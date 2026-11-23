@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type { NavigationCheckpoint } from './navigation-generation.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
@@ -60,8 +61,8 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
   /** `latest` is the line just said, kept in the hidden bar's element with its tone. */
   const paint = (latest: string, tone?: StatusTone): void => {
     if (line.parentElement !== surface) surface.replaceChildren(line);
-    write(errorText, error ?? '');
-    write(busyText, busy === null ? (error === null ? latest : '') : `${error === null ? '' : ' · '}${busy}`);
+    write(errorText, serviceWords(error ?? ''));
+    write(busyText, busy === null ? (error === null ? serviceWords(latest) : '') : `${error === null ? '' : ' · '}${serviceWords(busy)}`);
     if (error === null) dismiss.remove();
     else if (dismiss.parentElement !== surface) surface.append(dismiss);
     surface.hidden = error === null && busy === null;
@@ -72,15 +73,15 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
   const update = (message: string, tone?: StatusTone): void => {
     if (message === '') busy = null;
     // A new error is said again even when its words repeat the standing one: the bar's text is replaced.
-    else if (tone === 'error') { error = message; busy = null; errorText.textContent = message; }
+    else if (tone === 'error') { error = message; busy = null; errorText.textContent = serviceWords(message); }
     else if (tone === 'busy') busy = message;
     else {
       busy = null;
-      if (tone === 'success') { error = null; showToast(message, { tone }); }
+      if (tone === 'success') { error = null; showToast(serviceWords(message), { tone }); }
     }
     paint(message, tone);
     // Said once: a success by its toast, an error or busy line by the bar, any other line by the announcer.
-    if (announcer !== undefined) announcer.textContent = tone === undefined ? message : '';
+    if (announcer !== undefined) announcer.textContent = tone === undefined ? serviceWords(message) : '';
   };
   return Object.assign(update, {
     clearError: (): void => { if (error !== null) { error = null; paint(''); } },

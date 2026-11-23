@@ -1301,7 +1301,7 @@ function taskStatusSentence(plan: TaskPlanProjection, facts: TaskStatusFacts): s
     case 'settled':
       if (facts.outcome === null) return '已完成。';
       return facts.outcome.kind === 'result' ? `已完成，得到${facts.outcome.what}。`
-        : `已完成，没有可以查看的结果${facts.outcome.reason === null ? '。' : `：${facts.outcome.reason}`}`;
+        : `已完成，没有可以查看的结果${facts.outcome.reason === null ? '。' : `：${serviceWords(facts.outcome.reason)}`}`;
     case 'recorded': return `${TASK_BAR_RECORDED}。`;
     case 'cancelled': return `${TASK_BAR_CANCELLED}。`;
     case 'cancelled-after-start': return `${TASK_BAR_CANCELLED_NOTE}。`;

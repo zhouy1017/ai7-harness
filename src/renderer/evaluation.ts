@@ -265,7 +265,7 @@ export function evaluationMaterialsField(
   const items = page.materials?.items ?? [];
   const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
     : `最多参考 ${MAX_WRITING_MATERIALS} 份，每份不超过 ${MAX_WRITING_MATERIAL_GRAPHEMES.toLocaleString('zh-CN')} 字、合计不超过 ${MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES.toLocaleString('zh-CN')} 字；只参照、不照抄，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
-  if (items.length === 0) legend.append(el('span', undefined, ' · '), el('span', undefined, guidance));
+  if (items.length === 0) legend.append(el('span', undefined, ' · '), el('span', undefined, serviceWords(guidance)));
   else fieldset.append(el('p', 'field-note', guidance));
   // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
@@ -291,7 +291,7 @@ export function evaluationMaterialsField(
       repaint(item.materialId);
     });
     const name = el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`);
-    if (reason !== null) name.append(el('span', undefined, ' · '), el('span', undefined, reason));
+    if (reason !== null) name.append(el('span', undefined, ' · '), el('span', undefined, serviceWords(reason)));
     label.append(input, name);
     fieldset.append(label);
   }
@@ -341,7 +341,7 @@ export function evaluationPlanReferenceField(options: {
     });
     const materialLines = page.materialReferences?.[initial ? 'initial' : 'readersReport'] ?? [];
     const basis = options.reference.filter((line) => !materialLines.includes(line));
-    host.replaceChildren(...basis.map((line) => stateTerm(line)), evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
+    host.replaceChildren(...basis.map((line) => stateTerm(serviceWords(line))), evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
     host.append(similarMaterialsField(options.api, page.bookId, page.materials?.items ?? [], selected, (id) => { selected.add(id); update(); }));
     if (initial && page.market.series.length > 0) host.append(filterChoices({ label: '书系参考',
       choices: [['', '仅本书'], ...page.market.series.map((series) => [series.seriesId, `书系《${series.title}》`] as const)],
@@ -443,7 +443,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, READERS_REPORT_HEADING);
     heading.tabIndex = -1;
     const context = el('p', 'field-note', `${READERS_REPORT_LEDE.replace(/。$/u, '')}；`);
-    context.append(el('span', 'readers-report-exemplars', `${report.exemplars.statement.replace(/。$/u, '')}。`));
+    context.append(el('span', 'readers-report-exemplars', `${serviceWords(report.exemplars.statement).replace(/。$/u, '')}。`));
     section.append(heading, context);
     const basis = readersReportBasisLine(report.basis);
     if (basis !== null) section.append(el('p', 'readers-report-basis', basis));
@@ -1006,7 +1006,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (workspace.start.skipDamaged !== null) begin.append(' · ', el('span', 'evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
       start.append(begin);
     } else {
-      start.append(el('p', 'field-note evaluation-start-reason', workspace.start.allowed ? workspace.start.blankReason! : workspace.start.reason));
+      start.append(el('p', 'field-note evaluation-start-reason', serviceWords(workspace.start.allowed ? workspace.start.blankReason! : workspace.start.reason)));
     }
     const more = el('details', 'evaluation-more');
     more.append(el('summary', undefined, '更多 ▾'), menuPanel(start));
