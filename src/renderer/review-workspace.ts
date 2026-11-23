@@ -1284,7 +1284,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       line.append(' · ', details);
       item.append(line);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
-      if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
+      if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', serviceWords(summary.historicalMarker)));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
       if (opened) open.disabled = true;
       item.append(open);
@@ -1587,7 +1587,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>, run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-historical-marker');
     const markerLine = el('p');
-    markerLine.append(el('span', 'review-historical-marker-label', `${marker.label} · ${marker.detail}`));
+    markerLine.append(el('span', 'review-historical-marker-label', `${serviceWords(marker.label)} · ${serviceWords(marker.detail)}`));
     box.append(markerLine);
     // The marker links to the later remediation (Issue #912; LAUD-008): when, the material in 学习回溯, and the way on without it.
     const remediation = marker.remediation;
@@ -1870,7 +1870,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(finding.anchorState === 'anchor-changed' ? [el('p', 'review-finding-state', REVIEW_ANCHOR_CHANGED)] : []),
         ...(finding.status !== 'pending' && detail !== serviceWords(finding.statusLabel) ? [el('p', 'review-finding-status-detail', detail)] : []),
         ...(finding.ignoreReason === null ? [] : [el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason))]),
-        ...(finding.historicalMarker === null ? [] : [el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker)])];
+        ...(finding.historicalMarker === null ? [] : [el('p', 'review-historical-marker-label review-finding-marker', serviceWords(finding.historicalMarker))])];
     };
     // A source's 来源译文 comes from the rows this card already read for its finding (Issue #1174), by card.
     const translations = new Map((evidence.get(result.reviewFindingId) ?? []).flatMap((entry) =>
@@ -1988,7 +1988,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const settledDetail = serviceWords(finding.statusDetail);
     if (finding.status !== 'pending' && settledDetail !== serviceWords(finding.statusLabel)) main.append(el('p', 'review-finding-status-detail', settledDetail));
     if (finding.ignoreReason !== null) main.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
-    if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
+    if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', serviceWords(finding.historicalMarker)));
     const actions = renderFindingActions(run, finding);
     const controls = Array.from(actions.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
     const primary = finding.output === 'annotation' ? controls.find((control) => control.dataset['reviewAction'] === 'ignore-now') : controls[1];
@@ -2227,7 +2227,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
     section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
-    if (run.historicalMarker !== null) section.append(el('p', 'review-historical-marker-label review-report-marker', run.historicalMarker.label));
+    if (run.historicalMarker !== null) section.append(el('p', 'review-historical-marker-label review-report-marker', serviceWords(run.historicalMarker.label)));
     if (run.reportVersions.length > 0) {
       const versions = el('ol', 'review-report-versions');
       for (const version of run.reportVersions) {

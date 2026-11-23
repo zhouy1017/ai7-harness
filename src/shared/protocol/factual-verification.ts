@@ -399,6 +399,8 @@ export interface FactualVerificationResultProjection {
   actionNeed: FactualActionNeed;
   sourceCounts: { checked: number; candidates: number; independent: number; reused: number };
   limitations: ReadonlyArray<string>;
+  /** Projection-only: the first limitation is the service's not-attempted disclosure; all remaining entries are model text. */
+  unattemptedDisclosure?: true;
   policyPin: FactualVerificationPolicyPinProjection;
   producer: string;
   recordedAt: string;

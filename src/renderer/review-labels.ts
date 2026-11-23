@@ -332,7 +332,7 @@ export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: 
   if (selected.every((category) => category.modelFree)) return '只读基线分析的线索，不发送任何内容。';
   const free = selected.filter((category) => category.modelFree).map((category) => `「${category.label}」`);
   const sent = '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务';
-  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + (synthesis ? REVIEW_SYNTHESIS_PLAN_LINE : '');
+  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + (synthesis ? serviceWords(REVIEW_SYNTHESIS_PLAN_LINE) : '');
 }
 
 // ---- the plan ---------------------------------------------------------------------------------------

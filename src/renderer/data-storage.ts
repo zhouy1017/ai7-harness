@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { rendererApi } from './navigation-generation.js';
 import { navigation } from './navigation-generation.js';
 import { technicalLayerVisible } from './technical-layer.js';
@@ -72,7 +73,7 @@ export function createDataStorage(options: DataStorageOptions) {
       const credentials = element('section', 'review-section');
       credentials.append(
         element('h3', undefined, '密钥与产品数据分开'),
-        element('p', undefined, `${projection.separationLabel.replace(/。$/u, '')}；系统保护位置：${projection.protectedSecretStoreLabel}。`),
+        element('p', undefined, `${serviceWords(projection.separationLabel).replace(/。$/u, '')}；系统保护位置：${projection.protectedSecretStoreLabel}。`),
       );
       const reveal = button('查看数据位置', 'secondary', async () => {
         reveal.disabled = true;

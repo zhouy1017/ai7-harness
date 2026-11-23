@@ -898,6 +898,7 @@ export class FactualVerificationLedger {
       states: { referenceIntegrity: 'verified', claimSupport: effective.claimSupport, factualVerification: effective.outcome },
       sourceCondition, actionNeed, sourceCounts: { checked, candidates, independent, reused: sources.filter((source) => source.reused).length },
       limitations: notAttempted ? ['这条断言尚未开始联网核查；同一阅读范围内其他断言的证据不代表已核查本条。', ...result.body.limitations] : result.body.limitations,
+      ...(notAttempted ? { unattemptedDisclosure: true as const } : {}),
       policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
       anchor: anchorCurrent ? { state: 'current', label: null } : { state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL },
       decision: latestDecision === null ? null : this.#decisionProjection(latestDecision, latestVersion),

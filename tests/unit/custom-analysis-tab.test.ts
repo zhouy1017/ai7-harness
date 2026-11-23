@@ -103,7 +103,7 @@ describe('②A › 自定义', () => {
     await settle();
     const section = panel.querySelector('.custom-revision')!;
     expect(section.dataset['freshness']).toBe('current');
-    expect(section.textContent).toContain(latest.coverage.label);
+    expect(section.textContent).toContain('覆盖：部分 · 1/2 个部分 · 1 处未完成');
     expect(section.textContent).toContain(customTabCountsLine(latest.rowCounts));
     expect(section.querySelector('[data-gap-unit="2"]')).not.toBeNull();
     const rows = panel.querySelectorAll('.custom-row');

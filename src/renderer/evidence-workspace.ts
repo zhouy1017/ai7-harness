@@ -1,3 +1,4 @@
+import { factualLimitationWords, serviceWords } from './service-wording.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { reportResult } from './notifications.js';
 import { menuPanel } from './components/controls.js';
@@ -304,7 +305,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const limits = el('div', 'evidence-limitations');
       limits.append(el('span', 'evidence-term', EVIDENCE_LIMITATIONS_HEADING));
       const list = el('ul');
-      for (const entry of result.limitations) list.append(el('li', undefined, entry));
+      for (const entry of factualLimitationWords(result)) list.append(el('li', undefined, entry));
       limits.append(list);
       node.append(limits);
     }
@@ -538,7 +539,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     }
     if (offered || current.decisions.length > 0) node.append(el('p', 'field-note evidence-decision-note', DECISION_NOTE));
     if (card.recommendation !== null) {
-      node.append(el('p', 'evidence-decision-recommendation', `AI7 建议「${DECISION_LABELS[card.recommendation.disposition].replace(/…$/u, '')}」：${card.recommendation.rationale}`));
+      node.append(el('p', 'evidence-decision-recommendation', `AI7 建议「${DECISION_LABELS[card.recommendation.disposition].replace(/…$/u, '')}」：${serviceWords(card.recommendation.rationale)}`));
     }
     if (card.drift !== null) {
       const drift = el('p', 'evidence-decision-drift', card.drift);
@@ -632,7 +633,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderCorrection(current: EvidenceWorkspaceProjection): HTMLElement | null {
     if (saved !== null) {
       const done = el('section', 'evidence-correction');
-      const line = el('p', 'correction-saved', saved.completionLabel);
+      const line = el('p', 'correction-saved', serviceWords(saved.completionLabel));
       line.dataset['markIds'] = saved.markIds.join(',');
       done.append(el('h6', undefined, CORRECTION_HEADING), line);
       if (saved.label !== null) done.append(el('p', 'correction-assurance-label', saved.label));
