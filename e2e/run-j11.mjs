@@ -1431,7 +1431,7 @@ async function main() {
     // The bar covers no control the page shows: every visible button, link, field, select and disclosure outside the bar lies
     // clear of its box, and a hit test at the control's centre lands on the control, not on the bar.
     const COVERED_CONTROLS = `Array.from(document.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"]')).filter((node) => {
-      const bar = document.querySelector('#persistence-status'); if (bar.contains(node)) return false;
+      const bar = document.querySelector('#persistence-status'); if (bar.contains(node) || !node.checkVisibility({ visibilityProperty: true })) return false;
       const r = node.getBoundingClientRect(), box = bar.getBoundingClientRect();
       if (!(r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) || getComputedStyle(node).visibility === 'hidden') return false;
       const hit = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));

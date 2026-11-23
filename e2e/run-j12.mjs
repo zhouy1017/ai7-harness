@@ -1,7 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
-import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
+import { pressKey, pressReachable, reachable, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -684,7 +684,7 @@ async function saveMilestone(renderer) {
   await renderer.send('Input.insertText', { text: '本地且离线。' });
   await tabTo(io, section, 'milestone-return-to-summary', undefined, true);
   await pressReachable(io, section, 'milestone-collapse-form');
-  await assertRenderer(renderer, saveMenuActionsInOrder(), 'milestone-menu-order');
+  await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll('#context-actions details[data-save-menu="manuscript"] .editor-save-menu-body > button'), node => node.textContent)) === ${JSON.stringify(JSON.stringify(['导入新版本…', '导出交付物…']))}`, 'milestone-menu-order');
   await assertRenderer(renderer, reachable(outer), 'milestone-summary-in-window');
   await renderer.evaluate(`document.querySelector('${outer}').focus({preventScroll:true})`);
   const entry = '[data-import-new-version="manuscript"]', last = '.editor-save-menu-body > button:last-of-type';

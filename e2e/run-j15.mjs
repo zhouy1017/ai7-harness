@@ -626,7 +626,11 @@ async function main() {
     // chosen with its focus visible.
     await assertRenderer(renderer, `(() => { const tab=document.querySelector('#knowledge-tab-guidelines'); if(!(tab instanceof HTMLButtonElement))return false; tab.focus(); return document.activeElement===tab; })()`, 'knowledge-tab-focus');
     await pressKey(renderer, 'ArrowRight');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='standard-tables' && document.activeElement?.id==='knowledge-tab-standard-tables' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await pressKey(renderer, 'ArrowRight');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right-evaluation', 10_000);
+    await pressKey(renderer, 'ArrowLeft');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='standard-tables' && document.activeElement?.id==='knowledge-tab-standard-tables' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-left-standard-tables', 10_000);
     await pressKey(renderer, 'ArrowLeft');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='guidelines' && document.activeElement?.id==='knowledge-tab-guidelines' && document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, 'knowledge-arrow-left', 10_000);
 

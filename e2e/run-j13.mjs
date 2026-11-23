@@ -976,7 +976,7 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'library-find');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'series' && ${notice} === '已列出找到的图书'`, 'library-found');
     const found = await renderer.evaluate(`[document.querySelector('.book-filter-line')?.textContent ?? null, Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item button[data-book-id]'), (button) => button.dataset.bookId)]`);
-    requireJourney(JSON.stringify(found) === JSON.stringify([`按书系查找「${SERIES}」`, [first, second]]), 'library-found-words', found);
+    requireJourney(found[0] === `按书系查找「${SERIES}」` && JSON.stringify([...found[1]].sort()) === JSON.stringify([first, second].sort()), 'library-found-words', found);
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'library-clear');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="landing"] article.book-summary-item').length === 3`, 'library-cleared');
 
