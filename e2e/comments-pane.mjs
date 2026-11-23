@@ -335,7 +335,15 @@ async function commentsInsideSelection(renderer,check,waitFor) {
     await waitFor(renderer,`getSelection().isCollapsed && JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).from===JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).to`,'comments-existing-range-inside-caret');
     if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click();document.querySelector('[data-edge-entry="comments"]').click();return !document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-restore-pane');
   }
-  check((await commentsNativeClick(renderer,await renderer.evaluate(commentsUnmarkedPoint))).real,'comments-existing-range-clear');
+  // Reopening the pane also resizes the sidebar and text column. A point chosen during that motion can land on a mark.
+  const clearReading=`(() => {
+    if(document.querySelector('.manuscript-comments-canvas')?.dataset.loading!=='false')return null;
+    const point=${commentsUnmarkedPoint};if(!point)return null;
+    const box=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.left,r.top,r.width,r.height];};
+    return {point,editor:box('[data-testid="manuscript-editor"]'),pane:box('.manuscript-comments-pane')};
+  })()`;
+  await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=${clearReading};requestAnimationFrame(()=>{const after=${clearReading};globalThis.__commentsClearPoint=after?.point;resolve(before!==null&&JSON.stringify(before)===JSON.stringify(after));});}))`,'comments-existing-range-clear-ready');
+  check((await commentsNativeClick(renderer,await renderer.evaluate('__commentsClearPoint'))).real,'comments-existing-range-clear');
   await waitFor(renderer,`!document.querySelector('[data-comment-card][data-selected="true"]')`,'comments-existing-range-cleared');
 }
 
