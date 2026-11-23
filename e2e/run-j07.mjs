@@ -874,8 +874,8 @@ async function saveMilestone(renderer, milestone, revisionLabel, name) {
  * sequence moved on and nothing is left pending.
  */
 async function acknowledgedEdit(renderer, text, name) {
-  const before = await renderer.evaluate(`window.__j07.journal()`);
-  requireJourney(Number.isSafeInteger(before), `${name}-journal-before`);
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, `${name}-journal-before`);
   const typed = await renderer.evaluate(`(() => {
     const editor = document.querySelector('[data-testid="manuscript-editor"]');
     const block = editor?.querySelector(':scope > p[data-block-id]');
@@ -891,9 +891,12 @@ async function acknowledgedEdit(renderer, text, name) {
     return ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)}) && (block.textContent ?? '') === original + ${JSON.stringify(text)};
   })()`);
   requireJourney(typed === true, `${name}-typed`);
-  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
+  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before.journalSequence}; })()`, `${name}-dirty`, 30_000);
   await renderer.evaluate(`(() => { const save = document.querySelector('[data-editor-persistence]'); if (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
-  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return window.__j07.journal() > ${before} && save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed') && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
+  // #1539 I-10 remembers direct-edit mode: reopening no longer emits the mode-switch success toast.
+  // Persistence is the acknowledged journal and exact saved words, independent of the current toast.
+  await waitFor(renderer, journalEditPersisted(before, text), `${name}-acknowledged`, 120_000);
+  await assertRenderer(renderer, `document.documentElement.dataset.ai7CloseRisk !== 'true'`, `${name}-close-safe`);
   // Real editor reconciliation must retain the loaded preview while paragraph edits still reach the journal.
   await waitFor(renderer, `(async()=>{const image=document.querySelector('.manuscript-source-image img');
     if(!image||image.naturalWidth===0)return false;const source=image.src;
