@@ -1452,9 +1452,10 @@ async function resolvePagedIdentityConsequences(renderer, scenario) {
   const rewriteFailure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
   requireJourney(rewriteFailure === null, `${scenario}-rewrite-first-row-valid`, { persistence_status: rewriteFailure });
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-rewrite-first-row-page`);
+  // I-4b keeps resolved choices editable until commit; the selected verb remains explicit on the same row.
   await assertRenderer(
     renderer,
-    `(() => { const first = document.querySelector('article.reimport-group'); return first?.dataset.reimportGroupId === ${JSON.stringify(firstGroupId)} && first.dataset.reimportGroupVerb === 'rewrite' && !first.querySelector('[data-reimport-verb-choice]') && first.textContent.includes('已选择：改写与新增'); })()`,
+    `(() => { const first = document.querySelector('article.reimport-group'); const choices = Array.from(first?.querySelectorAll('[data-reimport-verb-choice]') ?? [], choice => [choice.dataset.reimportVerbChoice, choice.getAttribute('aria-pressed'), choice.disabled]); return first?.dataset.reimportGroupId === ${JSON.stringify(firstGroupId)} && first.dataset.reimportGroupVerb === 'rewrite' && JSON.stringify(choices) === JSON.stringify([['rewrite', 'true', false], ['delete', 'false', false]]) && first.textContent.includes('已选择：改写与新增'); })()`,
     `${scenario}-first-row-resolved`,
   );
 }
@@ -2075,7 +2076,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `${recentRow}?.parentElement?.querySelector('[data-nav-pin]')?.getAttribute('aria-pressed') === 'false' && !document.querySelector('#app-sidebar [data-nav-books="pinned"]') && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-unpinned');
   await assertRenderer(
     renderer,
-    `(() => { const row = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(bookId)}]')?.closest('.book-summary-item'); return row?.textContent.includes(${JSON.stringify(title)}) && row.textContent.includes('尚无稿件') && row.textContent.includes(${JSON.stringify(internalNumber)}) && row.textContent.includes(${JSON.stringify(bookId)}) && row.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '加载更多图书'); })()`,
+    `(() => { const row = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(bookId)}]')?.closest('.book-summary-item'); const technical = document.documentElement.dataset.technicalLayerVisible === 'true'; return row?.textContent.includes(${JSON.stringify(title)}) && row.textContent.includes('尚无稿件') && row.textContent.includes(${JSON.stringify(internalNumber)}) && row.textContent.includes(${JSON.stringify(bookId)}) === technical && row.textContent.includes(${JSON.stringify(`book:${bookId}`)}) === technical && Array.from(document.querySelectorAll('button')).filter(button => button.textContent === '加载更多图书').every(button => button.hidden && !button.checkVisibility() && button.getClientRects().length === 0); })()`,
     'compact-book-summary-exact-identity',
   );
   await clickExactButton(renderer, '新建图书', 'duplicate-number-create-open');
