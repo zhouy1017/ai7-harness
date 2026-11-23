@@ -1,3 +1,4 @@
+import { loadLibraryCheck, libraryDetail, selectedStandardTables } from '../../src/service/review/deterministic/library-check.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -243,4 +244,39 @@ describe('the 字表与词表 library (R5-L1)', () => {
     expect(provenance).toContain('频序号');
     expect(provenance).toMatch(/没有许可|未声明许可|不含许可/u);
   });
+});
+
+it('resolves disagreement, conditional mappings and common-word overlaps from applied library rows (#1717)', async () => {
+  const db = library([]);
+  function table(kind: string, name: string, strength: string, rows: string[][]) {
+    const id = randomUUID(), version = randomUUID();
+    db.exec('BEGIN');
+    db.prepare("INSERT INTO standard_tables VALUES (?,?,?,'imported',NULL,1,?,'now')").run(id,kind,name,version);
+    db.prepare("INSERT INTO standard_table_versions VALUES (?,?,1,'合成版','合成来源',?,NULL,?,NULL,NULL,NULL,'now')").run(version,id,'a'.repeat(64),rows.length);
+    for (const [i, [preferred, variant, condition, status]] of rows.entries()) {
+      db.prepare('INSERT INTO standard_table_entries VALUES (?,?,?,?,NULL,?,?,?,?,NULL,NULL)').run(
+        version,i+1,preferred!,JSON.stringify(variant ? [variant] : []),condition || null,'合成条目',strength,status ?? 'applied');
+    }
+    db.exec('COMMIT');
+    return id;
+  }
+  try {
+    const first = table('word-forms','合成甲表','national',[['苹果','苹裹'],['甲语','乙语','仅限正文'],['甲词','乙词']]);
+    const second = table('word-forms','合成乙表','house',[['苹裹','苹果'],['丙词','乙词','','to-confirm']]);
+    const common = table('common-words','合成常用词','dictionary',[['苹果'],['里程']]);
+    const bookTerms = [{ kind: 'term' as const, preferred: '理程', variants: ['里层'] }];
+    const options = { characters: true, variantWords: true, houseWordList: null, bookTerms };
+    const pins = selectedStandardTables(db,options);
+    const scan = loadLibraryCheck(db,pins,bookTerms);
+    const results = [];
+    for await (const hit of scan('苹裹。乙语。乙词。理程。',async () => {})) {
+      results.push({ literal: hit.literal, ...libraryDetail(pins,hit.rule,hit.literal,hit.entries) });
+    }
+    expect(results).toHaveLength(3);
+    expect(results[0]).toMatchObject({ literal: '苹裹', replacement: null, observation: expect.stringMatching(/国家规范[\s\S]*本社要求|本社要求[\s\S]*国家规范/) });
+    expect(results[0]!.observation).not.toContain('可能是不常用的写法');
+    expect(results[1]).toMatchObject({ replacement: null, observation: expect.stringContaining('仅限正文') });
+    expect(results[2]).toMatchObject({ replacement: '甲词' });
+    expect(selectedStandardTables(db,{ ...options,tableIds:[first,common] }).map(pin => pin.tableId)).not.toContain(second);
+  } finally { db.close(); }
 });

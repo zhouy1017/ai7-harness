@@ -1285,6 +1285,41 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
     await settled(renderer, 'span-settled');
 
+    // Finish the excerpt Book with an advisory. Its annotations stay with this Book while the next
+    // Book exercises punctuation decisions, pointer focus and the reading place of a dense paragraph.
+    at('local-common-word-check');
+    await assertRenderer(renderer, `(() => {
+      const block = [...document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')].find(p => !p.querySelector('.editorial-mark') && p.textContent.length < 600);
+      if (!block) return false;
+      window.__j05AdvisoryBlock = block.dataset.blockId;
+      return window.__j05.place(window.__j05AdvisoryBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'苹裹。');
+    })()`, 'local-advisory-edit');
+    await settled(renderer, 'local-advisory-edit-saved');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-advisory-review');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'local-advisory-review-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'local-advisory-open');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'local-advisory-ready');
+    await assertRenderer(renderer, `(() => {
+      const tables = [...document.querySelectorAll('dialog.review-sheet input[data-local-table]')];
+      return tables.length === 4 && tables.every(input => input.checked) && tables.some(input => input.parentElement.textContent.includes('现代汉语常用词表'));
+    })()`, 'local-enabled-library-tables-selected');
+    await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
+    await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelector('dialog.review-sheet')?.open===false`, 'local-advisory-complete');
+    await assertRenderer(renderer, `(async () => {
+      const run = (await window.ai7.inspectReviewWorkspace({reviewRunId:null})).run;
+      const note = run.findings.find(f => f.blockId === window.__j05AdvisoryBlock && f.quote === '苹裹');
+      return note?.output === 'annotation' && note.replacement === null && note.note.includes('辞书推荐（建议改）') && note.note.includes('可能是不常用的写法，请核对');
+    })()`, 'local-common-word-advisory');
+
+    const omitCommonWords = async () => {
+      const tableId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace =>
+        workspace.standardTables.find(table => table.kind === 'common-words')?.tableId ?? null)`);
+      requireJourney(tableId !== null, 'review-triage-common-table-offered');
+      const choice = 'dialog.review-sheet input[data-local-table="' + tableId + '"]';
+      await triageClick(renderer, choice);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.checked === false`, 'review-triage-common-table-deselected');
+    };
+
     // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
     // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.
     at('local-check-exact-sample1');
@@ -1311,6 +1346,7 @@ async function main() {
           await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'dispatch-reopen-local');
           await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'dispatch-local-sheet');
         }
+        await omitCommonWords();
         const before=await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length)`);
         await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'), start=sheet.querySelector('[data-review-action="start"]'), estimate=sheet.querySelector('[data-review-action="prepare"]'), chooser=sheet.querySelector('.dispatch-chooser'); if(!start||start.disabled||!estimate||estimate.disabled||!chooser)return false; const bounds=start.getBoundingClientRect(); if(bounds.left<0||bounds.right>innerWidth||bounds.top<0||bounds.bottom>innerHeight)return false; estimate.click();return true; })()`, 'dispatch-estimate-read-only');
         requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length)`)===before, 'dispatch-estimate-no-run');
@@ -1380,6 +1416,7 @@ async function main() {
         await triageClick(renderer,'.review-new-actions > details > summary');
         await triageClick(renderer,'[data-review-action="new-local-check"]');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'review-triage-start-ready');
+        await omitCommonWords();
         await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
         try {
           await waitFor(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewRunId!==undefined && card.dataset.reviewRunId!==${JSON.stringify(before)} && card.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3; })()`, 'review-triage-findings');

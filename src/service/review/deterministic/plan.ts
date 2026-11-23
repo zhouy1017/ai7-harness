@@ -8,6 +8,8 @@ import { validateHouseWordListSnapshot } from '../house-word-list.js';
 import { localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3 } from '../../procedures/preinstalled.js';
 import { STANDARD_TABLE_VERSION, TABLE_RULE_IDS, validLocalTables } from './tables.js';
 
+import { validLibraryPins, type LibraryPin } from './library-check.js';
+
 export const LOCAL_PLAN_SCHEMA = 'ai7.review.local-plan/1' as const;
 export const LOCAL_PLAN_SCHEMA_V2 = 'ai7.review.local-plan/2' as const;
 export interface LocalCheckBlock { readonly blockId: string; readonly position: number; readonly text: string }
@@ -42,10 +44,17 @@ export interface LocalCheckPlanV4 extends Omit<LocalCheckPlanV3, 'schema'> {
   readonly schema: 'ai7.review.local-plan/4';
   readonly procedureDefinition: ProcedureDefinitionDocument;
 }
-export type LocalCheckTablePlan = LocalCheckPlanV3 | LocalCheckPlanV4;
+export interface LocalCheckPlanV5 extends Omit<LocalCheckPlanV4, 'schema' | 'standardTableVersion'> {
+  readonly schema: 'ai7.review.local-plan/5';
+  readonly standardTables: readonly LibraryPin[];
+}
+export type LocalCheckTablePlan = LocalCheckPlanV3 | LocalCheckPlanV4 | LocalCheckPlanV5;
+function ruleVersion(schema: unknown, id: string) {
+  return schema === 'ai7.review.local-plan/5' && ['C01', 'C02', 'V01'].includes(id) ? 2 : 1;
+}
 export type AnyLocalCheckPlan = LocalCheckPlan | LocalCheckPlanV2 | LocalCheckTablePlan;
 export function isLocalTablePlan(plan: AnyLocalCheckPlan): plan is LocalCheckTablePlan {
-  return plan.schema === 'ai7.review.local-plan/3' || plan.schema === 'ai7.review.local-plan/4';
+  return plan.schema === 'ai7.review.local-plan/3' || plan.schema === 'ai7.review.local-plan/4' || plan.schema === 'ai7.review.local-plan/5';
 }
 export class LocalCheckError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'LocalCheckError'; }
@@ -81,9 +90,9 @@ export function validateLocalPlan(value: unknown): asserts value is LocalCheckPl
 function validateLocalFields(value: Record<string, unknown>, version: 1 | 2 | 3, ruleIds: readonly string[]): void {
   requireLocal(value.bookImportId === null || typeof value.bookImportId === 'string' && /^[0-9a-f-]{36}$/i.test(value.bookImportId));
   requireLocal(isRecord(value.procedure) && hasExactKeys(value.procedure, ['procedureId', 'version', 'digest']) &&
-    (value.schema === 'ai7.review.local-plan/4' || value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === version) &&
+    (value.schema === 'ai7.review.local-plan/4' || value.schema === 'ai7.review.local-plan/5' || value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === version) &&
     typeof value.procedure.digest === 'string' && /^[0-9a-f]{64}$/.test(value.procedure.digest));
-  requireLocal(canonicalJson(value.rules) === canonicalJson(ruleIds.map((id) => ({ id, version: 1 }))));
+  requireLocal(canonicalJson(value.rules) === canonicalJson(ruleIds.map((id) => ({ id, version: ruleVersion(value.schema, id) }))));
   requireLocal(['whole', 'chapters', 'selection'].includes(String(value.scope)) && validLocalOptions(value.options));
   requireLocal(version === 3 ? value.options.tables !== undefined : value.options.tables === undefined);
   const source = value.source;
@@ -139,13 +148,23 @@ export function freezeLocalPlanV4(input: Omit<LocalCheckPlanV4, 'schema' | 'rule
   const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
   validateLocalTablePlan(plan); return plan;
 }
+export function freezeLocalPlanV5(input: Omit<LocalCheckPlanV5, 'schema' | 'rules' | 'digest' | 'grammarVersion' | 'exclusionVersion'>): LocalCheckPlanV5 {
+  const schema = 'ai7.review.local-plan/5' as const;
+  const body = { schema, ...structuredClone(input), grammarVersion: 1 as const, exclusionVersion: 1 as const,
+    rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map(id => ({ id, version: ruleVersion(schema, id) })) };
+  const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
+  validateLocalTablePlan(plan);
+  return plan;
+}
 function validateLocalTablePlan(value: Record<string, unknown>): void {
-  const editable = value.schema === 'ai7.review.local-plan/4';
-  requireLocal(hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList', 'standardTableVersion', ...(editable ? ['procedureDefinition'] : [])]));
+  const library = value.schema === 'ai7.review.local-plan/5';
+  const editable = library || value.schema === 'ai7.review.local-plan/4';
+  requireLocal(hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList', library ? 'standardTables' : 'standardTableVersion', ...(editable ? ['procedureDefinition'] : [])]));
   const { digest, ...body } = value;
-  requireLocal((editable || value.schema === 'ai7.review.local-plan/3') && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && value.standardTableVersion === STANDARD_TABLE_VERSION);
+  requireLocal((editable || value.schema === 'ai7.review.local-plan/3') && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && (library ? validLibraryPins(value.standardTables) : value.standardTableVersion === STANDARD_TABLE_VERSION));
   validateLocalFields(value, 3, [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS]);
   requireLocal(isRecord(value.procedure) && isRecord(value.options) && validLocalTables(value.options.tables));
+  if (!library) requireLocal(value.options.tables.tableIds === undefined);
   if (editable) {
     requireLocal(isRecord(value.procedureDefinition) && value.procedureDefinition.id === value.procedure.procedureId &&
       value.procedureDefinition.version === value.procedure.version && sha256Hex(canonicalJson(value.procedureDefinition)) === value.procedure.digest);
@@ -162,7 +181,7 @@ function validateLocalTablePlan(value: Record<string, unknown>): void {
   }
 }
 export function validateAnyLocalPlan(value: unknown): asserts value is AnyLocalCheckPlan {
-  if (isRecord(value) && value.schema === 'ai7.review.local-plan/4') validateLocalTablePlan(value);
+  if (isRecord(value) && (value.schema === 'ai7.review.local-plan/4' || value.schema === 'ai7.review.local-plan/5')) validateLocalTablePlan(value);
   else if (isRecord(value) && value.schema === 'ai7.review.local-plan/3') validateLocalPlanV3(value);
   else if (isRecord(value) && value.schema === 'ai7.review.local-plan/2') validateLocalPlanV2(value);
   else validateLocalPlan(value);

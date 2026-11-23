@@ -6,7 +6,7 @@ import { navigation, rendererApi } from './navigation-generation.js';
 import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
-import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+import { standingBatchSuggestions } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { reviewSynthesisGenerateRow, reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -1443,7 +1443,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       local.append(el('p', 'field-note', `${technicalLayerVisible ? `${localBoundary}；` : ''}本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       if (technicalLayerVisible && Object.keys(run.localCheck.counts ?? {}).length > 0) {
         const counts = el('ul');
-        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v${count.version}：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
         local.append(counts);
       }
       if (run.localCheck.excluded.length > 0) {
@@ -1912,6 +1912,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (category.categoryId === 'local-text-check') batch.textContent = '批量采纳机械修正';
       batch.setAttribute('aria-expanded', ui.batch?.categoryId === category.categoryId ? 'true' : 'false');
       holdForWork(batch);
+      if (category.categoryId === 'local-text-check' && run.localCheck?.strengths?.length) {
+        heading.append(el('span', 'field-note', run.localCheck.strengths.map(row => row.label + ' ' + row.count + ' 条').join(' · ')));
+      }
       heading.append(batch);
     }
     const fold = el('details', 'review-category-fold');
@@ -2773,10 +2776,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         after = opened.findings.at(-1)!.ordinal;
       }
       const suggestions = pending.filter((finding) => finding.status === 'pending' && finding.output === 'change-suggestion');
-      const exact = suggestions.filter((finding) => !reviewFindingHasGuessedAnchor(finding.note) && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null);
-      // One batch cannot decide conflicting ranges; leave every overlapping suggestion for individual review.
-      const standing = category.categoryId === 'local-text-check' ? exact.filter((finding) => !exact.some((other) => other !== finding && other.blockId === finding.blockId &&
-        other.fromGrapheme < finding.toGrapheme && finding.fromGrapheme < other.toGrapheme)) : exact;
+      const standing = standingBatchSuggestions(suggestions, category.categoryId === 'local-text-check');
       const listed = standing.slice(0, MAX_BATCH_APPLY_SUGGESTIONS);
       ui.batch = {
         categoryId: category.categoryId,
@@ -2961,7 +2961,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       houseWordListRequest: 0,
       houseWordListLoading: false,
       localOptions: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
-        tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
+        tables: { characters: true, variantWords: true, ...(projection.standardTables ? { tableIds: projection.standardTables.map(t => t.tableId) } : {}), bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
       seriesChoices,
       recommendation: new ProcedureRecommendationSelection(),
@@ -3154,7 +3154,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
       el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点和无附加条件的异形词可生成机械修正，其余为批注；排除代码、网址和邮件等。'));
     const tables = state.localOptions.tables!;
-    for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
+    if (workspace.standardTables) for (const table of workspace.standardTables) {
+      const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox';
+      input.checked = tables.tableIds?.includes(table.tableId) ?? true;
+      input.dataset['localTable'] = table.tableId;
+      input.addEventListener('change', () => {
+        const ids = new Set(state.localOptions.tables!.tableIds);
+        if (input.checked) ids.add(table.tableId); else ids.delete(table.tableId);
+        state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, tableIds: [...ids] } };
+        updateSheet();
+      });
+      row.append(input, el('span', undefined, table.name + '（' + table.label + '）')); localOptions.append(row);
+    }
+    else for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
       const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox'; input.checked = tables[key]; input.dataset['localTable'] = key;
       input.addEventListener('change', () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, [key]: input.checked } }; updateSheet(); });
       row.append(input, el('span', undefined, label)); localOptions.append(row);
@@ -3426,7 +3438,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         if (blocked !== null) control.setAttribute('aria-describedby', problem.id);
         else control.removeAttribute('aria-describedby');
       }
-      if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
+      if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && (state.localOptions.tables?.tableIds?.length === 0 || !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords) && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled || state.launchPending === true;
       start.textContent = workspace.connectivity === 'offline' && !localOnly(state) ? '联网后开始任务' : '开始审阅';
       close.disabled = state.launchPending === true;

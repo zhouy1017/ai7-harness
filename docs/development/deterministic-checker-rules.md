@@ -42,7 +42,11 @@ Cards use the existing disposition, explicit annotation-to-suggestion conversion
 
 ## Selected offline tables and mechanical Apply
 
-> R5 replaces the built-in tables with the 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)): C01, C02 and V01 gain version 2, which reads the enabled library tables pinned by table, version and digest, and the default 常用词表 adds 「请核对」 annotations (slice R5-L3); `standard-data.json` becomes the pre-installed seed (R5-L1, R5-L5). Until those slices land, this section describes the delivered behaviour; version 1 stays readable for older results.
+Local plans prepared with table options use `ai7.review.local-plan/5`. Each selected, enabled library table contributes its current immutable version ID, digest, name and edition. The check reads only applied entries of those versions. Deletion refuses execution of a prepared check. Each result keeps its entry evidence and identifies a deleted table on the finding. Saved version 3 and 4 plans retain their pre-installed version 1 meanings.
+
+C01/v2 checks membership across the selected character lists. C02/v2 annotates mapped character forms. V01/v2 offers the recommended word form for an unconditional agreement. Conditions and disagreements produce annotations with each entry’s strength, forms and source. A Book term takes priority at its occurrence.
+
+For common words, V01 checks runs of Han characters. An isolated two-character run is one candidate. In longer runs the Chinese word segmenter supplies candidates of two to eight characters. A listed word is accepted. An unlisted candidate gets one 请核对 annotation if changing exactly one character to another with the same tone-bearing Unicode 17.0.0 Unihan `kMandarin` reading yields a listed word. A character finding, listed word form or Book term at an overlapping position suppresses that advisory. The annotation carries no replacement.
 
 Local@3 freezes `ai7.review.local-plan/3`, result/3 and stage-artifact/3 beside the earlier formats. The source revision, import boundary, scope, all options, complete selected House document/pin, Book term rows and built-in table version 1 are bound by the plan digest. It uses the existing local-stage ledger and recovery chain, without a model, credential, network, new execution owner or policy change.
 

@@ -2748,8 +2748,9 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
-      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `ai7.review.local-plan/${local.options.tables === undefined ? '1' : '3'} · ${local.digest} · ${local.paragraphs} 个冻结段落` },
-        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处${local.options.tables === undefined ? '' : ` · 规范字表 ${local.options.tables.characters ? '启用' : '关闭'} · 异形词 ${local.options.tables.variantWords ? '启用' : '关闭'} · 本社词表 ${local.options.tables.houseWordList === null ? '未选择' : '已冻结选择'} · 本书词表 ${local.options.tables.bookTerms.length} 条`}` }]),
+      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `${local.schema} · ${local.digest} · ${local.paragraphs} 个冻结段落` },
+        ...(local.standardTables === undefined ? [] : [{ key: 'local-standard-tables', label: '本次字表与词表', value: local.standardTables.map(pin => pin.name + '（' + pin.label + '） · ' + pin.digest).join('；') || '未选择' }]),
+        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处${local.options.tables === undefined ? '' : `${local.standardTables === undefined ? ` · 规范字表 ${local.options.tables.characters ? '启用' : '关闭'} · 异形词 ${local.options.tables.variantWords ? '启用' : '关闭'}` : ` · 本次选用 ${local.standardTables.length} 张字表与词表`} · 本社词表 ${local.options.tables.houseWordList === null ? '未选择' : '已冻结选择'} · 本书词表 ${local.options.tables.bookTerms.length} 条`}` }]),
       ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
         : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
           value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
