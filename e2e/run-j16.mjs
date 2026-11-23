@@ -1451,7 +1451,7 @@ async function main() {
     requireJourney(typeof selectedWords === 'string' && selectedWords.length === 20, 'dialogue-selected-words');
     await writeAnswerHold(2);
     await openSelectionMenu(renderer, askBlock, 2, 22, 'dialogue-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('ask-on-selection'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段提问…') && item.textContent.includes('对话，不改稿件'); })()`, 'dialogue-menu-item');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('ask-on-selection'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('问 AI 助手') && item.textContent.includes('带着选中文字提问或讨论，不直接改稿。'); })()`, 'dialogue-menu-item');
     await assertRenderer(renderer, `(() => { const item = window.__j16.item('ask-on-selection'); item.click(); return true; })()`, 'dialogue-menu-choose');
     await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'ask-about-selection'`, 'dialogue-composer');
     await assertRenderer(renderer, `(() => { const composer = window.__j16.composer(); return composer.getAttribute('aria-label') === '就这段提问' && composer.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)} && composer.querySelector('[data-mark-form-note]')?.textContent === '只发送所选文字和你的问题，不改稿件。' && composer.querySelector('[data-mark-action="submit"]')?.textContent === '提问'; })()`, 'dialogue-composer-words');
