@@ -153,9 +153,9 @@ export const SAVE_MENU = Object.freeze({
   actions: '#context-actions details[data-save-menu="manuscript"] .editor-save-menu-body > button',
 });
 
-/** 导入新版本… sits above 导出… in the menu: these two, in this order, are the menu's own buttons. */
+/** 导入新版本… sits above 导出交付物… in the menu: these two, in this order, are the menu's own buttons. */
 export function saveMenuActionsInOrder() {
-  return `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(SAVE_MENU.actions)}), (node) => node.textContent)) === ${JSON.stringify(JSON.stringify(['导入新版本…', '导出…']))}`;
+  return `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(SAVE_MENU.actions)}), (node) => node.textContent)) === ${JSON.stringify(JSON.stringify(['导入新版本…', '导出交付物…']))}`;
 }
 
 /** 稿件 → 「已保存 ▾」 → 导入新版本…, by pointer or by keyboard, then 取消导入 on the page it opens. */
@@ -170,7 +170,7 @@ export async function newVersionFromSaveMenu(io, how, bookId, name) {
   await io.assertRenderer(io.renderer, saveMenuActionsInOrder(), `${name}-menu-order`);
   if (how === 'pointer') await pressReachable(io, SAVE_MENU.entry, `${name}-entry`);
   else {
-    // The milestone form's own summary comes first, then 导入新版本…, then 导出….
+    // The milestone form's own summary comes first, then 导入新版本…, then 导出交付物….
     await pressKey(io.renderer, 'ArrowDown');
     await pressKey(io.renderer, 'ArrowDown');
     await io.assertRenderer(io.renderer, `document.activeElement === document.querySelector(${JSON.stringify(SAVE_MENU.entry)})`, `${name}-entry-focus`);
