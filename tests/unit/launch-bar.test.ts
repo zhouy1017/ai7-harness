@@ -70,6 +70,21 @@ function tick(materialId: string): void {
   node.dispatchEvent({ type: 'change', bubbles: true });
 }
 
+it.each([false, true])('shows the service estimate before launching, keeping tokens only in developer mode (%s)', async developer => {
+  setTechnicalLayerVisible(developer);
+  try {
+    const { api, launch } = launchApi('launchWritingTask');
+    const sentence = '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；按最近同类任务，约 6 分钟。';
+    const previewTaskLaunch = vi.fn(async () => ({ steps: [], scope: '', units: 12, reference: [], send: '', usage: '上限 50000 tokens', adaptations: [],
+      estimate: { parts: 12, fewestRequests: 13, more: ['retry'], ceiling: true, durationMs: 360000, sentence } }));
+    const { bar } = await mount({ ...api, previewTaskLaunch }, { bookId: 'book', operation: 'launchWritingTask', title: '写作', input: WRITING_REQUEST });
+    await bar.openPlan();
+    expect(miniDocument.querySelector('.task-launch-estimate-sentence')?.textContent).toBe(sentence);
+    expect(miniDocument.querySelector('.task-launch-estimate')?.textContent.includes('50000 tokens')).toBe(developer);
+    expect(launch).not.toHaveBeenCalled();
+  } finally { setTechnicalLayerVisible(true); }
+});
+
 it.each(OPERATIONS)('builds the %s input from the run options and the remembered choice, with a fresh clientCommandId after a change', async operation => {
   const kind = LEDGER_TASK_LAUNCH_KINDS[operation];
   const remembered = { modelConnectionId: 'connection', modelId: 'model', reasoningEffort: 'high' };

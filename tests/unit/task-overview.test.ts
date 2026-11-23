@@ -8,7 +8,7 @@ import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js'
 import { describe, expect, it, vi } from 'vitest';
 import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
 import { composeTaskOverview, estimateTaskStarts, controlOverviewTasks } from '../../src/service/task-overview.js';
-import type { BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
+import type { BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi, TaskWorkProjection } from '../../src/shared/protocol.js';
 
 function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttentionItemProjection['state'], id: string): GlobalAttentionItemProjection {
   return { itemId: id, group, state, blocked: false, at: new Date().toISOString(), book: { bookId: 'book', title: '任务总览' },
@@ -16,6 +16,53 @@ function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttent
     target: { kind: 'analysis', bookId: 'book', taskIntentId: id }, technical: [{ key: 'run-record', label: '运行', value: id }] };
 }
 describe('task overview', () => {
+  it('ticks the same work on the global page and Book panel, retaining the nodes through pauses and resumes', async () => {
+    const uninstall = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);
+    vi.stubGlobal('window', { setInterval, clearInterval, setTimeout, clearTimeout });
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    let work: TaskWorkProjection = { workedMs: 60000, workingSince: new Date().toISOString(), finished: null };
+    const projection = composeTaskOverview({ groups: [{ key: 'active', items: [task('active', 'analysis-running', 'running')], total: 1 }], actionableCount: 0, running: true, processing: { state: 'local' } }, 2, () => null);
+    const api = { inspectTaskOverview: async () => ({ ...projection, groups: projection.groups.map(group => ({ ...group, items: group.items.map(item => ({ ...item, work })) })) }),
+      inspectBookTasks: async () => ({ bookId: 'book', running: true, groups: [] }), inspectBaselineAnalysis: async () => { throw new Error('no analysis'); } } as unknown as RendererApi;
+    const root = document.createElement('section');
+    const overview = mountTaskOverview({ root, api, setStatus: vi.fn(), openTarget: vi.fn(), openBook: vi.fn(), openResult: vi.fn() });
+    const panel = mountTaskPanel({ api, setStatus: vi.fn(), errorMessage: () => '', parked: () => null } as unknown as Parameters<typeof mountTaskPanel>[0]);
+    miniDocument.body.append(root as never, panel.element as never);
+    try {
+      panel.show('book'); await vi.advanceTimersByTimeAsync(0);
+      const nodes = [root, panel.element].map(host => host.querySelector('.task-overview-usage')!);
+      expect(nodes.map(node => node.textContent)).toEqual(['用时 1 分 0 秒', '用时 1 分 0 秒']);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(nodes.map(node => node.textContent)).toEqual(['用时 1 分 3 秒', '用时 1 分 3 秒']);
+      work = { workedMs: 63000, workingSince: null, finished: null };
+      overview.refresh(); panel.refresh(); await vi.advanceTimersByTimeAsync(10000);
+      expect([root, panel.element].map(host => host.querySelector('.task-overview-usage')!.textContent)).toEqual(['用时 1 分 3 秒', '用时 1 分 3 秒']);
+      work = { ...work, workingSince: new Date().toISOString() };
+      overview.refresh(); panel.refresh(); await vi.advanceTimersByTimeAsync(2000);
+      expect([root, panel.element].map(host => host.querySelector('.task-overview-usage')!.textContent)).toEqual(['用时 1 分 5 秒', '用时 1 分 5 秒']);
+      for (const host of [root, panel.element]) expect(host.textContent).not.toContain('已用时');
+    } finally { overview.destroy(); panel.stop(); expect(vi.getTimerCount()).toBe(0); vi.useRealTimers(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); }
+  });
+
+  it.each([false, true])('shows exact ended work and the recorded model, omitting absent work (Book panel: %s)', inBook => {
+    const uninstall = installMiniDom(); setTechnicalLayerVisible(false);
+    const original = task('recent', 'analysis-completed', 'finished');
+    const projection = composeTaskOverview({ groups: [{ key: 'recent', items: [original], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
+    const item = { ...projection.groups[4]!.items[0]!, usage: { calls: 999, elapsed: 999999 },
+      work: { workedMs: 45000, workingSince: null, finished: { requests: 12, modelLabel: 'recorded-model@high' } } };
+    try {
+      const card = taskOverviewCard(item, vi.fn(), inBook);
+      expect(card.querySelector('.task-overview-usage')?.textContent).toBe('用时 45 秒 · 12 次模型调用');
+      expect(card.querySelector('.task-overview-model')?.textContent).toBe('recorded-model@high');
+      expect(card.textContent).not.toMatch(/tokens|约 .*次调用|999/u);
+      const { work: _work, ...withoutWork } = item;
+      for (const bare of [withoutWork, { ...withoutWork, work: null }]) expect(taskOverviewCard(bare, vi.fn(), inBook).querySelector('.task-overview-usage')).toBeNull();
+      const unknown = taskOverviewCard({ ...item, work: { ...item.work, finished: { requests: null, modelLabel: null } } }, vi.fn(), inBook);
+      expect(unknown.querySelector('.task-overview-usage')?.textContent).toBe('用时 45 秒');
+      expect(unknown.querySelector('.task-overview-model')).toBeNull();
+    } finally { setTechnicalLayerVisible(true); uninstall(); }
+  });
+
   it('keeps running task more and exact summary focus through two changed polls (#1375)', async () => {
     const uninstall = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);
     vi.stubGlobal('window', { setInterval, clearInterval });

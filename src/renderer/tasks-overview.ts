@@ -7,7 +7,7 @@ import { showToast } from './components/toast.js';
 import { menuPanel } from './components/controls.js';
 import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
 import { attentionSentence, globalAttentionTimeLine } from './global-attention-labels.js';
-import { TASK_BAR_CANCELLED, TASK_BAR_CANCELLED_NOTE } from './task-drawer-labels.js';
+import { TASK_BAR_CANCELLED, TASK_BAR_CANCELLED_NOTE, taskWorkLine } from './task-drawer-labels.js';
 import { taskCardView, TASK_PAGE_GROUP_LABELS, TASK_PAGE_GROUPS, TASK_PANEL_GROUP_LABELS, TASK_PANEL_GROUPS, type TaskCardAction } from './task-card-view.js';
 export type { TaskCardAction } from './task-card-view.js';
 const BOOK_FILTER_BUTTONS = 6;
@@ -25,10 +25,10 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const line = el('div', 'task-overview-card-line', attentionSentence(view.line)); line.title = line.textContent ?? '';
   const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
   const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
-  if (item.usage !== null) {
-    body.append(el('span', 'task-overview-usage', `用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`));
-  }
-  if (item.attention.modelLabel) body.append(el('span', 'task-overview-model', item.attention.modelLabel));
+  const work = taskWorkLine(item.work, Date.now());
+  if (work !== null) body.append(el('span', 'task-overview-usage', work));
+  const modelLabel = item.work?.finished ? item.work.finished.modelLabel : item.attention.modelLabel;
+  if (modelLabel) body.append(el('span', 'task-overview-model', modelLabel));
   if (view.pageGroup === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
   function actionButton(entry: (typeof view.actions)[number]): HTMLButtonElement {
@@ -289,7 +289,17 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     if (event.key === 'Enter' || event.key === ' ' || event.key === 'Delete') { event.preventDefault(); const offered = new Set(taskCardView(item).actions.map((entry) => entry.action)); if (event.key === 'Enter') act(item, 'open'); else if (event.key === 'Delete' && offered.has('cancel')) act(item, 'cancel'); else if (event.key === ' ' && (offered.has('pause') || offered.has('resume'))) act(item, offered.has('pause') ? 'pause' : 'resume'); }
   }
   const visible = (): void => { if (document.visibilityState === 'visible') refresh(); };
+  // Only the text ticks; open menus, keyboard focus and the service's polling cadence stay intact.
+  const workClock = window.setInterval(() => {
+    if (projection === null) return;
+    const items = new Map(projection.groups.flatMap(group => group.items).map(item => [item.itemId, item]));
+    for (const card of host.querySelectorAll<HTMLElement>('[data-task-item]')) {
+      const work = items.get(card.dataset['taskItem']!)?.work;
+      const line = card.querySelector<HTMLElement>('.task-overview-usage');
+      if (line && work?.workingSince != null) line.textContent = taskWorkLine(work, Date.now());
+    }
+  }, 1000);
   document.addEventListener('visibilitychange', visible);
   options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 2000); refresh();
-  return { refresh, showStart() { void openSheet(); }, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
+  return { refresh, showStart() { void openSheet(); }, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); window.clearInterval(workClock); document.removeEventListener('visibilitychange', visible); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
 }

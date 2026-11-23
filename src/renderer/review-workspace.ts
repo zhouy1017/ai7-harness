@@ -20,7 +20,7 @@ import { hideToast, showToast } from './components/toast.js';
 import { reportResult, type StatusSetter } from './notifications.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
-import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate, reviewReadFailedLine, reviewPartMoreName,
+import { reviewExcludedHeading, reviewConsequenceEstimate, reviewReadFailedLine, reviewPartMoreName,
   REVIEW_STATISTICS_TOTALS_WHOLE, REVIEW_PART_MORE, REVIEW_PART_REREAD, REVIEW_PAGE_FAILED, REVIEW_REREAD } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
@@ -233,7 +233,7 @@ export interface ReviewWorkspaceSurface {
 
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
-  'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
+  'getModelServiceSettings' | 'previewTaskLaunch' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'getTaskPlanPage' | 'searchReferableMaterials' |
   'generateReviewReport' | 'generateReviewSynthesis' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'recordChangeSuggestionDecision' | 'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
@@ -501,6 +501,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     capabilityFindingId: null,
   };
   let sheetState: SheetState | null = null;
+  let estimateGeneration = 0;
   /** The Run whose 取消任务 waits for its confirmation (Issue #64, S29b); `null` while none does. */
   let scopeCancel: string | null = null;
   let sheetOpening = false;
@@ -3318,7 +3319,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const problem = el('p', 'review-problem review-sheet-problem');
     problem.id = uid('sheet-problem');
     problem.setAttribute('role', 'alert');
-    const estimateNotice = el('p', 'review-estimate'); estimateNotice.setAttribute('role', 'status');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
     const start = actionButton('start', 'primary', () => void startOrEstimateRun(state, 'start'));
@@ -3342,7 +3342,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     timing.value = state.startWhen ?? 'now';
     timing.addEventListener('change', () => { state.startWhen = timing.value === 'when-online' ? 'when-online' : 'now'; delete state.clientCommandId; });
     const timingRow = el('label', undefined, '开始时间'); timingRow.append(timing, el('small', undefined, '只安排这一次审阅的开始时间。'));
-    const planContent = el('div'); planContent.append(consequences, estimateNotice, prepare);
+    const planContent = el('div'); planContent.append(consequences, prepare);
     prepare.textContent = '更新计划';
     const primaryActions = createLaunchBarPresentation(chooser.element, start, { title: '选项', content: timingRow }, planContent);
     syncLaunchModelSettings(primaryActions);
@@ -3352,12 +3352,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(choices.element, localOptions, scopes, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
-    for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { estimateGeneration += 1; delete state.clientCommandId; delete state.estimate; sheetUpdate(); });
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
-      estimateNotice.textContent = state.estimate ?? '';
-      estimateNotice.hidden = state.estimate === undefined;
       const preparing = state.launchPending === true || state.choicePending === true;
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
@@ -3383,7 +3381,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const selected = offeredCategories.filter((entry) => effective.includes(entry.categoryId));
       const estimate = reviewConsequenceEstimate(selected, state.scope, workspace, { from, to });
       readValue.textContent = estimate.read; sendValue.textContent = estimate.send;
-      notDoValue.textContent = estimate.notDo; costValue.textContent = estimate.cost;
+      notDoValue.textContent = estimate.notDo; costValue.textContent = state.estimate ?? estimate.cost;
       const networkBlocked = selected.some((entry) => entry.networkUnavailable === true);
       networkNotice.hidden = !networkBlocked;
       networkSettings.hidden = !selected.some((entry) => entry.searchEngine) || options.openSearchSettings === undefined;
@@ -3419,6 +3417,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   async function updateExecutionChoice(state: SheetState, config: RuntimeExecutionConfig): Promise<void> {
     state.executionConfig = config; state.rememberedChoice = false;
+    estimateGeneration += 1; delete state.estimate;
     delete state.clientCommandId;
     const ticket = state.choiceTicket = (state.choiceTicket ?? 0) + 1;
     state.choicePending = true;
@@ -3472,17 +3471,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       reviewFrom: state.from, reviewTo: state.to }).catch(() => options.setStatus('未能记住本次审阅设置。', 'error'));
     // The 核查力度 in use is kept only when 事实核查 runs, and only by 先看计划 or 开始审阅 (取消 keeps nothing).
     if (categoryIds.includes('factual-review')) void rememberEvidenceAssuranceLevel(state.evidenceAssuranceLevel).catch(() => options.setStatus('未能记住本次审阅设置。', 'error'));
+    const previewGeneration = mode === 'preview' ? ++estimateGeneration : null;
     try {
       if (mode === 'preview') {
-        const bounds = sheetChapters(projection, state);
-        const from = bounds.from;
-        const to = bounds.to;
-        const workspace = projection;
-        const estimates = workspace.categories.filter(category => categoryIds.includes(category.categoryId)).map(category => {
-          const count = estimateReviewCalls(category, state.scope, workspace.scopeUnitCounts, from && to ? { startPosition: from.position, endPosition: to.endPosition } : null);
-          return `${category.label}：${count === null ? '按所选范围估计' : `约 ${count} 次调用`}`;
-        });
-        state.estimate = estimates.join('；');
+        const preview = await api.previewTaskLaunch({ launch: { operation: 'launchReviewRun', input: {
+          ...request.launch, clientCommandId: crypto.randomUUID(), executionConfig: state.executionConfig ?? {}, rememberedChoice: state.rememberedChoice ?? false,
+        } } });
+        if (destroyed || state.dismissed || sheetState !== state || previewGeneration !== estimateGeneration) return;
+        state.estimate = preview.estimate?.sentence ?? '用时暂无可靠估计。';
         state.problem = null;
         sheetUpdate();
         options.setStatus('已显示审阅估计。', 'success');
@@ -3517,6 +3513,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(result.launchNotice ?? REVIEW_STATUS_LINES.started, 'success');
 
     } catch (error) {
+      if (mode === 'preview' && (state.dismissed || sheetState !== state || previewGeneration !== estimateGeneration)) return;
       state.launchPending = false;
       if (destroyed) return;
       if (state.dismissed) {

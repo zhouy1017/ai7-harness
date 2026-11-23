@@ -1,7 +1,7 @@
 import type { GlobalAttentionStateKey, TaskOverviewItemProjection } from '../shared/protocol.js';
 import { globalAttentionNextStepLine, globalAttentionReason, globalAttentionStateLabel } from './global-attention-labels.js';
 import { serviceWords } from './service-wording.js';
-import { technicalWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import { DIALOGUE_ACTIONS } from './dialogue-labels.js';
 import { TASK_BAR_CANCEL_RUN, TASK_BAR_PROXY_SETTINGS, TASK_BAR_REDO, TASK_BAR_RESUME, TASK_BAR_VIEW_UNCONFIRMED } from './task-drawer-labels.js';
 
@@ -68,7 +68,7 @@ function line(item: TaskOverviewItemProjection, group: TaskPageGroup): string {
   const state = item.attention.state;
   if (state === 'analysis-running' || state === 'review-running') {
     // Ordinary mode reads a share of the work, never the reading ranges counted (Issue #1431 item 106).
-    return item.progress === null ? '正在处理稿件。' : `${technicalWords(`已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围`, `已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`)}${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
+    return item.progress === null ? '正在处理稿件。' : `${technicalWords(`已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围`, `已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`)}${!technicalLayerVisible || item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
   }
   if (group === 'queued' && item.queuePosition !== null) return `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
   // Only the editor's own pause says 「你」: a pause AI7 made at its close, an interruption or a yield say why in the record's words.
