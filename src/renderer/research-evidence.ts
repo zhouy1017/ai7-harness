@@ -17,6 +17,7 @@ import {
   sourceCaptureLine,
   sourceFindingLine,
   sourceName,
+  findingSourceLine,
   type FindingSourceEntry,
   sourceStalenessLine,
   sourceTranslationView,
@@ -218,6 +219,25 @@ export function findingEvidenceList(sources: ReadonlyArray<FindingSourceEntry>, 
       open.addEventListener('click', () => openSource(evidenceId));
       item.append(open);
     }
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+/** Retention commits before verification; its standalone finding keeps the retained row's own safe link controls. */
+export function findingRetainedSources(projection: ResearchEvidenceBookProjection, finding: { blockId: string; quote: string }, bookId: string): HTMLElement | null {
+  const origin = projection.findings.find(entry => entry.blockId === finding.blockId && entry.quote === finding.quote);
+  if (origin === undefined) return null;
+  const records = projection.records.filter(record => record.findingId === origin.findingId && record.runRecordId === origin.runRecordId);
+  if (records.length === 0) return null;
+  const section = el('section', 'finding-evidence'); section.dataset['evidenceCount'] = String(records.length);
+  const list = el('ul', 'finding-evidence-list');
+  for (const record of records) {
+    const item = el('li', 'finding-evidence-source'); item.dataset['evidenceId'] = record.evidenceId;
+    item.append(el('p', 'review-finding-source', findingSourceLine(record, projection.staleAfterDays, localInstantLabel)),
+      el('p', 'research-evidence-url technical-identity', record.url),
+      sourceLinkControls({ address: record.url, identity: { bookId, evidenceId: record.evidenceId } }));
     list.append(item);
   }
   section.append(list);

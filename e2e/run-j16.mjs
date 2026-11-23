@@ -5,7 +5,7 @@ import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable } from './task-card-reach.mjs';
 import { setDeveloperMode } from './ordinary-pages.mjs';
-import { tabTo, pressKey } from './import-entry-stages.mjs';
+import { tabTo, pressKey, pressReachable as pressWithoutFrames } from './import-entry-stages.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -444,9 +444,19 @@ async function openManuscriptOf(renderer, bookId, name) {
 }
 
 /** 任务 on the manuscript's right edge: the Book's panel in the side slot, read once it is ready. */
-async function openPanel(renderer, name) {
-  await pressReachable(renderer, waitFor, requireJourney, '[data-edge-entry="tasks"]', `${name}-entry`);
+async function openPanel(renderer, name, { heldFrames = false } = {}) {
+  if (heldFrames) await assertRenderer(renderer, `Array.isArray(globalThis.__ai7HeldCompletionFrames)`, `${name}-held-frame-contract`);
+  const press = (selector, label) => heldFrames
+    ? pressWithoutFrames({ renderer, waitFor, assertRenderer }, selector, label)
+    : pressReachable(renderer, waitFor, requireJourney, selector, label);
+  const view = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer && !drawer.hidden ? drawer.dataset.taskDrawerView : null; })()`);
+  if (view !== null && view !== 'panel') {
+    await press('#task-drawer [data-task-drawer-control="close"]', `${name}-close-covering-drawer`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true && document.getAnimations().every(a=>a.playState!=='running')`, `${name}-drawer-closed`);
+  }
+  if (view !== 'panel') await press('[data-edge-entry="tasks"]', `${name}-entry`);
   const panel = await waitForPanel(renderer, (panel) => panel.state === 'ready', `${name}-panel`);
+  await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${name}-panel-settled`);
   await assertRenderer(renderer, `document.querySelectorAll('#task-drawer .task-panel-launch > summary').length===1 && !document.querySelector('#task-drawer [data-task-overview-start]')`, `${name}-one-launcher`);
   return panel;
 }
@@ -1990,7 +2000,7 @@ async function main() {
     const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
     requireJourney(returnBefore === null, 'selection-task-gone-no-return-before', returnBefore);
     const goneLoadsBefore = await windowLoads();
-    const gonePanel = await openPanel(renderer, 'selection-task-gone');
+    const gonePanel = await openPanel(renderer, 'selection-task-gone', { heldFrames: true });
     const goneCard = cardsOf(gonePanel, 'recent').find((card) => card.state === 'review-completed');
     requireJourney(goneCard !== undefined && goneCard.title === '审阅 · 第 1 次 · 所选段落' && goneCard.actions.some(([key, label, state]) => key === 'jump' && label === '跳到所选文字' && state === 'enabled'), 'selection-task-gone-card', gonePanel);
     await cardAction(renderer, 'review-completed', 'jump', 'selection-task-gone-jump');
