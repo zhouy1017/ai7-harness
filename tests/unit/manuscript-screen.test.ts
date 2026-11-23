@@ -508,7 +508,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
+      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新', '新建 / 导入衍生稿件…', '管理全部衍生稿件（0）']);
     app.showing?.destroy();
   });
 
