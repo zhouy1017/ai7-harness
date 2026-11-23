@@ -7,7 +7,8 @@ import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { StoreError, requireStore } from '../store-records.js';
 import { installPreinstalledStandardTables, PREINSTALLED_TABLE_KEYS, requireStandardTableEntries, standardTableDigest } from '../standard-tables.js';
 import { standardsTable, type FlashTaskResult, type StandardRow } from '../fast-role/flash-task-contract.js';
-import { standardTableInputs, type StandardTableOperations as Ops, type StandardTableRow as Row, type StandardTableVersion,
+import { standardTableInputs } from './schemas.js';
+import { type StandardTableOperations as Ops, type StandardTableRow as Row, type StandardTableVersion,
   type StandardTablePreview, type StandardTableConversionReport, type StandardTablesProjection, type StandardTableInspection, type StandardTableDiff } from '../../shared/protocol/standard-tables.js';
 import { checkedRows, convertTable, counts, holdConflicts, MAX_TABLE_BYTES, rowTuple } from './conversion.js';
 

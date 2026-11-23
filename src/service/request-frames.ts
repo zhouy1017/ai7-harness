@@ -1,4 +1,4 @@
-import { standardTableInputs } from '../shared/protocol/standard-tables.js';
+import { standardTableInputs } from './standard-tables/schemas.js';
 import { validBookFindingsFilters } from './book-findings.js';
 import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';

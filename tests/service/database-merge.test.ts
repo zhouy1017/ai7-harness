@@ -239,10 +239,12 @@ async function richMergeFixture() {
   const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   let book: { bookId: string; manuscriptId: string; branchId: string };
   let before: unknown;
+  let bookBefore: unknown;
   let emptyId: string;
   let foundBefore: number;
   try {
     book = await richBook(source);
+    bookBefore = readings(source, book);
     emptyId = emptyBook(source, '空白之书', 'AI7-0001');
     // Issue #922: a Custom Analysis Dimension belongs to the house, so a Book merge must leave its document history behind.
     const dimension = source.saveCustomAnalysisDimension({ dimensionId: null, title: '合并维度', questionTemplate: '本单元从哪里开始？' }).dimensions[0]!;
@@ -264,7 +266,7 @@ async function richMergeFixture() {
     target.close();
   }
 
-  return { book, before, emptyId, foundBefore };
+  return { book, before, bookBefore, emptyId, foundBefore };
 }
 
 function ownedFiles(bookId: string) {
@@ -341,7 +343,7 @@ describe('合并图书 over two real stores', () => {
   }, 180_000);
 
   it('merges a Book with every record it owns, beside a Book of the same title, and reads it as the store it came from', async () => {
-    const { book, before, emptyId, foundBefore } = await richMergeFixture();
+    const { book, before, bookBefore, emptyId, foundBefore } = await richMergeFixture();
     const plan = withAttached(otherRoot, roots.dataRoot, (db) => planMerge(db));
     expect(plan.books.map((entry) => [entry.bookId, entry.title, entry.status, entry.internalNumberCleared])).toEqual([
       [book.bookId, TITLE, 'same-title', false],
@@ -361,7 +363,7 @@ describe('合并图书 over two real stores', () => {
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual([TITLE, TITLE, '本机之书', '空白之书'].sort());
-      expect(readings(target, book)).toEqual(before);
+      expect(readings(target, book)).toEqual(bookBefore);
       expect(found(target, book, '合并前')).toBe(foundBefore);
       expect(foundBefore).toBeGreaterThan(0);
       expect(target.inspectSeriesList().series).toEqual([]);

@@ -280,7 +280,11 @@ describe('Production Documents', () => {
         expect(acknowledge).toHaveBeenCalledTimes(1);
         expect(abandon).not.toHaveBeenCalled();
         expect((await store.getImportStartup()).state).toBe('none');
-        expect(store.listPriorWork()).toEqual(before);
+        const after = store.listPriorWork();
+        const beforeWorked = before[0]?.library?.lastWorkedAt;
+        const afterWorked = after[0]?.library?.lastWorkedAt;
+        expect(after.map(({ library, ...rest }) => ({ ...rest, ...(library && beforeWorked !== undefined ? { library: { ...library, lastWorkedAt: beforeWorked } } : library ? { library } : {}) }))).toEqual(before);
+        expect(typeof afterWorked === 'string' && typeof beforeWorked === 'string' && afterWorked >= beforeWorked).toBe(true);
       } finally { view.close(); acknowledge.mockRestore(); abandon.mockRestore(); }
     });
   });

@@ -201,7 +201,8 @@ async function ensureClosedOutputs() {
     !preload.includes('node:http') &&
       !preload.includes('node:net') &&
       !preload.includes('installNodeNetworkDenial') &&
-      preload.includes('contextBridge'),
+      preload.includes('contextBridge') &&
+      [...preload.matchAll(/\brequire\(([^)]+)\)/gu)].every((match) => match[1] === '"electron"'),
     'Sandboxed preload gained Node network authority or lost its narrow bridge.',
   );
   requireBuild(

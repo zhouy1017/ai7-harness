@@ -3,7 +3,8 @@ import { SaxesParser } from 'saxes';
 import { extname } from 'node:path';
 import { extractMaterialFormatText, extractPdfText, MaterialFormatRefusal } from '../material-formats.js';
 import { STANDARD_TABLE_FORMAT, type StandardEntry } from '../standard-tables.js';
-import { standardTableKind, standardTableRow, type StandardTableRow, type StandardTableKind, type StandardStrength } from '../../shared/protocol/standard-tables.js';
+import type { StandardTableRow, StandardTableKind, StandardStrength } from '../../shared/protocol/standard-tables.js';
+import { standardTableKind, standardTableRow } from './schemas.js';
 import { requireStore } from '../store-records.js';
 
 export const MAX_TABLE_BYTES = 16 * 1024 * 1024;
