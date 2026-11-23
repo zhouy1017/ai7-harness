@@ -1,6 +1,6 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { launchReviewFromSheet } from './launch-review-sheet.mjs';
+import { launchReviewFromSheet, checkReviewPlanReopening } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -201,7 +201,7 @@ async function createRendererManager(browser) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if ((await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false)) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-13', name);
@@ -1252,6 +1252,9 @@ async function main() {
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
     requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['series-consistency']), 'consistency-sheet-offered', sheet);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    at('review-plan-rapid-reopen');
+    await checkReviewPlanReopening(renderer, waitFor);
+    at('consistency-offered');
     await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState!=='prepared'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;

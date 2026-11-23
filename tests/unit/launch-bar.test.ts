@@ -433,3 +433,48 @@ it('lets go of the page once a launch popover is removed while it is open (#1526
     expect(listeners.has('resize')).toBe(false);
   } finally { restore(); }
 });
+
+
+it.each(['button', 'programmatic'] as const)('keeps a later %s opening when the previous native panel close arrives late (#1711)', opening => {
+  let flushOpenAttribute = (_wasOpen: boolean) => {};
+  vi.stubGlobal('MutationObserver', class {
+    constructor(changed: (records: Array<{ oldValue: string | null }>) => void) { flushOpenAttribute = wasOpen => changed([{ oldValue: wasOpen ? '' : null }]); }
+    observe(): void {}
+    disconnect(): void {}
+  });
+  const { plan, panel, restore } = popoverBar(382);
+  const button = plan.querySelector<HTMLButtonElement>('summary button')!;
+  const setOpen = (value: boolean): void => {
+    const wasOpen = plan.open;
+    if (opening === 'button') button.click(); else plan.open = value;
+    // Native attribute mutation delivery precedes the queued toggle task, as in the captured browser sequence.
+    flushOpenAttribute(wasOpen);
+  };
+  const panelClosing = (): void => {
+    panel.dispatchEvent({ type: 'beforetoggle', oldState: 'open', newState: 'closed' } as never);
+    panel.hidePopover();
+  };
+  const closedEvent = (): void => { panel.dispatchEvent({ type: 'toggle', oldState: 'open', newState: 'closed' } as never); };
+  try {
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    panelClosing();
+    setOpen(false);
+    setOpen(true);
+    // The old close is delivered after the latest opening, before that opening's own toggle work.
+    closedEvent();
+    expect(plan.open).toBe(true);
+    plan.dispatchEvent({ type: 'toggle' } as never);
+    expect(panel.matches(':popover-open')).toBe(true);
+    // Normal closing still closes both controls.
+    setOpen(false); panelClosing(); plan.dispatchEvent({ type: 'toggle' } as never); closedEvent();
+    expect(plan.open).toBe(false); expect(panel.matches(':popover-open')).toBe(false);
+    // A new external close after an opening remains authoritative.
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    panelClosing(); closedEvent();
+    expect(plan.open).toBe(false);
+    // Another automatic popover closes this panel in the same task, before a redundant open write is delivered.
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    plan.open = true; panelClosing(); flushOpenAttribute(true); closedEvent();
+    expect(plan.open).toBe(false);
+  } finally { restore(); }
+});

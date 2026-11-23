@@ -1848,6 +1848,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-saved',
     'model-credential-removed',
     'consistency-offered',
+    'review-plan-rapid-reopen',
     'consistency-review-run',
     'series-scope-review-run',
     'consistency-marks-on-manuscript',
