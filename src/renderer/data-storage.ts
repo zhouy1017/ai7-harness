@@ -123,7 +123,7 @@ export function createDataStorage(options: DataStorageOptions) {
       mountDatabaseImport({ root: databaseImport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       void rendererApi.inspectDataVersion().then((version) => {
-        if (!summary.isConnected) return;
+        if (!version || !summary.isConnected) return;
         if (version.canRollbackUpgrade) {
           summary.append(button('回到升级前的数据','secondary',async () => {
             try { await rendererApi.quitApplication('rollback-upgrade'); }
