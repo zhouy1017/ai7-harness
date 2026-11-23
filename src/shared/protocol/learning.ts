@@ -203,7 +203,7 @@ export interface EditorialMemoryVersion {
 export type GlobalEditorialMemoryVersion = LegacyEditorialMemoryVersion | EditorialMemoryVersion;
 
 export interface EditorialLearningProjection {
-  curation?: { available: boolean; disclosure: string; envelope: EnabledLearningEnvelope | null; passesUsed: number; reservedTokens: number;
+  curation?: { available: boolean; offerDigest: string | null; disclosure: string; envelope: EnabledLearningEnvelope | null; passesUsed: number; reservedTokens: number;
     recentRuns: ReadonlyArray<{ runRecordId: string; state: string; summary: string }> };
   basis: string;
   enabled: boolean;
@@ -224,13 +224,14 @@ export interface InspectEditorialLearningInput {
   detailItemId?: string; historyOffset?: number; sourceOffset?: number;
 }
 export type ChangeEditorialLearningInput =
-  | { kind: 'switch'; enabled: boolean; expectedEntries: number; curation?: LearningCurationBudget }
+  | { kind: 'switch'; enabled: boolean; expectedEntries: number; offerDigest?: string; curation?: LearningCurationBudget }
   | { kind: 'book'; bookId: string; excluded: boolean; expectedEntries: number }
   | { kind: 'material'; signalId: string };
 
 export interface LearningCurationBudget { maxPasses: number; totalTokens: number; perPassTokens: number }
 export interface EnabledLearningEnvelope {
   schema: 'ai7.enabled-learning-envelope/1';
+  tidying?: { binding: EnabledLearningEnvelope['binding']; contractDigest: string };
   budget: LearningCurationBudget;
   contractDigest: string;
   policy: import('../protocol.js').SelectedPolicyIdentity;

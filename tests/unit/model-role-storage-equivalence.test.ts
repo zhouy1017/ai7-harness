@@ -1,15 +1,20 @@
+import * as modelService from '../../src/shared/protocol/model-service.js';
 import sequenceAnswers from '../fixtures/model-role-m1-sequences.json' with { type: 'json' };
 import { captureModelRoleSequences } from '../support/model-role-storage-sequences.js';
 import expected from '../fixtures/model-role-m1.json' with { type: 'json' };
 import { mapRevision116ModelRoleChoices, writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { modelServiceSettingsProjection } from '../../src/main/model-service-settings-projection.js';
 import { MODEL_ROLE_IDS, type ModelServiceStoredStateProjection } from '../../src/shared/protocol.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
+
+// The M1 snapshots record the inheritance path before channels supplied a default to underlying Flash.
+beforeEach(() => { vi.spyOn(modelService, 'modelServiceRecommendedModels').mockReturnValue(undefined); });
+afterEach(() => vi.restoreAllMocks());
 
 function withUntestedConnectionHistory(m1: unknown): unknown {
   return JSON.parse(JSON.stringify(m1), (_key, value) => value && typeof value === 'object' && value.connectionTest === null

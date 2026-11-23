@@ -565,11 +565,13 @@ describe('导入数据库 over the real store', () => {
     const connection = store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
     try {
       store.selectMainRoleModel('anthropic-claude', 'account-opus');
-      store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+      store.selectForegroundFlashModel('anthropic-claude', 'account-dialogue');
+      store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'anthropic-claude', modelId: 'account-haiku' });
       const preview = await store.inspectDatabaseImport(await exported(store, 'independent-roles.ai7db'));
       await store.prepareDatabaseReplacement(preview.previewId, T);
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: 'account-opus', credentialReference: connection.credentialReference });
+      expect(store.getConfiguredModelRoleBinding('foreground-flash')).toMatchObject({ model: 'account-dialogue', credentialReference: connection.credentialReference });
       expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account-haiku', credentialReference: connection.credentialReference });
     } finally { store.close(); }
   });

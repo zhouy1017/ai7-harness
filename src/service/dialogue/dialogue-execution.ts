@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { bindEditorialMemory, editorialMemoryDigest } from '../learning/memory-facade.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST,
   admittedGlobalAgentRoute, admittedGlobalAgentScopedRoute } from './global-agent-session.js';
@@ -383,7 +384,7 @@ export class DialogueExecutionOwner {
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST) : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
     const baseSystemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt) : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
-    const memory = live?.route?.providerProcessingVersion === 'v35' || turn.globalRoute?.providerProcessingVersion === 'v35'
+    const memory = supportsEditorialMemoryPolicy(live?.route?.providerProcessingVersion) || supportsEditorialMemoryPolicy(turn.globalRoute?.providerProcessingVersion)
       ? records.dialogueEditorialMemory?.(turn.dialogueId) ?? null : null;
     const { promptContractDigest, systemPrompt } = bindEditorialMemory({ promptContractDigest: basePromptContractDigest, systemPrompt: baseSystemPrompt }, memory);
     let current: string | null = null;

@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { referencedRules } from './rule-references.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, ReviewPreferenceLifecycleInput, TrustedOperationalScope } from '../../shared/protocol.js';
@@ -17,7 +18,7 @@ export function fastRoleMemoryContext(bookId: string): [string, string] { return
 export { dialogueMemoryContext } from './editorial-memory.js';
 
 export function analysisUsesAutomaticMemory(scope: TrustedOperationalScope, version: string | null | undefined, sourceKind: string): boolean {
-  return !sourceKind.startsWith('editorial-review/') && scope === 'ordinary-production' && version === 'v35';
+  return !sourceKind.startsWith('editorial-review/') && scope === 'ordinary-production' && supportsEditorialMemoryPolicy(version);
 }
 
 /** Both values always use the same already-selected snapshot; the existing digest algebra is unchanged. */
@@ -38,7 +39,7 @@ export class EditorialMemoryFacade {
   #preferences() { return new HouseReviewPreferenceLedger(this.db, this.learning); }
 
   request(input: { operationalScope: TrustedOperationalScope; providerProcessingVersion: string | undefined; bookId: string | null; taskKind: string }): EditorialMemorySnapshot | null {
-    if (input.operationalScope !== 'ordinary-production' || input.providerProcessingVersion !== 'v35') return null;
+    if (input.operationalScope !== 'ordinary-production' || !supportsEditorialMemoryPolicy(input.providerProcessingVersion)) return null;
     return this.#preferences().memory(input.operationalScope, { bookId: input.bookId, taskKind: input.taskKind,
       ...(input.taskKind.startsWith('custom-analysis/') ? { categoryId: input.taskKind.slice('custom-analysis/'.length) } : {}) }, this.peopleNames());
   }

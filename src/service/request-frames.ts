@@ -617,10 +617,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectFastRoleModel':
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
+    case 'selectUnderlyingModel':
     case 'selectProModel':
     case 'selectFlashModel':
     case 'testModelServiceConnection': {
-      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && isRecord(value.input) && value.input.inherit === true) {
+        const input = requireInput(value.input, ['roleId', 'inherit'], tentativeId);
+        if (input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
+        break;
+      }
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : value.op === 'selectUnderlyingModel' ? ['reasoningEffort', 'roleId'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
       if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
@@ -1050,7 +1057,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // The picker path starts a preview; an exact preview ID reads another bounded clause page.
     case 'previewReviewGuidelineVersion': {
-      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage', 'formatConfirmed'], tentativeId);
+      if (input.formatConfirmed !== undefined && (input.formatConfirmed !== true || Object.hasOwn(input, 'previewId'))) throw new ProtocolError(tentativeId);
       const validSource = Object.hasOwn(input, 'previewId')
         ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
           (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))
@@ -1625,8 +1633,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
         if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
       } else {
-        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
-        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation', 'offerDigest'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || typeof input.offerDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.offerDigest) || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
         if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
             !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
       }

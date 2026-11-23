@@ -1,3 +1,8 @@
+import defaults from '../../../config/runtime-execution-defaults.json' with { type: 'json' };
+
+/** Confirmed guideline formatting shares the configured model ceiling across admission and transport. */
+export const GUIDELINE_FORMAT_TIMEOUT_MS = defaults.transport.totalCeilingSeconds * 1000;
+
 /**
  * The model-request transport settings of the ordinary-production launch projection (#1599). They are read from the
  * `transport` record of `config/runtime-execution-defaults.json`; no source constant carries a value.

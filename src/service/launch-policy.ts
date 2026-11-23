@@ -1,3 +1,5 @@
+import { STRUCTURED_FLASH_TASKS } from './fast-role/flash-task-contract.js';
+import { modelRoleOfTaskKind } from '../shared/protocol/model-roles.js';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import defaults from '../../config/runtime-execution-defaults.json' with { type: 'json' };
 import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRecommendedModels, modelServiceRouteRefusal, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
@@ -276,17 +278,23 @@ export interface SearchFallbackTerms {
 /** Compatibility version fields describe the existing record format, never a selected policy. */
 export const ACTIVE_SET_VERSION = 'no-policy-lock' as const;
 export const DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION = 'v24' as const;
-export const ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION = 'v35' as const;
+export const ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION = 'v36' as const;
 
 export function searchFallbackTermsOf(projection: LaunchPolicyProjection | null | undefined): SearchFallbackTerms | null {
   return projection?.operationalScope === 'ordinary-production' ? structuredClone(defaults.searchFallback) as unknown as SearchFallbackTerms : null;
 }
 
+const NEW_FLASH_TASK_KINDS = new Set(Object.keys(STRUCTURED_FLASH_TASKS));
+
+interface UnderlyingBindings { pro: ConfiguredProviderBinding | null; flash: ConfiguredProviderBinding | null }
+
 function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBinding | null,
-  fastBinding: ConfiguredProviderBinding | null): AdmittedProviderRule[] {
+  fastBinding: ConfiguredProviderBinding | null, underlying: UnderlyingBindings): AdmittedProviderRule[] {
   const templates = scope === 'developer-live' ? defaults.developer : defaults.ordinary;
   return templates.flatMap((template) => {
     const selected = scope === 'developer-live' ? DEVELOPER_LIVE_POLICY_BINDING
+      : modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-pro' ? underlying.pro
+      : template.modelRole === 'Fast Interaction Role' && modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-flash' ? underlying.flash
       : template.modelRole === 'Fast Interaction Role' ? fastBinding : binding;
     if (selected === null) return [];
     const localTools = typeof template.localTools === 'number' ? defaults.localTools[template.localTools] : template.localTools;
@@ -299,20 +307,21 @@ function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBind
 /** Scope selects the transport boundary. No document, fingerprint or policy selection participates. */
 export function resolveSourceCheckoutLaunchPolicySync(_codeRoot: string,
   requestedScope: TrustedOperationalScope = 'development-ci', configuredBinding: ConfiguredProviderBinding | null = null,
-  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding): LaunchPolicyProjection {
+  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
+  underlying: UnderlyingBindings = { pro: configuredBinding, flash: configuredFastBinding }): LaunchPolicyProjection {
   if (!isTrustedOperationalScope(requestedScope)) return deny('launch-scope-not-selectable');
-  if (requestedScope === 'ordinary-production' && [configuredBinding, configuredFastBinding].some((binding) =>
+  if (requestedScope === 'ordinary-production' && [configuredBinding, configuredFastBinding, underlying.pro, underlying.flash].some((binding) =>
     binding !== null && allowedProductionBindingOf(binding, 'fast-interaction') === null)) return deny('binding-not-allowed');
   const ci = requestedScope === 'development-ci';
   const ordinary = requestedScope === 'ordinary-production';
-  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding);
+  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding, underlying);
   const configured = !ci && admittedRules.length > 0;
   return {
     integrityState: 'verified', denialReason: null, operationalScope: requestedScope, activePolicySetVersion: ACTIVE_SET_VERSION,
-    selectedPolicyIdentity: { providerProcessingVersion: ci ? 'v1' : ordinary ? 'v35' : 'v24',
+    selectedPolicyIdentity: { providerProcessingVersion: ci ? 'v1' : ordinary ? 'v36' : 'v24',
       providerProcessingSha256: '0'.repeat(64), activePolicySetVersion: ACTIVE_SET_VERSION, activePolicySetSha256: '0'.repeat(64) },
     providerProcessing: {
-      version: ci ? 'v1' : ordinary ? 'v35' : 'v24', decision: ci ? 'deny' : 'eligible-only',
+      version: ci ? 'v1' : ordinary ? 'v36' : 'v24', decision: ci ? 'deny' : 'eligible-only',
       authorizedLiveTransmissionCount: ci ? 0 : 'bounded-by-run', liveTransmissionAllowed: configured,
       crossUnitReductionAllowed: !ci, assuranceSamplingAllowed: !ci, runReportReflectionAllowed: !ci, admittedRules,
       ...(ordinary ? { bindingState: configured ? 'configured' : 'setup-required',
@@ -342,6 +351,10 @@ export function readRetainedBoundAnalysisPolicySync(codeRoot: string, pin: impor
   binding: ConfiguredProviderBinding): LaunchPolicyProjection | null {
   if (pin.operationalScope !== 'ordinary-production') return null;
   const projection = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', binding);
+  if (pin.providerProcessingVersion !== 'v36') {
+    projection.providerProcessing = { ...projection.providerProcessing, admittedRules: projection.providerProcessing.admittedRules?.filter(rule =>
+      !NEW_FLASH_TASK_KINDS.has(rule.taskKinds[0]!)) ?? [] };
+  }
   delete projection.selectedPolicyIdentity;
   projection.activePolicySetVersion = pin.activePolicySetVersion;
   projection.providerProcessing.version = pin.providerProcessingVersion;

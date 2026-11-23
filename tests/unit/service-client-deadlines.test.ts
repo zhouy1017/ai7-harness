@@ -61,6 +61,19 @@ describe('serial service request execution deadlines', () => {
   });
   afterEach(() => { peer.kill(); vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
+  it('keeps the service available through a confirmed formatting request and bounds a stalled one', async () => {
+    const input = { documentId: 'synthetic', path: 'synthetic', formatConfirmed: true as const };
+    const slow = client.call('previewReviewGuidelineVersion', input);
+    await vi.advanceTimersByTimeAsync(600_001);
+    expect(peer.kill).not.toHaveBeenCalled();
+    peer.reply(peer.requests[0]!, {});
+    await slow;
+    const stalled = outcome(client.call('previewReviewGuidelineVersion', input));
+    await vi.runAllTimersAsync();
+    expect(await stalled).toBe('SERVICE_TIMEOUT');
+    expect(peer.kill).toHaveBeenCalled();
+  });
+
   function closeMarkers(): string[] {
     vi.stubEnv('AI7_E2E_JOURNEY', 'J-01');
     const lines: string[] = [];

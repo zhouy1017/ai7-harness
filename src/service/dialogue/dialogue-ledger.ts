@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { appendOnly } from '../append-only.js';
 import { editorialMemoryDigest } from '../learning/editorial-memory.js';
 import type { GlobalMemoryPin, LocalFixtureProfile, OrdinaryProductionRouteId, SelectedPolicyIdentity } from '../../shared/protocol.js';
@@ -155,7 +156,7 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
-  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
   /** The no-tools rule, or v31's scoped tool rule (#1171); a record never moves between them. */
   readonly policyRuleId: 'ordinary-production-global-agent-dialogue' | typeof GLOBAL_AGENT_SCOPED_RULE_ID;
   readonly route: OrdinaryProductionRouteId;
@@ -179,7 +180,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
-  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34' && identity.providerProcessingVersion !== 'v35')) || value.textProcessing !== 'qualified-original-fields' ||
+  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(identity.providerProcessingVersion))) || value.textProcessing !== 'qualified-original-fields' ||
       (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
         identity.providerProcessingVersion === 'v30')) || value.modelRole !== 'Fast Interaction Role' ||
       typeof route !== 'string' || typeof value.model !== 'string' || value.model.length === 0 ||

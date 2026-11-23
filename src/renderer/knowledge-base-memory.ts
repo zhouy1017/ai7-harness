@@ -153,7 +153,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         const perPass = number('每次整理的 token 上限', curation.envelope?.budget.perPassTokens ?? 20_000);
         const save = el('button', '启用这个学习整理范围'); save.type = 'submit'; save.disabled = busy; form.append(save);
         form.addEventListener('submit', (event) => { event.preventDefault(); run(() => api.changeEditorialLearning({
-          kind: 'switch', enabled: true, expectedEntries: page.controlEntries,
+          kind: 'switch', enabled: true, expectedEntries: page.controlEntries, offerDigest: curation.offerDigest!,
           curation: { maxPasses: Number(passes.value), totalTokens: Number(total.value), perPassTokens: Number(perPass.value) } })); });
         panel.append(form);
       }

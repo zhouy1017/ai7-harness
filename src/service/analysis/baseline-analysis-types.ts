@@ -542,6 +542,7 @@ export type AnalysisAuthorizationOrigin =
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
+  readonly learningBinding?: (role: 'underlying-pro' | 'underlying-flash') => OrdinaryProductionLaunchBinding | null;
   /** Current editor-confirmed rules, frozen by new plans; never a startup scan or a second ledger. */
   readonly editorialMemory?: (bookId: string, taskKind: string) => import('../learning/editorial-memory.js').EditorialMemorySnapshot | null;
   readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;

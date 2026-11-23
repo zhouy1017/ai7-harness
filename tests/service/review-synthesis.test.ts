@@ -131,8 +131,19 @@ it('reads the archived SampleBook report and continues its paused review after a
     const archived = runs.find(r => r.report !== null && r.report !== undefined)!.report!;
     expect(canonicalRecord(archived.record).digest).toBe(archived.digest);
     const paused = runs.find(r => r.canContinue)!;
-    await session.driver.continue(paused.reviewRunId);
     const book = session.store.listBooks(null).items.find(b => session.store.inspectReviewWorkspace(b.bookId,null).run?.reviewRunId === paused.reviewRunId)!;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    let runId: string;
+    try {
+      const row = db.prepare("SELECT json_extract(canonical_json, '$.runRecordId') AS id FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? AND state = 'dispatched'").get(paused.reviewRunId, TYPOS)!;
+      runId = String(row.id);
+    } finally { db.close(); }
+    const ledger = session.store.executionLedgerForRun(runId);
+    const bound = ledger.executionBindingOf(runId)!;
+    expect(bound.binding.policyPin.providerProcessingVersion).toBe('v35');
+    expect(ledger.loadExecutionPlan(runId).retainedPolicyPin).toEqual(bound.binding.policyPin);
+    await session.driver.continue(paused.reviewRunId);
+    expect(ledger.executionBindingOf(runId)?.bindingDigest).toBe(bound.bindingDigest);
     expect(session.store.inspectReviewWorkspace(book.bookId,paused.reviewRunId).run?.state).toBe('settled');
   } finally { await closeCapturedSession(session); }
 },180_000);

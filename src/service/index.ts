@@ -1,3 +1,4 @@
+import { guidelineClauses } from './fast-role/flash-task-contract.js';
 import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
@@ -224,13 +225,17 @@ async function dispatch(
       store.selectBothRoleModels(request.input.route, request.input.modelId, request.input.reasoningEffort, request.input.fastReasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectUnderlyingModel':
+      store.selectUnderlyingModel(request.input);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectMainRoleModel':
     case 'selectProModel':
       store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectFlashModel':
-      store.selectFastRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      store.selectForegroundFlashModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'clearFlashModel':
@@ -771,7 +776,7 @@ async function dispatch(
     case 'previewReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
         ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
-        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path, request.input.formatConfirmed) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
@@ -2058,8 +2063,8 @@ function configuredRoleBindingOf(store: EditorialStore): ConfiguredProviderBindi
 }
 
 /** The launch binding a configured route gives the ledgers: its exact facts, and a Run ceiling left to the editor (S16a). */
-function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null): OrdinaryProductionLaunchBinding | null {
-  const allowed = allowedProductionBindingOf(configured);
+function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null, flash = false): OrdinaryProductionLaunchBinding | null {
+  const allowed = flash ? allowedProductionBindingOf(configured, 'fast-interaction') : allowedProductionBindingOf(configured);
   return allowed === null || configured === null ? null : {
     scope: 'ordinary-production',
     route: allowed.route,
@@ -2151,7 +2156,7 @@ async function run(): Promise<void> {
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
-    { materialTranslator, MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage, readMaterialTranslationAnswer },
+    { materialTranslator, evidenceTranslator, MATERIAL_TRANSLATION_KIND },
     { AgentWorkspace: AgentWorkspaceClass },
     { ServiceRequestLoop },
   ] =
@@ -2297,8 +2302,9 @@ async function run(): Promise<void> {
     const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
       if (production === null) return launchPolicy;
       const configured = configuredRoleBindingOf(openedStore);
-      productionState.fast = openedStore.getConfiguredModelRoleBinding('fast-interaction');
-      launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', configured, productionState.fast);
+      productionState.fast = openedStore.getConfiguredModelRoleBinding('foreground-flash');
+      launchPolicy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', configured, productionState.fast,
+        { pro: openedStore.getConfiguredModelRoleBinding('underlying-pro'), flash: openedStore.getConfiguredModelRoleBinding('underlying-flash') });
       productionState.live = launchPolicy.operationalScope === 'ordinary-production' && launchPolicy.providerProcessing.bindingState === 'configured'
         ? productionLaunchBindingOf(configured)
         : null;
@@ -2312,6 +2318,7 @@ async function run(): Promise<void> {
           operationalScope: 'ordinary-production',
           get policy() { return launchPolicy; },
           get live() { return productionState.live; },
+          learningBinding: role => productionLaunchBindingOf(openedStore.getConfiguredModelRoleBinding(role), role === 'underlying-flash'),
         }
       : developerLive === null
       ? { operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => openedStore.localFixtureRuntime() }
@@ -2386,16 +2393,7 @@ async function run(): Promise<void> {
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
-      sourceTranslator: async ({ text }) => {
-        const owner = fastRole?.owner;
-        if (owner === undefined || owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
-        try {
-          const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
-          if (result.kind !== 'answered') return null;
-          const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
-          return translated == null ? null : { text: translated, route: result.binding.route, model: result.binding.model };
-        } catch { return null; }
-      },
+      sourceTranslator: evidenceTranslator(() => underlyingOwner),
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).
       factualRunStart: (input) => {
         guardedStore.recordFactualRunAssurance({ ...input,
@@ -2481,7 +2479,7 @@ async function run(): Promise<void> {
         ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
         : production !== null
           ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
-            (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
+            (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('foreground-flash');
               return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
                   current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
             () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null,
@@ -2500,8 +2498,18 @@ async function run(): Promise<void> {
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
     // policy before one names it, which refuses it with 「当前策略未开放来源译文」.
+    const underlyingFlash = () => openedStore.getConfiguredModelRoleBinding('underlying-flash');
+    const underlyingOwner = production === null ? fastRoleOwner : fastRoleOwner.fork(productionFastRoleRoutes(production, () => launchPolicy,
+        () => underlyingFlash()?.credentialReference ?? null, createKeyringSecretResolver(),
+        (reference, route) => { const now = underlyingFlash(); return now?.credentialReference === reference && now.route === route.profile.route && now.model === route.modelProfile.model; },
+        () => openedStore.getModelServiceConnections().find(entry => entry.credentialReference === underlyingFlash()?.credentialReference)?.credentialUpdatedAt ?? null,
+        () => underlyingFlash()?.reasoningEffort));
+    if (production !== null) store.useGuidelineFormatter({
+      model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('guideline-clause-formatting') === null ? selected.route + ' / ' + selected.model : null; },
+      format: paragraphs => underlyingOwner.execute(guidelineClauses, paragraphs, 'guideline-preview'),
+    });
     store.useMaterialTranslator(materialTranslator(
-      fastRoleOwner,
+      underlyingOwner,
       developerLive !== null ? 'developer-live' : production !== null ? 'ordinary-production' : 'development-ci',
       () => (launchPolicy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length,
     ));

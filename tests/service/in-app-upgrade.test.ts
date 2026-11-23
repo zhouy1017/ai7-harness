@@ -79,11 +79,20 @@ it('resumes each phase, imports the older package and recovers missing old files
   const converted = await EditorialStore.open(root, roots.codeRoot);
   try {
     expect(converted.listBooks(null).items.length).toBe(2);
-    expect(converted.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('glm-5.3-flash'));
+    expect(converted.getModelRoles().map(role => [role.roleId, role.binding?.modelId, role.source])).toEqual([
+      ['foreground-pro', 'glm-5.3-flash', 'pro-tier'],
+      ['foreground-flash', 'glm-5.3-flash', 'flash-tier'],
+      ['underlying-pro', 'glm-5.3-flash', 'pro-tier'],
+      ['underlying-flash', 'deepseek-v4.1-flash', 'channel-recommended-flash'],
+    ]);
     expect(converted.inspectDataVersion().upgrades[0]?.fromDataVersion).toBe(1);
   } finally { converted.markCleanShutdown(); converted.close(); }
   const db = new DatabaseSync(join(root, 'store', 'ai7.sqlite'), { readOnly: true });
   try {
+    expect(db.prepare('SELECT role_id, model_id FROM model_role_choices ORDER BY role_id').all()).toEqual([
+      { role_id: 'foreground-flash', model_id: 'glm-5.3-flash' },
+      { role_id: 'foreground-pro', model_id: 'glm-5.3-flash' },
+    ]);
     expect(db.prepare('SELECT count(*) n FROM manuscript_revisions WHERE upgrade_snapshot=1').get()?.n).toBe(2);
     expect(db.prepare('SELECT count(*) n FROM editor_steps').get()?.n).toBe(0);
   } finally { db.close(); }

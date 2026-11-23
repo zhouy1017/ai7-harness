@@ -453,7 +453,7 @@ export class BaselineAnalysisStore {
   }
 
   settleCuration(run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted',
-    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
+    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; retryAfterCredential?: boolean; reason: string }): void {
     return curationRuns.settleCuration(this.#curationRunsHost, run, state, evidence);
   }
 
@@ -1559,7 +1559,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35', 'v36'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -4778,9 +4778,19 @@ export class BaselineAnalysisStore {
       requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
         this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
     }
+    let frozenPolicyPin = retainedBinding?.binding.policyPin;
+    if (frozenPolicyPin === undefined && productionBinding !== null && selectedMetadata.selectedPolicyIdentity !== undefined) {
+      // Authorization freezes the version before dispatch creates the first execution binding.
+      const processing = providerPlan.remoteBinding.providerProcessing;
+      const pin = { operationalScope: processing.operationalScope, providerProcessingVersion: processing.version,
+        activePolicySetVersion: selectedMetadata.selectedPolicyIdentity.activePolicySetVersion, liveTransmissions: processing.authorizedLiveTransmissionCount };
+      requireAnalysis(isResultSetPolicyPin(pin), 'ANALYSIS_RECORD_INVALID', '冻结计划的策略 pin 无效。');
+      frozenPolicyPin = pin;
+    }
     let retainedPolicy: LaunchPolicyProjection | null = null;
-    if (retainedBinding !== null && selectedMetadata.selectedPolicyIdentity === undefined && productionBinding !== null) {
-      retainedPolicy = this.#launch.retainedPolicyFor?.(retainedBinding.binding.policyPin,
+    if (frozenPolicyPin !== undefined && productionBinding !== null && (selectedMetadata.selectedPolicyIdentity === undefined ||
+        frozenPolicyPin.providerProcessingVersion !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION)) {
+      retainedPolicy = this.#launch.retainedPolicyFor?.(frozenPolicyPin,
         { ...productionBinding, credentialReference: providerPlan.remoteBinding.credentialReference }) ?? null;
       requireAnalysis(retainedPolicy !== null, 'ANALYSIS_RECORD_INVALID', '历史执行绑定缺少准确的已核实策略阅读。');
     }
@@ -4875,7 +4885,7 @@ export class BaselineAnalysisStore {
       // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
       ...selectedMetadata,
-      ...(retainedBinding === null ? {} : { retainedPolicyPin: retainedBinding.binding.policyPin }),
+      ...(frozenPolicyPin === undefined ? {} : { retainedPolicyPin: frozenPolicyPin }),
       ...(retainedPolicy === null ? {} : { retainedPolicy }),
       ...(localFixtureRuntime == null ? {} : { localFixtureRuntime }),
       productionBinding,

@@ -97,6 +97,8 @@ export interface ProviderRouteProfile {
    * declaring `null` refuses to assemble rather than inventing a number.
    */
   readonly maxOutputTokens: number | null;
+  /** Explicit cap of a bounded structured task. Omitted on retained request shapes. */
+  readonly taskOutputTokenLimit?: number;
   readonly statelessReasoning?: boolean;
   readonly reasoning?: { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string };
   /**
@@ -163,7 +165,7 @@ export interface ProviderRequestContext {
 function providerRequestBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload, stream: boolean): string {
   switch (model.capabilities.requestShape) {
     case 'openai-chat-completions': {
-      const body = chatCompletionsBody(model, payload);
+      const body = chatCompletionsBody(model, payload, profile.taskOutputTokenLimit);
       return stream ? chatCompletionsStreamBody(body) : body;
     }
     case 'anthropic-messages': {
@@ -534,8 +536,10 @@ export interface DeepSeekAdapterDependencies extends Pick<import('../../shared/r
   readonly transport?: DeepSeekTransport;
   /** Recheck the consumer/source generation inside the broker callback, before transport admission. */
   readonly beforeSend?: () => void;
+  /** Observe the buffered response's own model identity during an explicit connection probe. */
+  readonly onProbeModel?: (model: string | undefined, family: ProviderModelProfile['capabilities']['requestShape']) => void;
   /** Exact-call observation from inside the adapter, before any native sender was entered. */
-  readonly onRequestNotSent?: () => void;
+  readonly onRequestNotSent?: (error?: unknown) => void;
   /** The route this adapter serves; the unchanged production route when absent. */
   readonly profile?: ProviderRouteProfile;
   /** The model this adapter speaks to; the production model when absent. Must belong to the bound route. */
@@ -749,6 +753,10 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
       const shape = this.#modelProfile.capabilities.requestShape;
+      if (this.#deps.onProbeModel) {
+        const reported = isRecord(body) ? body[shape === 'google-generate-content' ? 'modelVersion' : 'model'] : undefined;
+        this.#deps.onProbeModel(typeof reported === 'string' ? reported : undefined, shape);
+      }
       const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
           offeredToolNames: (options.tools ?? []).map((tool) => tool.name),
@@ -773,7 +781,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
     } catch (error) {
       this.#lastRequestNotSent = !sent || error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest;
-      if (this.#lastRequestNotSent) this.#deps.onRequestNotSent?.();
+      if (this.#lastRequestNotSent) this.#deps.onRequestNotSent?.(error);
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
         : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)

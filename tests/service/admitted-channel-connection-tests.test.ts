@@ -23,16 +23,19 @@ async function saved(route: ModelServiceRouteId): Promise<EditorialStore> {
 }
 
 /** A family fixture case's recorded response, served once for the one request the test sends. */
-function fixtureTransport(family: string, name: string, answer?: string): ReturnType<typeof vi.fn> {
+function fixtureTransport(family: string, name: string, answer?: string, returnedModel?: string | null): ReturnType<typeof vi.fn> {
   const response = JSON.parse(readFileSync(`tests/fixtures/model/provider-families/${family}.json`, 'utf8')).cases.find((entry: { name: string }) => entry.name === name).response;
   const body = answer === undefined ? response.body : JSON.parse(JSON.stringify(response.body).replace('合成回答。', answer));
+  const modelField = family === 'google-generate-content' ? 'modelVersion' : 'model';
+  if (returnedModel === null) delete body[modelField];
+  else if (returnedModel !== undefined) body[modelField] = returnedModel;
   return vi.fn(async () => ({ status: response.status, headers: new Headers(), json: async () => body, text: async () => JSON.stringify(body) }));
 }
 
 describe('the connection test on the admitted channels', () => {
   it('retains a passing answer without splitting a Unicode code point at the storage limit (#1311)', async () => {
     const target = await saved('google-gemini');
-    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'a'.repeat(3999) + '😀');
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'a'.repeat(3999) + '😀', 'account-new-model');
     const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
       { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
     expect(status.outcome).toBe('passed');
@@ -44,7 +47,7 @@ describe('the connection test on the admitted channels', () => {
   });
   it.each(['`AI7_OK`。', '"ai7-ok"!', '模型连接成功。'])('accepts and retains a nonempty probe answer: %s (#1311)', async (answer) => {
     const target = await saved('google-gemini');
-    const nativeFetch = fixtureTransport('google-generate-content', 'text', answer.replaceAll('"', '\\"'));
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', answer.replaceAll('"', '\\"'), 'account-new-model');
     const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
       { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
     expect(status).toMatchObject({ outcome: 'passed', code: null, responseText: answer });
@@ -66,15 +69,15 @@ describe('the connection test on the admitted channels', () => {
   it.each([['anthropic-claude', 'claude-opus-5', 'anthropic-messages'], ['google-gemini', 'gemini-3.8-flash', 'google-generate-content']] as const)(
     'passes %s %s through its own family adapter, which then serves both roles (#1225)', async (route, modelId, family) => {
       const target = await saved(route);
-      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK');
+      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK', modelId);
       const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
         { route, modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v35' } });
+      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v36' } });
       expect(nativeFetch).toHaveBeenCalledTimes(1);
       expect(String(nativeFetch.mock.calls[0]![0])).toContain(route === 'anthropic-claude' ? 'https://api.anthropic.com/v1/messages' : `/models/${modelId}:generateContent`);
       target.selectModelServiceRoute(route);
       target.selectFastRoleModel(route, modelId);
-      expect([target.getConfiguredModelRoleBinding('main-editorial')?.model, target.getConfiguredModelRoleBinding('fast-interaction')?.model]).toEqual([modelId, modelId]);
+      expect([target.getConfiguredModelRoleBinding('main-editorial')?.model, target.getConfiguredModelRoleBinding('foreground-flash')?.model]).toEqual([modelId, modelId]);
     });
 
   it.each([['anthropic-claude', 'claude-opus-5', 'anthropic-messages'], ['google-gemini', 'gemini-3.8-flash', 'google-generate-content']] as const)(
@@ -93,7 +96,7 @@ describe('the connection test on the admitted channels', () => {
     ['gpt-6-sol', 'openai-responses', 'https://opencode.ai/inference/openai/v1/responses']] as const)(
     'sends OpenCode Zen %s on its declared %s route (#1582)', async (modelId, family, endpoint) => {
       const target = await saved('opencode-zen');
-      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK');
+      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK', modelId);
       const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
         { route: 'opencode-zen', modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
       expect(status).toMatchObject({ modelId, outcome: 'passed', provenance: { model: modelId, endpoint } });
@@ -106,16 +109,35 @@ describe('the connection test on the admitted channels', () => {
       else expect([Array.isArray(body.input) || typeof body.input === 'string', typeof body.max_output_tokens, 'messages' in body]).toEqual([true, 'number', false]);
     });
 
+  it.each([['google-generate-content', 'google-gemini', 'requested', 'unrelated', 'failed'],
+    ['google-generate-content', 'google-gemini', 'requested', 'models/requested-001', 'passed'],
+    ['openai-responses', 'openai-platform', 'requested', 'unrelated', 'failed'],
+    ['openai-responses', 'openai-platform', 'requested', 'requested-2026-11-20', 'passed'],
+    ['anthropic-messages', 'anthropic-claude', 'claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'passed'],
+    ['openai-chat-completions', 'opencode-go', 'requested', null, 'failed'],
+    ['openai-chat-completions', 'opencode-go', 'requested', 'requested', 'passed'],
+    ['openai-chat-completions', 'opencode-go', 'requested', 'unrelated', 'failed']] as const)(
+    'checks %s response identity %s/%s against %s', async (family, route, modelId, returned, outcome) => {
+      const target = await saved(route);
+      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK', returned);
+      const result = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as typeof fetch },
+        { route, modelId }, { resolve: async () => 'synthetic-placeholder' }, { requestGovernor });
+      expect(result).toMatchObject({ outcome, code: outcome === 'failed' ? 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' : null });
+      if (outcome === 'failed') expect(result.responseText).toBeUndefined();
+      expect(target.getModelServiceRouteConnection(route)?.connectionTest).toEqual(result);
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+    });
+
   it('tests a dynamic Gemini model ID through its channel adapter', async () => {
     const target = await saved('google-gemini');
-    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'AI7_OK');
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'AI7_OK', 'account-new-model');
     const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
       { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
     expect(status.outcome).toBe('passed');
     expect(nativeFetch).toHaveBeenCalledTimes(1);
     target.selectFastRoleModel('google-gemini', 'account-new-model');
     target.selectModelServiceRoute('google-gemini');
-    expect(target.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe('account-new-model');
+    expect(target.getConfiguredModelRoleBinding('foreground-flash')?.model).toBe('account-new-model');
     expect(target.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gemini-3.8-flash');
   });
 });

@@ -49,7 +49,7 @@ const LIVE_ROUTES: Readonly<Record<'developer-live' | 'ordinary-production', Rea
 };
 
 /** The categories the Egress Gate reads; a rule naming any other carries it to no binding. */
-const OUTBOUND_CATEGORIES: ReadonlyArray<OutboundDataCategory> = ['public-or-synthetic', 'house-review-preference-excerpt', 'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'];
+const OUTBOUND_CATEGORIES: ReadonlyArray<OutboundDataCategory> = ['frozen-material-reference-excerpt', 'house-review-guideline-clause', 'public-or-synthetic', 'house-review-preference-excerpt', 'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'];
 
 /** The roles the Credential Broker binds a slot for; a rule naming any other cannot release a credential. */
 const BINDABLE_ROLES: ReadonlyArray<CredentialSlotBinding['modelRole']> = ['Fast Interaction Role', 'Main Editorial Role'];

@@ -1,3 +1,5 @@
+import { learningCurationRule } from './analysis/live-kind-admission.js';
+import { learningTidying } from './fast-role/flash-task-contract.js';
 import { appendOnly } from './append-only.js';
 import { one } from './store-operation-support.js';
 import { dialogueMemoryContext } from './learning/editorial-memory.js';
@@ -1575,13 +1577,17 @@ export function inspectEditQualitySignals(host: EditorialLearningStoreHost, book
   });
 }
 
+function curationOfferDigest({ budget: _budget, ...offer }: EnabledLearningEnvelope): string {
+  return sha256Hex(storeCanonicalJson(offer));
+}
+
 export function inspectEditorialLearning(host: EditorialLearningStoreHost, input: InspectEditorialLearningInput): EditorialLearningProjection {
   return host.learningCall(() => {
     const learning = host.memoryFacade();
     const current = learning.curationEnvelope();
     const offered = curationEnvelope(host, { maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
     return { ...learning.inspect(input, host.baselineAnalysis.launch.operationalScope), curation: {
-      available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
+      available: offered !== null, offerDigest: offered && curationOfferDigest(offered), disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
       envelope: current?.envelope ?? null, ...host.baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
       recentRuns: host.baselineAnalysis.curationRuns() } };
   });
@@ -1591,35 +1597,47 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
   const launch = host.baselineAnalysis.launch;
   const policy = launch.policy;
   const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
-  const live = launch.live;
-  const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
+  const live = launch.learningBinding ? launch.learningBinding('underlying-pro') : launch.live;
+  const flash = launch.learningBinding ? launch.learningBinding('underlying-flash') : launch.live;
   if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-    policy?.integrityState !== 'verified' || (identity?.providerProcessingVersion !== 'v31' && (identity?.providerProcessingVersion !== 'v32' && identity?.providerProcessingVersion !== 'v33' && identity?.providerProcessingVersion !== 'v34' && identity?.providerProcessingVersion !== 'v35')) || rule?.enabledLearningEnvelope === undefined ||
-    rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
+      flash?.scope !== 'ordinary-production' || identity?.providerProcessingVersion !== 'v36' ||
+      learningCurationRule(policy, live) === null || learningCurationRule(policy, flash, 'learning-sample-tidying') === null) return null;
+  const pin = (role: typeof live): EnabledLearningEnvelope['binding'] => ({ route: role.route, model: role.model, endpoint: role.endpoint,
+    credentialSlot: role.credentialSlot, credentialReference: role.credentialReference,
+    ...(role.reasoningEffort === undefined ? {} : { reasoningEffort: role.reasoningEffort }) });
   return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
-    binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference,
-      ...(live.reasoningEffort === undefined ? {} : { reasoningEffort: live.reasoningEffort }) },
+    binding: pin(live), tidying: { binding: pin(flash), contractDigest: learningTidying.promptContractDigest },
     sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
     supervisionDigest: host.memoryFacade().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
-    disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+    disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${flash.route} · ${flash.model} 预整理，再由 ${live.route} · ${live.model} 归纳。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
 }
 
 export function prepareLearningCuration(host: EditorialLearningStoreHost, bookId: string, signalIds: readonly string[]): LearningCurationBundle {
   return host.learningCall(() => host.memoryFacade().prepareCuration(bookId, signalIds));
 }
 
-export function nextLearningCuration(host: EditorialLearningStoreHost): CurationRun | null {
+function pendingCuration(host: EditorialLearningStoreHost) {
+  const learning = host.memoryFacade();
+  const current = learning.curationEnvelope();
+  if (current === null || storeCanonicalJson(curationEnvelope(host, current.envelope.budget)) !== storeCanonicalJson(current.envelope) || host.replacementFrozen()) return null;
+  const use = host.baselineAnalysis.curationBudgetUse(current.entryId);
+  if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
+  for (const bookId of learning.curationBooks()) {
+    const bundle = learning.nextCuration(bookId);
+    if (bundle?.state === 'ready') return { bundle, current };
+  }
+  return null;
+}
+
+export function pendingLearningControl(host: EditorialLearningStoreHost) {
+  return host.learningCall(() => pendingCuration(host)?.current ?? null);
+}
+
+export function nextLearningCuration(host: EditorialLearningStoreHost, checkedEntryId?: string): CurationRun | null {
   return host.learningCall(() => host.transaction(host.authority, () => {
-    const learning = host.memoryFacade();
-    const current = learning.curationEnvelope();
-    if (current === null || storeCanonicalJson(curationEnvelope(host, current.envelope.budget)) !== storeCanonicalJson(current.envelope) || host.replacementFrozen()) return null;
-    const use = host.baselineAnalysis.curationBudgetUse(current.entryId);
-    if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
-    for (const bookId of learning.curationBooks()) {
-      const bundle = learning.nextCuration(bookId);
-      if (bundle?.state === 'ready') return host.baselineAnalysis.startCuration(bundle, current);
-    }
-    return null;
+    const pending = pendingCuration(host);
+    if (!pending || checkedEntryId !== undefined && pending.current.entryId !== checkedEntryId) return null;
+    return host.baselineAnalysis.startCuration(pending.bundle, pending.current);
   }));
 }
 
@@ -1632,10 +1650,10 @@ export function learningCurationCurrent(host: EditorialLearningStoreHost, run: C
   } catch { return false; }
 }
 
-export function publishLearningCuration(host: EditorialLearningStoreHost, run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+export function publishLearningCuration(host: EditorialLearningStoreHost, run: CurationRun, text: string, retainedIds: readonly string[], evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
   return host.learningCall(() => host.transaction(host.authority, () => {
     requireStore(learningCurationCurrent(host, run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
-    const proposals = parseCurationResult(text, run.bundle.examples);
+    const proposals = parseCurationResult(text, run.bundle.examples.filter(example => retainedIds.includes(example.exampleId)));
     requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
     host.memoryFacade().proposeCuration(run.bundle, proposals, run);
     host.baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
@@ -1653,6 +1671,8 @@ export function changeEditorialLearning(host: EditorialLearningStoreHost, input:
     const budget = input.kind === 'switch' ? input.curation : undefined;
     const envelope = budget === undefined ? undefined : curationEnvelope(host, budget);
     requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
+    if (envelope) requireStore(input.kind === 'switch' && input.offerDigest === curationOfferDigest(envelope),
+      'LEARNING_OFFER_CHANGED', '学习整理的模型或范围已经变化，请重新查看并确认。');
     host.memoryFacade().change(input, envelope ?? undefined);
     rebuildStoredHouseReviewPreference(host.learningSupervisionHost);
     return inspectEditorialLearning(host, { signalOffset: 0, itemOffset: 0 });

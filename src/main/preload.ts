@@ -882,6 +882,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   selectBothRoleModels: (input: Parameters<RendererApi['selectBothRoleModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectBothRoleModels']>>>(IPC_CHANNELS.selectBothRoleModels, input),
   refreshModelServiceModels: (input: Parameters<RendererApi['refreshModelServiceModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['refreshModelServiceModels']>>>(IPC_CHANNELS.refreshModelServiceModels, input),
   selectFastRoleModel: (input: Parameters<RendererApi['selectFastRoleModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFastRoleModel']>>>(IPC_CHANNELS.selectFastRoleModel, input),
+  selectUnderlyingModel: (input: Parameters<RendererApi['selectUnderlyingModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectUnderlyingModel']>>>(IPC_CHANNELS.selectUnderlyingModel, input),
   selectProModel: (input: Parameters<RendererApi['selectProModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectProModel']>>>(IPC_CHANNELS.selectProModel, input),
   selectFlashModel: (input: Parameters<RendererApi['selectFlashModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFlashModel']>>>(IPC_CHANNELS.selectFlashModel, input),
   clearFlashModel: () => invoke<Awaited<ReturnType<RendererApi['clearFlashModel']>>>(IPC_CHANNELS.clearFlashModel, {}),

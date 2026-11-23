@@ -27,7 +27,7 @@ function learning() {
     items: [memory('active', 'active'), memory('candidate', 'proposed')].map((current) => ({ current, usable: current.state === 'active', history: [current],
       row: { group: current.state === 'active' ? 'enabled' as const : 'pending' as const, changedAt: AT, origin: 'ai' as const, reenable: null, pin: current.versionId, pausedInUse: false } })),
     nextSignalOffset: null, nextItemOffset: null, nextExclusionOffset: null,
-    curation: { available: true, disclosure: '整理预算', envelope: null, passesUsed: 0, reservedTokens: 0, recentRuns: [] },
+    curation: { available: true, offerDigest: 'a'.repeat(64), disclosure: '整理预算', envelope: null, passesUsed: 0, reservedTokens: 0, recentRuns: [] },
   };
   const change = (itemId: string, state: EditorialMemoryVersion['state']) => {
     page = { ...page, items: page.items.map((item) => item.current.itemId === itemId
