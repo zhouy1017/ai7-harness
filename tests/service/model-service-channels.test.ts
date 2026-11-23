@@ -11,14 +11,14 @@ let store: EditorialStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
 describe('the model-service channel catalogue', () => {
-  it('persists independent models on one channel and across channels, and can set both atomically', async () => {
+  it('persists independent foreground models on one channel and across channels, and can set both atomically', async () => {
     const roots = await createServiceTestRoots('ai7-role-models-');
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
     store.saveModelServiceConnection('Synthetic Gemini', null, 'ready', 'google-gemini');
     store.selectMainRoleModel('anthropic-claude', 'account-opus', 'high');
     store.selectFastRoleModel('anthropic-claude', 'account-haiku', 'low');
-    const bindings = () => ['main-editorial', 'fast-interaction'].map((role) => store!.getConfiguredModelRoleBinding(role as 'main-editorial' | 'fast-interaction'));
+    const bindings = () => (['foreground-pro', 'foreground-flash'] as const).map(role => store!.getConfiguredModelRoleBinding(role));
     expect(bindings()).toMatchObject([{ model: 'account-opus', credentialReference: claude.credentialReference }, { model: 'account-haiku', credentialReference: claude.credentialReference }]);
     store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
@@ -35,6 +35,9 @@ describe('the model-service channel catalogue', () => {
     expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['vendor-future-level', 'vendor-future-level']);
     expect(() => store!.selectBothRoleModels('google-gemini', 'invalid model')).toThrow();
     expect(bindings().map((binding) => binding?.model)).toEqual(['claude-custom', 'claude-custom']);
+    const underlying = store.getConfiguredModelRoleBinding('underlying-flash');
+    expect(underlying).toMatchObject({ route: 'anthropic-claude', model: 'claude-haiku-4-5', credentialReference: claude.credentialReference });
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(underlying);
   });
 
   it('offers all catalogue models on admitted channels with protocol capabilities', () => {
