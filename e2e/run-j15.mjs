@@ -434,7 +434,10 @@ async function wheelToSearchControl(renderer, selector, name) {
     const at = await renderer.evaluate(reachableExpression(selector));
     requireJourney(at !== null, `${name}-present`, at);
     if (at.reachable) return;
-    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY: at.down ? 120 : -120 });
+    // An on-screen control can still sit behind a fixed control. Wheel it towards the visible scroller centre.
+    const deltaY = at.inWindow && at.inScroller ? Math.round(at.y - at.wheelY) : at.down ? 120 : -120;
+    if (deltaY === 0) break;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY });
     await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
   }
   requireJourney(false, `${name}-wheel-reachable`, await renderer.evaluate(reachableExpression(selector)));
@@ -442,6 +445,7 @@ async function wheelToSearchControl(renderer, selector, name) {
 
 /** A real press at the centre of a control asserted reachable, two frames apart, with no scripted scroll before it. */
 async function pressSearchControl(renderer, selector, name) {
+  await wheelToSearchControl(renderer, selector, name);
   const before = await renderer.evaluate(reachableExpression(selector));
   await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
   const at = await renderer.evaluate(reachableExpression(selector));
@@ -863,7 +867,6 @@ async function main() {
     const searchCard = `article.library-material[data-material-id="${materialId}"]`;
     const searchField = `${searchCard} [data-library-field="vector-query"]`;
     const searchButton = `${searchCard} [data-library-action="vector-search"]`;
-    await wheelToSearchControl(renderer, searchField, 'library-search-field');
     await pressSearchControl(renderer, searchField, 'library-search-field');
     await renderer.send('Input.insertText', { text: '他们说话' });
     await pressSearchControl(renderer, searchButton, 'library-search-button');
