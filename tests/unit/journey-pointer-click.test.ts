@@ -111,15 +111,11 @@ it('polls a synchronous J-13 predicate until its value becomes truthy', async ()
   }
 });
 
-it.each(['late', 'pending', 'clock-advanced', 'wall-clock-rollback'])('enforces the J-13 deadline for a %s renderer response', async (scenario) => {
+it.each(['late', 'pending', 'wall-clock-rollback'])('enforces the J-13 deadline for a %s renderer response', async (scenario) => {
   vi.useFakeTimers();
   try {
     const renderer = {
       evaluate: async () => {
-        if (scenario === 'clock-advanced') {
-          vi.advanceTimersByTime(20);
-          return true;
-        }
         if (scenario === 'wall-clock-rollback') vi.setSystemTime(Date.now() - 150);
         return new Promise<boolean>(resolve => {
           if (scenario === 'late') setTimeout(resolve, 93, true);
@@ -136,6 +132,24 @@ it.each(['late', 'pending', 'clock-advanced', 'wall-clock-rollback'])('enforces 
     await vi.advanceTimersByTimeAsync(93);
     expect(outcome).toBe('deadline');
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('rejects a true J-13 response after its deadline before the timeout callback is delivered', async () => {
+  vi.useFakeTimers();
+  const clock = vi.spyOn(performance, 'now');
+  try {
+    const renderer = {
+      evaluate: async () => {
+        clock.mockReturnValue(performance.now() + 20);
+        return true;
+      },
+    };
+    // Only the elapsed-time reading moves. The scheduled timeout is still pending when evaluate returns.
+    await expect(journeyWaitBoundary('13')(renderer, 'true', 'deadline', 10)).rejects.toThrow('deadline');
+  } finally {
+    clock.mockRestore();
     vi.useRealTimers();
   }
 });
