@@ -1,4 +1,5 @@
-import { guidelineClauses } from './fast-role/flash-task-contract.js';
+import { StandardTableLibrary, type StandardTableFormatter } from './standard-tables/library.js';
+import { ReviewGuidelineFormatting, type EditorialStoreGuidelineFormatter } from './review-guideline-formatting.js';
 import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
 import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
@@ -713,7 +714,7 @@ import { BACKGROUND_ANALYSIS_LISTED, BACKGROUND_ANALYSIS_NOT_GRANTED, BACKGROUND
 import { BookDeliveryPackageError, BookDeliveryPackages, type PackageReadersReportReading } from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError } from './book-people.js';
-import { ReviewGuidelineError, ReviewGuidelineLedger, readGuidelineFile } from './review-guidelines.js';
+import { ReviewGuidelineError, ReviewGuidelineLedger } from './review-guidelines.js';
 import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvidenceError, ResearchEvidenceLedger } from './research-evidence.js';
 import { FactualVerificationLedger, type ManuscriptReader } from './factual-verification.js';
 import { planEditAssuranceLevel } from './analysis/plan-edits.js';
@@ -1071,10 +1072,6 @@ export type DraftPreparation =
     readonly intentDraft: DraftPromotion;
   };
 
-interface EditorialStoreGuidelineFormatter {
-  model: () => string | null;
-  format: (paragraphs: readonly string[]) => Promise<import('./fast-role/flash-task-contract.js').FlashTaskResult<string[]>>;
-}
 
 export class EditorialStore {
   readonly #importRetentionOperationsHost: importRetentionOperations.ImportRetentionOperationsHost = this.#importRetentionOperationsHostOf();
@@ -1621,6 +1618,12 @@ export class EditorialStore {
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
+    this.#guidelineFormatting = new ReviewGuidelineFormatting(this.#reviewGuidelines, this.#assertAvailable.bind(this), this.#guidelineCall.bind(this));
+    this.standardTables = new StandardTableLibrary({ db: authority, assertAvailable: this.#assertAvailable.bind(this),
+      transaction: operation => this.#transaction(authority, operation), withObjects: operation => this.#withContentObjectLifecycle(operation),
+      keep: async (bytes, digest) => { this.#requireNoAbandonmentCleanupForObject(digest);
+        const existing = authority.prepare('SELECT relative_key FROM content_objects WHERE object_digest = ?').get(digest);
+        return existing ? String(existing.relative_key) : this.#persistContentObject(bytes, digest, 'UNKNOWN'); }, objectPath: this.#contentObjectPath.bind(this) });
     this.#materialIndex = new MaterialIndexLedger(authority);
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#factualVerification = new FactualVerificationLedger(authority);
@@ -5378,47 +5381,13 @@ export class EditorialStore {
     return capturedProcedureOperations.inspectKnowledgeProcedures(this.#capturedProcedureHost);
   }
 
-  #guidelineFormatter: EditorialStoreGuidelineFormatter | null = null;
-  #guidelineOffer: { documentId: string; digest: string; model: string } | null = null;
-
-  useGuidelineFormatter(formatter: EditorialStoreGuidelineFormatter): void {
-    this.#guidelineFormatter = formatter;
+  readonly #guidelineFormatting: ReviewGuidelineFormatting;
+  useGuidelineFormatter(formatter: EditorialStoreGuidelineFormatter): void { this.#guidelineFormatting.useGuidelineFormatter(formatter); }
+  previewReviewGuidelineVersion(documentId: string, path: string | undefined, formatConfirmed = false): Promise<ReviewGuidelinePreviewProjection> {
+    return this.#guidelineFormatting.previewReviewGuidelineVersion(documentId, path, formatConfirmed);
   }
-
-  /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string | undefined, formatConfirmed = false): Promise<ReviewGuidelinePreviewProjection> {
-    this.#assertAvailable();
-    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
-    let read: Awaited<ReturnType<typeof readGuidelineFile>>;
-    try {
-      read = await readGuidelineFile(path);
-    } catch (error) {
-      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
-    const previous = this.#guidelineOffer;
-    this.#guidelineOffer = null;
-    if (formatConfirmed) requireStore(previous?.documentId === documentId && previous.digest === read.source.sha256 &&
-      previous.model === this.#guidelineFormatter?.model(), 'REVIEW_GUIDELINE_CHANGED', '文件或所选模型已变化，请重新选择。');
-    try {
-      return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
-    } catch (error) {
-      if (!(error instanceof StoreError) || error.code !== 'REVIEW_GUIDELINE_NO_CLAUSES' || !this.#guidelineFormatter) throw error;
-      const model = this.#guidelineFormatter.model();
-      if (!model) throw error;
-      const bytes = Buffer.byteLength(guidelineClauses.message(read.paragraphs));
-      if (bytes > guidelineClauses.budget.maxInputBytes) throw new StoreError('REVIEW_GUIDELINE_TOO_LARGE', '文件超过一次整理的范围，请分为较小的规范文件。');
-      if (!formatConfirmed) {
-        this.#guidelineOffer = { documentId, digest: read.source.sha256, model };
-        throw new StoreError('REVIEW_GUIDELINE_FORMAT_OFFER', `文件没有编号。可将选定文件的 ${read.paragraphs.length} 段（约 ${Math.ceil(bytes / 1024)} KB）发给底层 Flash（${model}）整理。预计一次请求，结果可逐条核对后导入。`);
-      }
-      const result = await this.#guidelineFormatter.format(read.paragraphs);
-      if (result.state !== 'checked') throw new StoreError('REVIEW_GUIDELINE_FORMAT_UNAVAILABLE', result.reason);
-      const clauses = result.value;
-      return { ...this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId,
-        { source: read.source, paragraphs: clauses.map((clause, index) => `${index + 1}. ${clause}`) })), modelFormatted: true };
-    }
-  }
+  readonly standardTables: StandardTableLibrary;
+  useStandardTableFormatter(formatter: StandardTableFormatter): void { this.standardTables.useFormatter(formatter); }
 
   /** 确认导入: the previewed version recorded, and the page as it now reads. */
   importReviewGuidelineVersion(previewId: string): ReviewGuidelinesProjection {
@@ -10790,6 +10759,8 @@ export class EditorialStore {
   }
 
   #assertAbandonmentCleanupAuthority(intent: AbandonmentCleanupIntent): void {
+    for (const object of this.#cleanupObjects(intent)) requireStore(!this.#authority.prepare('SELECT 1 FROM standard_table_versions WHERE source_object_digest = ?').get(object.digest),
+      'ABANDON_REFERENCE_CHANGED', '这份文件已作为字表原件保存，不能作为未使用的导入文件删除。');
     const proof = one(
       this.#authority
         .prepare(
@@ -11035,6 +11006,7 @@ export class EditorialStore {
            AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = co.object_digest)
            AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = co.object_digest)
            AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = co.object_digest)
+           AND NOT EXISTS (SELECT 1 FROM standard_table_versions v WHERE v.source_object_digest = co.object_digest)
          ORDER BY co.object_digest`,
       )
       .all() as SqlRow[];
@@ -11053,7 +11025,8 @@ export class EditorialStore {
                AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = content_objects.object_digest)
                AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)
                AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = content_objects.object_digest)
-               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = content_objects.object_digest)`,
+               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = content_objects.object_digest)
+               AND NOT EXISTS (SELECT 1 FROM standard_table_versions v WHERE v.source_object_digest = content_objects.object_digest)`,
           )
           .run(digest);
       });

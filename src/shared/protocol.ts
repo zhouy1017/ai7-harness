@@ -1,3 +1,5 @@
+import { STANDARD_TABLE_CHANNELS, type StandardTableOperations, type StandardTableRendererApi } from './protocol/standard-tables.js';
+export * from './protocol/standard-tables.js';
 import type { ImportReviewServiceOperations, ReturnImportToEditingProjection } from './protocol/import-intake.js';
 export type { ReturnImportToEditingProjection, ImportEditingChoices } from './protocol/import-intake.js';
 import { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
@@ -7,8 +9,7 @@ export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 import type { BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput } from './protocol/review.js';
-import type { TransportSettings } from './protocol/transport-settings.js';
-export type { TransportSettings } from './protocol/transport-settings.js';
+import type { TransportSettings } from './protocol/transport-settings.js'; export type { TransportSettings } from './protocol/transport-settings.js';
 import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, TaskLaunchPreviewInput, ReviewExecutionLaunchInput } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
@@ -300,9 +301,7 @@ import type {
   KnowledgeProceduresProjection,
   ProcedureRecommendationInput,
   ProcedureRecommendationProjection,
-  ReviewGuidelinePreviewProjection,
-  ReviewGuidelinesPage,
-  ReviewGuidelinesProjection,
+  ReviewGuidelinePreviewProjection, ReviewGuidelinesPage, ReviewGuidelinesProjection,
 } from './protocol/knowledge-base.js';
 import type {
   CapturedProcedureApplicabilityProjection,
@@ -523,6 +522,7 @@ export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const IPC_CHANNELS = {
+  ...STANDARD_TABLE_CHANNELS,
   previewTaskLaunch: 'ai7:j04:preview-task-launch',
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
@@ -3800,7 +3800,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations, ReviewPreferenceLifecycleOperations, ImportReviewServiceOperations {
+export interface ServiceOperationMap extends StandardTableOperations, GlobalAgentOperations, HouseWordListOperations, ReviewPreferenceLifecycleOperations, ImportReviewServiceOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
@@ -4878,7 +4878,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, ReviewPreferenceLifecycleRendererApi {
+export interface RendererApi extends StandardTableRendererApi, GlobalAgentRendererApi, HouseWordListApi, ReviewPreferenceLifecycleRendererApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: string; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
