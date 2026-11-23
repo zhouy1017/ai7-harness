@@ -392,7 +392,7 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
- * Protocol 205 (#1517 R4 closure, 0.7.3): PR #1595 (#1506) adds generateReviewSynthesis (生成统合总结 for a settled
+ * Protocol 206 (#1539/#1540 0.8.0 Alpha closure): standard-tables library IPC, 4-role model matrix, version history & upgrade;
  * Review Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection. It is the round's one
  * protocol change. Schema 116 and Data Version 1 are unchanged; closure adds no migration.
  *
@@ -406,7 +406,7 @@ export * from './protocol/scoped-edit.js';
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 205 as const;
+export const SERVICE_PROTOCOL_VERSION = 206 as const;
 
 export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
 export type { BookFindingProjection, BookFindingsProjection, BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput, BookFindingsFilters, BookFindingPlace, BookFindingDecision } from './protocol/review.js';
