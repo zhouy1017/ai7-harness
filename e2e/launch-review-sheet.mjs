@@ -53,8 +53,8 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await pressReviewControl(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-${width}`, '.sheet-foot');
-      // The estimate is shown once computed; a local-only review has no model call to estimate, so its line may be empty.
-      await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-estimate')?.hidden===false`, `review-estimate-${width}`);
+      // The computed estimate replaces the cost row's rough call count; local-only reviews say no model is called.
+      await waitFor(renderer, `/^(?:预计.+；(?:用时暂无可靠估计|按最近同类任务，.+)|只在本机检查，不调用模型)。$/u.test(document.querySelector('dialog.review-sheet .review-consequences [data-consequence="cost"]')?.textContent ?? '')`, `review-estimate-${width}`);
       await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`, `review-plan-reachable-${width}`);
       await pressReviewControl(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-close-${width}`, '.sheet-foot');
     }
