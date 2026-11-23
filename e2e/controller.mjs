@@ -517,6 +517,7 @@ const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-t
 
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    'import-page-primary-visible', 'fidelity-one-sentence', 'single-answer-sentences',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
@@ -813,6 +814,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
+    'reply-draft-kept',
     'comments-inline-reply-column',
     'comments-inline-reply-overlay',
     'comments-connector-reply-overlay',
@@ -1175,6 +1177,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    'selection-menu-swatches', 'comments-header-add', 'mark-draft-kept',
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
     'comments-connector-apply-overlay',
@@ -1752,7 +1755,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'chip-return-retained-busy',
     'chip-return-retained-ready',
     'chip-return-target-missing',
-    'chip-return-status-replaced',
+    'chip-return-arrival-unobserved',
     'chip-return-late-completion',
     'analysis-jump-chip',
     'j14-panel-keyboard',

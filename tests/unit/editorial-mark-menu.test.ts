@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latestAnswer, menuPlacement, sameProcedureEntries, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
+import { editorialMarkMenuGroup, latestAnswer, menuPlacement, sameProcedureEntries, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
 import type { SelectionProcedureEntry } from '../../src/renderer/selection-task-labels.js';
 
 const viewport = { width: 640, height: 400 };
@@ -144,4 +144,14 @@ describe('the house\'s 可复用工序 as the selection menu reads them (Issue #
     await gone.refresh();
     expect(gone.current()).toBeNull();
   });
+});
+
+
+it('keeps all six mark actions, three individually named swatches and their disabled reason', () => {
+  const act = { compose: () => undefined, highlight: () => undefined };
+  const enabled = editorialMarkMenuGroup(undefined, act);
+  expect(enabled.items.map(item => item.action)).toEqual(['add-change-suggestion', 'add-annotation', 'add-editor-note', 'add-highlight-1', 'add-highlight-2', 'add-highlight-3']);
+  expect(enabled.items.slice(3).map(item => [item.label, item.swatch])).toEqual([['加高亮 · 黄', 1], ['加高亮 · 橙', 2], ['加高亮 · 绿', 3]]);
+  const disabled = editorialMarkMenuGroup('请在同一段内选择文字。', act);
+  expect(disabled.items.every(item => item.disabledReason === disabled.note && item.run === undefined)).toBe(true);
 });

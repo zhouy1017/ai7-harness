@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { inWindowPress } from './review-preferences.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, popoverShownInside } from './launch-task-bar.mjs';
@@ -406,8 +407,7 @@ async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const targetLabel = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${targetLabel}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -3834,7 +3834,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
     await click(renderer, '导入稿件', 'word-import-stage');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-import-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-new-book');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'word-import-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-import-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"] [data-word-learn-from-edits]')?.checked === true`, 'word-learning-default-visible');

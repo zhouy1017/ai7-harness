@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
@@ -638,7 +639,7 @@ async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-explicit');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');

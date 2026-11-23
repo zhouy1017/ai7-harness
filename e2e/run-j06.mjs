@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -350,7 +351,7 @@ async function importAndOpen(renderer, title) {
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', 'import-start');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
