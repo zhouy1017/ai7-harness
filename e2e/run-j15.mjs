@@ -429,7 +429,7 @@ function reachableExpression(selector) {
 }
 
 /** The editor's own mouse wheel over the control's scroller, a turn at a time, until the control is reachable. */
-async function wheelIntoView(renderer, selector, name) {
+async function wheelToSearchControl(renderer, selector, name) {
   for (let turn = 0; turn < 60; turn += 1) {
     const at = await renderer.evaluate(reachableExpression(selector));
     requireJourney(at !== null, `${name}-present`, at);
@@ -441,7 +441,7 @@ async function wheelIntoView(renderer, selector, name) {
 }
 
 /** A real press at the centre of a control asserted reachable, two frames apart, with no scripted scroll before it. */
-async function pressReachable(renderer, selector, name) {
+async function pressSearchControl(renderer, selector, name) {
   const before = await renderer.evaluate(reachableExpression(selector));
   await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
   const at = await renderer.evaluate(reachableExpression(selector));
@@ -863,10 +863,10 @@ async function main() {
     const searchCard = `article.library-material[data-material-id="${materialId}"]`;
     const searchField = `${searchCard} [data-library-field="vector-query"]`;
     const searchButton = `${searchCard} [data-library-action="vector-search"]`;
-    await wheelIntoView(renderer, searchField, 'library-search-field');
-    await pressReachable(renderer, searchField, 'library-search-field');
+    await wheelToSearchControl(renderer, searchField, 'library-search-field');
+    await pressSearchControl(renderer, searchField, 'library-search-field');
     await renderer.send('Input.insertText', { text: '他们说话' });
-    await pressReachable(renderer, searchButton, 'library-search-button');
+    await pressSearchControl(renderer, searchButton, 'library-search-button');
     const searchFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-search-found');
     const search = searchFound.cards.find((card) => card.id === materialId).vectorSearch;
     requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&

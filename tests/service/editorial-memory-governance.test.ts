@@ -212,7 +212,7 @@ it('refreshes ordinary preference pins after memory acceptance before stopping f
   const candidate = make(create([signals[0]!.signalId], '保留合成作者节奏。'));
   const view = await ordinaryMemory(subject);
   try {
-    await view.click(`[data-memory-item="${candidate.itemId}"]`, '接受记忆');
+    await view.click(`[data-memory-item="${candidate.itemId}"]`, '接受');
     expect(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
       scope: { kind: 'house' }, categoryId: preference.categoryId, text: '', effect: 'guide' })).toThrow('刚在别处改过');
     await view.click(`[data-review-preference="${preference.itemId}"]`, '停用');
