@@ -2513,7 +2513,12 @@ async function main() {
       let settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'j12-tier-flash'});
       const role=(id)=>settings.modelRoles.find(item=>item.roleId===id);
       if(settings.modelRoles.map(item=>item.roleId).join(',')!=='foreground-pro,foreground-flash,underlying-pro,underlying-flash')return false;
-      if(role('underlying-flash')?.binding?.modelId!=='j12-tier-flash'||role('underlying-flash').source!=='flash-tier'||role('foreground-pro').binding?.modelId!=='deepseek-flash')return false;
+      if(role('foreground-flash')?.binding?.modelId!=='j12-tier-flash'||role('foreground-pro')?.binding?.modelId!=='deepseek-flash')return false;
+      if(role('underlying-flash')?.source!=='channel-recommended-flash'||role('underlying-flash').binding?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.selectUnderlyingModel({roleId:'underlying-flash',route:'deepseek-open-platform',modelId:'j12-underlying-flash'});
+      if(role('underlying-flash')?.binding?.modelId!=='j12-underlying-flash'||role('foreground-flash')?.binding?.modelId!=='j12-tier-flash')return false;
+      settings=await window.ai7.selectUnderlyingModel({roleId:'underlying-flash',inherit:true});
+      if(role('underlying-flash')?.source!=='channel-recommended-flash')return false;
       settings=await window.ai7.clearFlashModel();
       if(role('foreground-flash')?.source!=='follows-foreground-pro'||role('foreground-flash').sourceLabel!=='跟随前台 Pro'||role('foreground-flash').binding?.modelId!=='deepseek-flash')return false;
       await window.ai7.selectProModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
