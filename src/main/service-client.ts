@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
+import { GUIDELINE_FORMAT_TIMEOUT_MS } from '../shared/protocol/transport-settings.js';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import {
   MAX_FRAME_BYTES,
@@ -81,8 +82,10 @@ export function journeyClose(
  */
 export function requestTimeoutMs(operation: 'testModelServiceConnection'): null;
 export function requestTimeoutMs(operation: Exclude<ServiceOperation, 'testModelServiceConnection'>): number;
-export function requestTimeoutMs(operation: ServiceOperation): number | null;
-export function requestTimeoutMs(operation: ServiceOperation): number | null {
+export function requestTimeoutMs(operation: ServiceOperation, input?: unknown): number | null;
+export function requestTimeoutMs(operation: ServiceOperation, input?: unknown): number | null {
+  if (operation === 'previewReviewGuidelineVersion' && typeof input === 'object' && input !== null &&
+      'formatConfirmed' in input && input.formatConfirmed === true) return GUIDELINE_FORMAT_TIMEOUT_MS + REQUEST_TIMEOUT_MS;
   // The unchanged single-response protocol has no permit-granted signal. The service owns this
   // probe's post-grant model deadline; ordinary/startup/shutdown watchdogs remain independent.
   if (operation === 'testModelServiceConnection') return null;
@@ -392,7 +395,7 @@ export class ServiceClient {
     frame.writeUInt32BE(payload.length, 0);
     payload.copy(frame, 4);
     return new Promise<ServiceOperationMap[Operation]['output']>((resolve, reject) => {
-      const timeoutMs = requestTimeoutMs(operation);
+      const timeoutMs = requestTimeoutMs(operation, input);
       this.#pending.set(id, {
         operation,
         resolve: (value) => resolve(value as ServiceOperationMap[Operation]['output']),

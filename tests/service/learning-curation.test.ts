@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { allowedProductionBindingOf, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText } from '../support/composed-fixture.js';
@@ -12,6 +12,7 @@ let roots: ServiceTestRoots, store: EditorialStore, owner: BaselineAnalysisExecu
 let book: Awaited<ReturnType<typeof importSample1Book>>;
 let sent: Array<{ model: string; messages: Array<{ role: string; content: string }>; tools?: unknown[] }>;
 let tidy: (source: Array<{ exampleId: string; beforeDigest: string; afterDigest: string }>) => unknown;
+let credential: () => string | null;
 let answer: () => Promise<Response>;
 const budget = { maxPasses: 2, totalTokens: 40_000, perPassTokens: 20_000 };
 const inspect = () => store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
@@ -25,7 +26,7 @@ function edit(text = '校订', index = 0): void {
     baseRevisionId: view.revisionId, blockId: block.blockId, windowStartBlockId: view.blocks[0]!.blockId,
     baseBlockDigest: block.digest, expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: text });
 }
-function enable(): void { store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: inspect().controlEntries, curation: budget }); }
+function enable(): void { store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: inspect().controlEntries, offerDigest: inspect().curation!.offerDigest!, curation: budget }); }
 async function run(): Promise<void> {
   owner.setBackgroundIdle(true); owner.startLearningCuration(store);
   await owner.whenIdle();
@@ -40,22 +41,23 @@ beforeEach(async () => {
   store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'opencode-go');
   store.selectModelServiceRoute('opencode-go');
   const binding = { ...allowed, credentialReference: connection.credentialReference };
-  const flash = { ...binding, model: 'glm-5.3-flash', reasoningEffort: 'low' };
+  const flash = { ...binding, model: 'deepseek-v4-flash', reasoningEffort: 'low' };
   const pro = { ...binding, reasoningEffort: 'high' };
   const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding, binding, { pro, flash });
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
     learningBinding: role => ({ ...(role === 'underlying-flash' ? flash : pro), scope: 'ordinary-production', runBudgetCeiling: 'unset' }),
     live: { ...binding, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
   tidy = examples => examples.map(({ exampleId, beforeDigest, afterDigest }) => ({ exampleId, beforeDigest, afterDigest, editorialDimension: 'typos-and-usage' }));
+  credential = () => 'synthetic-curation-test-placeholder';
   sent = []; answer = async () => response();
   owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, requestGovernor: new ModelRequestGovernor(),
     launchPolicy: policy, currentLaunchPolicy: () => policy, fixture: null,
-    secretResolver: { resolve: async () => 'synthetic-curation-test-placeholder' },
+    secretResolver: { resolve: async () => credential() },
     production: { scope: 'ordinary-production', nativeFetch: async (_url, input) => {
       const request = JSON.parse(String(input?.body));
       sent.push(request);
       const data = JSON.parse(request.messages.find((entry: { role: string }) => entry.role === 'user').content);
-      if (Array.isArray(data)) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(tidy(data)) }, finish_reason: 'stop' }],
+      if (Array.isArray(data)) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items: tidy(data) }) }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 100, completion_tokens: 80 } }));
       return answer();
     } } });
@@ -81,7 +83,7 @@ describe('enabled learning curation through real Task/Run, DSH and final gate', 
     answer = async () => response([{ title: '保持语句简洁', editorialDimension: 'typos-and-usage', confidence: 0.6, exampleIds: ['e1'] }]);
     await run();
     expect(sent).toHaveLength(2); expect(sent[0]!.tools ?? []).toEqual([]);
-    expect(sent[0]!.model).toBe('glm-5.3-flash');
+    expect(sent[0]).toMatchObject({ model: 'deepseek-v4-flash', response_format: { type: 'json_object' } });
     expect(sent[1]!.model).not.toBe(sent[0]!.model);
     const packet = JSON.parse(sent[1]!.messages.find((entry) => entry.role === 'user')!.content);
     expect(packet.examples).toEqual([{ exampleId: 'e1', sourceRef: 's1', sourceKind: 'manual-edit-journal', operation: 'edit',
@@ -97,6 +99,56 @@ describe('enabled learning curation through real Task/Run, DSH and final gate', 
     store.changeEditorialLearning({ kind: 'material', signalId: signal.signalId });
     expect(inspect().items[0]!.usable).toBe(false);
     expect(store.inspectHouseReviewPreference().current?.lines.some((line) => line.owner?.itemId === memory.current.itemId)).toBe(false);
+  });
+
+  it.each([1, 2, 3])('releases an unsent batch after missing credential read %i and sends it once after recovery', async missingRead => {
+    enable(); edit();
+    let reads = 0;
+    credential = () => ++reads === missingRead ? null : 'synthetic-present';
+    await run();
+    expect(sent).toHaveLength(0);
+    expect(inspect().curation).toMatchObject({ passesUsed: 0, reservedTokens: 0 });
+    credential = () => 'synthetic-present';
+    await Promise.all([run(), run()]);
+    await run();
+    expect(sent).toHaveLength(2);
+    expect(inspect().curation).toMatchObject({ passesUsed: 1, reservedTokens: 20_000 });
+  });
+
+  it.each(['underlying-flash', 'underlying-pro'] as const)('binds confirmation to the disclosed %s recipient', async changed => {
+    const offer = inspect();
+    const launch = store.baselineAnalysisLedger.launch;
+    const flash = launch.learningBinding!('underlying-flash')!;
+    const other = store.saveModelServiceConnection('Synthetic second channel', null, 'ready', 'openai-platform');
+    store.selectUnderlyingModel({ roleId: changed, route: 'openai-platform', modelId: 'alternate-model' });
+    const replacement = store.getConfiguredModelRoleBinding(changed)!;
+    expect(replacement.credentialReference).toBe(other.credentialReference);
+    const pro = launch.learningBinding!('underlying-pro')!;
+    const selected = { ...flash, ...(changed === 'underlying-flash' ? allowedProductionBindingOf(replacement, 'fast-interaction') : allowedProductionBindingOf(replacement))!,
+      credentialReference: replacement.credentialReference };
+    const roles = { pro: changed === 'underlying-pro' ? selected : pro, flash: changed === 'underlying-flash' ? selected : flash };
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', pro, pro, roles);
+    store.baselineAnalysisLedger.bindLaunch({ ...launch, policy, learningBinding: role => role === 'underlying-flash' ? roles.flash : roles.pro });
+    expect(inspect().curation!.offerDigest).not.toBe(offer.curation!.offerDigest);
+    expect(() => store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: offer.controlEntries,
+      curation: budget, offerDigest: offer.curation!.offerDigest! })).toThrow(/重新查看并确认/u);
+    edit(); await run();
+    expect(sent).toEqual([]);
+    expect(inspect().curation!.envelope).toBeNull();
+    enable();
+    const envelope = inspect().curation!.envelope!;
+    expect(changed === 'underlying-flash' ? envelope.tidying?.binding : envelope.binding).toMatchObject(replacement);
+  });
+
+  it('attributes each proposal only to the retained examples it cites', async () => {
+    enable(); edit('修改甲'); edit('修改乙', 1); edit('修改丙', 2);
+    const signalIds = inspect().signals.map(signal => signal.signalId).reverse();
+    tidy = items => items.slice(1).map(({ exampleId, beforeDigest, afterDigest }) => ({ exampleId, beforeDigest, afterDigest, editorialDimension: 'typos-and-usage' }));
+    answer = async () => response(['e2','e3'].map(id => ({ title: id, editorialDimension: 'typos-and-usage', confidence: 0.5, exampleIds: [id] })));
+    await run();
+    const items = inspect().items.map(entry => entry.current).sort((a,b) => a.title.localeCompare(b.title));
+    expect(items.map(item => item.signalIds)).toEqual([[signalIds[1]], [signalIds[2]]]);
+    expect(items.map(item => 'sources' in item && item.sources.map(source => source.signalId))).toEqual([[signalIds[1]], [signalIds[2]]]);
   });
 
   it('holds a changed sample digest before any Pro request or proposal', async () => {

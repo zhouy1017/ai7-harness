@@ -328,7 +328,9 @@ export class EditorialLearningLedger {
     const rows = this.db.prepare(`SELECT s.* FROM learning_signals s WHERE s.book_id = ? AND NOT EXISTS (
       SELECT 1 FROM analysis_plan_records p, json_each(p.canonical_json, '$.signalIds') member
       WHERE p.component = 'run-source-scope' AND json_extract(p.canonical_json, '$.schema') = 'ai7.qualified-learning-curation/1'
-        AND member.value = s.signal_id) ORDER BY s.rowid DESC LIMIT 100`).all(bookId) as Row[];
+        AND member.value = s.signal_id AND NOT EXISTS (
+          SELECT 1 FROM analysis_task_outcomes o WHERE o.task_intent_id = p.task_intent_id
+            AND json_extract(o.canonical_json, '$.retryAfterCredential') = 1)) ORDER BY s.rowid DESC LIMIT 100`).all(bookId) as Row[];
     const selected: string[] = [];
     for (const row of rows) {
       const signal = this.#provedSignal(row);
@@ -508,17 +510,19 @@ export class EditorialLearningLedger {
     requireLearning(this.prepareCuration(bundle.bookId, bundle.signalIds).digest === bundle.digest);
     if (this.db.prepare(`SELECT 1 FROM global_editorial_memory_item_versions WHERE json_extract(canonical_json, '$.curation.runRecordId') = ?`)
       .get(run.runRecordId)) return;
-    const sources = bundle.signalIds.map((signalId) => this.sourceSnapshot(signalId));
+    const sourcesByExample = new Map(bundle.examples.map((example, index) => [example.exampleId, bundle.sources[index]!.signalId]));
     for (const proposal of proposals) {
       requireLearning(!new SupervisionDirectives(this.db).history('ordinary-production').some((directive) => directive.effect === 'freeze' &&
         (directive.scope.kind === 'house' || directive.scope.kind === 'book' && directive.scope.bookId === bundle.bookId ||
           directive.scope.kind === 'category' && directive.categoryId === proposal.editorialDimension)));
-      requireLearning(proposal.exampleIds.length > 0 && proposal.exampleIds.every((id) => bundle.examples.some((example) => example.exampleId === id)));
+      requireLearning(proposal.exampleIds.length > 0 && proposal.exampleIds.every(id => sourcesByExample.has(id)));
+      const signalIds = proposal.exampleIds.map(id => sourcesByExample.get(id)!);
+      const sources = signalIds.map(id => this.sourceSnapshot(id));
       const version: EditorialMemoryVersion = { schema: 'ai7.global-editorial-memory/2', itemId: randomUUID(), versionId: randomUUID(),
         ordinal: 1, supersedes: null, recordedAt: new Date().toISOString(), operationalScope: 'ordinary-production',
         applicability: sources.every((source) => source.eligibility === 'house') ? { kind: 'house' } : { kind: 'book', bookId: bundle.bookId },
         editorialDimension: proposal.editorialDimension, title: proposal.title, confidence: proposal.confidence,
-        state: 'proposed', actor: 'AI7', actionId: randomUUID(), action: 'create', signalIds: [...bundle.signalIds], sources,
+        state: 'proposed', actor: 'AI7', actionId: randomUUID(), action: 'create', signalIds, sources,
         positiveExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind !== 'rejected' ? [source.source] : []),
         negativeExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind === 'rejected' ? [source.source] : []),
         parentVersions: [], supervisionDirectiveRefs: [], curation: { taskIntentId: run.taskIntentId, runRecordId: run.runRecordId, bundleDigest: bundle.digest } };

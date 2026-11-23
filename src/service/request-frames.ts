@@ -1633,8 +1633,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
         if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
       } else {
-        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
-        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation', 'offerDigest'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || typeof input.offerDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.offerDigest) || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
         if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
             !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
       }

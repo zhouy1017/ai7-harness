@@ -25,6 +25,8 @@ describe('underlying Flash contracts', () => {
     expect(retrievalRerank.validateAndTrace('["other"]', source)).toBeNull();
     expect(queryExpansion.validateAndTrace('["书单","目录","书目索引"]', source.query)).toHaveLength(3);
     expect(queryExpansion.validateAndTrace('["书单"]', source.query)).toBeNull();
+    expect(queryExpansion.validateAndTrace('{"items":["书单","目录","书目索引"],"extra":true}', source.query)).toBeNull();
+    expect(retrievalRerank.validateAndTrace('{"items":["unknown"]}', source)).toBeNull();
     service.dispose();
   });
 

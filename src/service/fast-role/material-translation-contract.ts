@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { SourceTranslator } from '../analysis/factual-review-evidence.js';
 import type { FlashTaskContract } from './flash-task-contract.js';
 import { DEFAULT_TRANSPORT_SETTINGS } from '../provider/request-deadlines.js';
 import { extractModelJson, type SalvagedModelResult, canonicalJson, sha256Hex } from '../analysis/canonical.js';
@@ -184,5 +186,19 @@ export function materialTranslator(
         },
       };
     },
+  };
+}
+
+/** Factual evidence and library translation share the same underlying model owner. */
+export function evidenceTranslator(underlying: () => FastRoleExecutionOwner): SourceTranslator {
+  return async ({ text }) => {
+    const owner = underlying();
+    if (owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
+    try {
+      const answer = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
+      if (answer.kind !== 'answered') return null;
+      const translated = readMaterialTranslationAnswer(answer.text, 1)?.[0];
+      return translated == null ? null : { text: translated, route: answer.binding.route, model: answer.binding.model };
+    } catch { return null; }
   };
 }

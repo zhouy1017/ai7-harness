@@ -6553,12 +6553,14 @@ export class EditorialStore {
     return learningSupervision.prepareLearningCuration(this.#editorialLearningHost, bookId, signalIds);
   }
 
-  nextLearningCuration(): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost); }
+  pendingLearningControl() { return learningSupervision.pendingLearningControl(this.#editorialLearningHost); }
+
+  nextLearningCuration(checkedEntryId?: string): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost, checkedEntryId); }
 
   learningCurationCurrent(run: CurationRun): boolean { return learningSupervision.learningCurationCurrent(this.#editorialLearningHost, run); }
 
-  publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
-    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, evidence);
+  publishLearningCuration(run: CurationRun, text: string, retainedIds: readonly string[], evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, retainedIds, evidence);
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */

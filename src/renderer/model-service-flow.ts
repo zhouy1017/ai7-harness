@@ -510,7 +510,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       const target = tier === 'main' ? actions : optional;
       const current = role?.binding;
       const summary = el('p', 'field-note', `${role?.roleLabel ?? label}：${current ? current.providerLabel + ' / ' + modelLabelWords(current) : '尚未设置'} · ${current?.reasoningEffort ?? '模型默认强度'}`);
-      const inherit = el('button', 'quiet', tier === 'main' ? '跟随前台 Pro' : '跟随前台 Flash');
+      const inherit = el('button', 'quiet', tier === 'main' ? '跟随前台 Pro' : '恢复底层 Flash 默认模型');
       inherit.type = 'button';
       inherit.dataset['action'] = 'inherit-' + roleId;
       inherit.addEventListener('click', () => void (async () => {

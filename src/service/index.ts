@@ -2156,7 +2156,7 @@ async function run(): Promise<void> {
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
-    { materialTranslator, MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage, readMaterialTranslationAnswer },
+    { materialTranslator, evidenceTranslator, MATERIAL_TRANSLATION_KIND },
     { AgentWorkspace: AgentWorkspaceClass },
     { ServiceRequestLoop },
   ] =
@@ -2393,16 +2393,7 @@ async function run(): Promise<void> {
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
-      sourceTranslator: async ({ text }) => {
-        const owner = fastRole?.owner;
-        if (owner === undefined || owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
-        try {
-          const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
-          if (result.kind !== 'answered') return null;
-          const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
-          return translated == null ? null : { text: translated, route: result.binding.route, model: result.binding.model };
-        } catch { return null; }
-      },
+      sourceTranslator: evidenceTranslator(() => underlyingOwner),
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).
       factualRunStart: (input) => {
         guardedStore.recordFactualRunAssurance({ ...input,

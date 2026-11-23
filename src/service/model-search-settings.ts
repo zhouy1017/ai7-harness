@@ -21,6 +21,7 @@ import {
   modelRoleIdOf,
   modelServiceChannelOf,
   modelServiceModels,
+  modelServiceRecommendedModels,
   modelServiceRouteRefusal,
   modelServiceRuntimeBinding,
   modelTierOf,
@@ -269,7 +270,7 @@ export interface ResolvedModelRole {
 }
 
 /**
- * Resolve explicit role choices and ADR 0107's defaults (#1650). Underlying Flash follows foreground Flash before Pro.
+ * Resolve explicit role choices and ADR 0107's defaults (#1650). An unset underlying Flash role takes the primary channel’s served recommendation first.
  * Unusable Flash choices are retained while following their defaults; an unusable chosen Pro model does not choose another
  * channel. Per-Task choices retain M1's channel-default semantics, including a usable chosen Flash model on that channel.
  */
@@ -291,21 +292,28 @@ export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleI
     ? connections.find(candidate => candidate.connectionId === proChoice.connectionId) : pro;
   let effectiveModel = modelOf(effectiveConnection, proChoice);
   let source: ModelRoleSource = 'pro-tier';
-  // Underlying Flash follows foreground Flash before Pro. No inherited model is persisted as a copy.
-  const flashChoices = roleId === 'underlying-flash' ? [choiceOf('underlying-flash'), choiceOf('foreground-flash')] : [choiceOf('foreground-flash')];
   if (flash) {
     source = 'follows-foreground-pro';
-    for (const choice of flashChoices) {
+    const foreground = choiceOf('foreground-flash');
+    const underlying = roleId === 'underlying-flash' ? choiceOf('underlying-flash') : undefined;
+    const recommended = roleId === 'underlying-flash' && underlying === undefined && pro?.credentialOperationState === 'ready'
+      ? modelServiceRecommendedModels(pro.binding.providerId)?.flash.find(id => modelServiceRuntimeBinding(pro.binding.providerId, id, 'fast') !== undefined)
+      : undefined;
+    const recommendation = pro && recommended ? { connectionId: pro.connectionId, modelId: recommended } : undefined;
+    for (const choice of [underlying, recommendation, foreground]) {
       if (choice === undefined) continue;
       const candidate = connections.find(entry => entry.connectionId === choice.connectionId);
       if (candidate?.credentialOperationState !== 'ready') { source = 'flash-unavailable-follows-foreground-pro'; continue; }
       if (modelServiceRouteRefusal(candidate.binding.providerId, choice.modelId, 'fast') !== null) { source = 'flash-not-served-follows-foreground-pro'; continue; }
-      effectiveConnection = candidate; effectiveModel = modelOf(candidate, choice); source = 'flash-tier'; break;
+      effectiveConnection = candidate;
+      effectiveModel = modelOf(candidate, choice);
+      source = choice === recommendation ? 'channel-recommended-flash' : 'flash-tier';
+      break;
     }
   }
   const perTask = override.modelConnectionId !== undefined;
   const connection = perTask ? connections.find(candidate => candidate.connectionId === override.modelConnectionId) : effectiveConnection;
-  const model = perTask && !(flash && source === 'flash-tier' && connection === effectiveConnection)
+  const model = perTask && !(flash && (source === 'flash-tier' || source === 'channel-recommended-flash') && connection === effectiveConnection)
     ? connection?.binding ?? null : effectiveModel;
   const resolved = { roleId, source, connection: connection ?? null, model, refusal: null,
     usedChoice: connection === undefined || model === null ? null : { connectionId: connection.connectionId, modelId: override.modelId ?? model.modelId,
@@ -387,7 +395,6 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
       writeModelRoleChoice(host.authority, item === 'main' ? 'foreground-pro' : 'foreground-flash', {
         connectionId: saved.connectionId, modelId, ...(selectedModel.reasoningEffort === undefined ? {} : { reasoningEffort: selectedModel.reasoningEffort }),
       });
-      if (item === 'fast' && role !== 'foreground-flash') writeModelRoleChoice(host.authority, 'underlying-flash', null);
     }
   });
 }

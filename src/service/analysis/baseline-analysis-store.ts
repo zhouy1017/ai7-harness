@@ -453,7 +453,7 @@ export class BaselineAnalysisStore {
   }
 
   settleCuration(run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted',
-    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
+    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; retryAfterCredential?: boolean; reason: string }): void {
     return curationRuns.settleCuration(this.#curationRunsHost, run, state, evidence);
   }
 
@@ -4779,7 +4779,8 @@ export class BaselineAnalysisStore {
         this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
     }
     let retainedPolicy: LaunchPolicyProjection | null = null;
-    if (retainedBinding !== null && selectedMetadata.selectedPolicyIdentity === undefined && productionBinding !== null) {
+    if (retainedBinding !== null && productionBinding !== null && (selectedMetadata.selectedPolicyIdentity === undefined ||
+        retainedBinding.binding.policyPin.providerProcessingVersion !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION)) {
       retainedPolicy = this.#launch.retainedPolicyFor?.(retainedBinding.binding.policyPin,
         { ...productionBinding, credentialReference: providerPlan.remoteBinding.credentialReference }) ?? null;
       requireAnalysis(retainedPolicy !== null, 'ANALYSIS_RECORD_INVALID', '历史执行绑定缺少准确的已核实策略阅读。');

@@ -28,6 +28,7 @@ import {
 import { transmitOnce } from '../provider/live-transmission.js';
 import { localFixtureRegisteredProfile, type LocalFixtureExecutionContext, type LocalFixtureRuntimeContext, type ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, ProviderResultCacheError, type ProviderTestItemSlice } from '../provider/provider-result-cache.js';
+import { GUIDELINE_FORMAT_TIMEOUT_MS } from '../../shared/protocol/transport-settings.js';
 import { connectionTestTransport } from '../provider/request-deadlines.js';
 import {
   CONFLICT_REGENERATE_KIND,
@@ -309,6 +310,8 @@ export class UnderlyingFlashService {
     this.#inFlight = true;
     const cancellation = new AbortController();
     this.#requestAbort = cancellation;
+    const operationTimer = kindId === 'guideline-clause-formatting'
+      ? setTimeout(() => cancellation.abort(new DOMException('规范整理超过时限。', 'TimeoutError')), GUIDELINE_FORMAT_TIMEOUT_MS) : undefined;
     let producer: ModelRequestProducer | null = null;
     try {
       if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
@@ -318,6 +321,7 @@ export class UnderlyingFlashService {
       return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal, readMemory);
     } finally {
       if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
+      clearTimeout(operationTimer);
       this.#requestAbort = null;
       this.#inFlight = false;
       this.#active = null;
@@ -440,6 +444,7 @@ export class UnderlyingFlashService {
             codes,
             profile,
             modelProfile: route.modelProfile,
+            verifyResponseModel: kind.kindId === CONNECTION_TEST_KIND,
             signal,
             beforeSend: () => requireRunning(signal),
             ...(kind.kindId === CONNECTION_TEST_KIND ? { transportSettings: connectionTestTransport(live.transportSettings) }

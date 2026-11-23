@@ -1,3 +1,4 @@
+import { evidenceTranslator } from '../../src/service/fast-role/material-translation-contract.js';
 import { STRUCTURED_FLASH_TASKS } from '../../src/service/fast-role/flash-task-contract.js';
 import * as egressGate from '../../src/service/provider/egress-gate.js';
 import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
@@ -955,7 +956,7 @@ it.each(['queued', 'body', 'current-projection'] as const)('orders real-store se
     probe: (selection, execution) => testModelServiceConnection(store, roots.codeRoot, {
       scope: 'ordinary-production', nativeFetch: (async () => { sends += 1; return { status: 200, json: async () => { consuming.resolve(); return body.promise; } }; }) as unknown as typeof fetch,
     }, selection, { resolve: async () => 'public-synthetic-placeholder' }, execution),
-    probeCompleted: async () => { refreshed += 1; await production.rebind(store); finalFastRoute = store.getConfiguredModelRoleBinding('fast-interaction')?.route; },
+    probeCompleted: async () => { refreshed += 1; await production.rebind(store); finalFastRoute = store.getConfiguredModelRoleBinding('foreground-flash')?.route; },
     dispatch: async (request) => {
       if (request.op === 'saveModelServiceConnection') {
         const value = store.saveModelServiceConnection(request.input.connectionName, request.input.credentialReference,
@@ -1436,6 +1437,59 @@ describe('schema 72 (Issue #811)', () => {
 
 
 describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
+  it('allows a confirmed guideline request to wait for its first byte and settles a silent send once', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic guideline', null, 'ready', 'opencode-go');
+    const fast = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, fast);
+    const reading = deferred();
+    let sends = 0;
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: (async (_url: string, init: { signal: AbortSignal }) => {
+        sends++;
+        return { status: 200, json: () => new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+          reading.resolve();
+        }) };
+      }) as unknown as typeof fetch }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    vi.useFakeTimers();
+    const contract = STRUCTURED_FLASH_TASKS['guideline-clause-formatting'];
+    const task = owner.execute(contract, ['合成条款'], 'preview');
+    try {
+      await reading.promise;
+      await vi.advanceTimersByTimeAsync(contract.budget.firstByteSeconds * 1000 - 1);
+      expect(owner.busy).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await task).toMatchObject({ state: 'outcome-unknown', value: null });
+      expect(sends).toBe(1);
+      expect(owner.busy).toBe(false);
+    } finally { owner.dispose(); vi.useRealTimers(); }
+  });
+
+  it('validates object-mode Go output on all four general structured contracts', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'deepseek-v4-flash' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, null, { pro: null, flash: binding });
+    const replies: unknown[][] = [['目录','书目','索引'], ['second'], ['核对图题。'], [{ paragraph: 1, recommended: '甲', discouraged: ['乙'] }]];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        expect(request).toMatchObject({ model: binding.model, response_format: { type: 'json_object' } });
+        expect(request.messages[0].content).toContain('"items"');
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items: replies.shift() }) }, finish_reason: 'stop' }] }));
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    try {
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['retrieval-query-expansion'], '目录', 'expand')).toMatchObject({ state: 'checked' });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['retrieval-rerank'], { query: '目录', candidates: [{ id: 'second', preview: '书目' }] }, 'rank'))
+        .toEqual({ state: 'checked', value: ['second'] });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['guideline-clause-formatting'], ['核对图题。'], 'format')).toMatchObject({ state: 'checked' });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['standards-table-formatting'], ['甲乙'], 'table')).toMatchObject({ state: 'checked', value: [{ status: '待确认' }] });
+      expect(replies).toHaveLength(0);
+    } finally { owner.dispose(); }
+  });
+
   it('validates each new underlying Flash answer on the configured route without replaying an earlier result', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Synthetic formatter', null, 'ready', 'openai-platform');
@@ -1443,7 +1497,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, binding);
     const bodies: Array<Record<string, unknown>> = [];
-    const replies = ['["核对图题。"]', '["修改原文。"]'];
+    const replies = ['{"items":["核对图题。"]}', '["修改原文。"]'];
     const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
       { scope: 'ordinary-production', nativeFetch: async (url, init) => {
         bodies.push(JSON.parse(String(init?.body)));
@@ -1462,7 +1516,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
   it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Fast effort', null, 'ready', 'openai-platform');
-    store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'high');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'custom-fast-model', reasoningEffort: 'high' });
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
     const bodies: Array<Record<string, unknown>> = [];
@@ -1478,7 +1532,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const answer = await owner.ask('material-translation', 'Public synthetic reference text.', 'effort-proof');
       expect(answer).toMatchObject({ kind: 'answered', binding: { model: 'custom-fast-model', reasoningEffort: 'high' } });
       expect(bodies).toHaveLength(1); expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
-      store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'low');
+      store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'custom-fast-model', reasoningEffort: 'low' });
       const second = await owner.ask('material-translation', 'Public synthetic second reference text.', 'second-effort-proof');
       expect(second).toMatchObject({ kind: 'answered', binding: { reasoningEffort: 'low' } });
       expect(bodies).toHaveLength(2); expect(bodies[1]).toMatchObject({ reasoning: { effort: 'low' } });
@@ -1496,14 +1550,17 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     }) as unknown as typeof fetch;
   }
 
-  it('translates 来源译文 on the Pro model when only a Pro model is chosen (#1620)', async () => {
+  it('translates 来源译文 on the recommended underlying Flash when only a Pro model is chosen', async () => {
     const { store } = await openProductionStore();
     store.saveModelServiceConnection('Pro only OpenAI', null, 'ready', 'openai-platform');
     store.selectModelServiceRoute('openai-platform');
     store.selectMainRoleModel('openai-platform', 'gpt-5.6-sol');
+    store.saveModelServiceConnection('Foreground Go', null, 'ready', 'opencode-go');
+    store.selectForegroundFlashModel('opencode-go', 'different-foreground-model');
+    const foreground = store.getConfiguredModelRoleBinding('foreground-flash')!;
     const main = store.getConfiguredModelRoleBinding('main-editorial')!;
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
-    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+    const fast = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', main, foreground, { pro: main, flash: fast });
     const calls: Array<{ url: string; model: string; cap: number }> = [];
     const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
       { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA,
@@ -1511,7 +1568,10 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     try {
       const result = await materialTranslator(owner, 'ordinary-production', () => 1).translate('b'.repeat(64), ['Public synthetic reference text for a Pro-only translation.'], 'pro-only');
       expect(result.kind).toBe('translated');
-      expect(calls.map((call) => [call.url, call.model])).toEqual([[main.endpoint, 'gpt-5.6-sol']]);
+      const evidence = await evidenceTranslator(() => owner)({ text: 'Synthetic evidence sentence.', url: 'https://example.org/evidence' });
+      expect(evidence).toMatchObject({ route: fast.route, model: fast.model });
+      expect(calls.map(call => call.model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna']);
+      expect(foreground.model).toBe('different-foreground-model');
     } finally { owner.dispose(); }
   });
 
@@ -1529,7 +1589,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const tested = await testModelServiceConnection(store, roots.codeRoot,
         { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') }, { route: 'openai-platform', modelId }, resolver, { requestGovernor });
       expect(tested).toMatchObject({ modelId, outcome: 'passed', verified: 'buffered-text-only' });
-      store.selectFastRoleModel('openai-platform', modelId);
+      store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId });
       expect(store.getConfiguredModelRoleBinding('main-editorial')?.credentialReference).toBe(official.credentialReference);
       expect(store.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe(modelId);
     }

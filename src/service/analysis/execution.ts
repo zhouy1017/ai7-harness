@@ -9,7 +9,7 @@ import { parseFactualClaimVerification } from './factual-claim-contract.js';
 import { withProviderResponseSalvage } from '../provider/response-normalization.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './factual-recheck.js';
 import { learningTidying, runStructuredFlashTask } from '../fast-role/flash-task-contract.js';
-import { parseCurationResult, CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
+import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
@@ -43,7 +43,7 @@ import {
   type OrdinaryProductionRuntime,
   type ConfiguredProviderBinding,
 } from '../launch-policy.js';
-import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
+import { CredentialBroker, CredentialBrokerError, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { classifyModelFailure, evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
@@ -556,7 +556,7 @@ export class BaselineAnalysisExecutionOwner {
   #curation: { abort: AbortController; done: Promise<void> } | null = null;
 
   /** One tool-free turn on the existing F17 lane, using the same broker, physical governor and final gate. */
-  startLearningCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
+  startLearningCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
     if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
       !isOrdinaryProductionRuntime(this.#live())) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
@@ -564,17 +564,23 @@ export class BaselineAnalysisExecutionOwner {
     active.done = this.#executeCuration(store, active.abort.signal).finally(() => { this.#curation = null; this.#drain(); this.#changed(); });
   }
 
-  async #executeCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
+  async #executeCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
     signal: AbortSignal): Promise<void> {
     const live = this.#live();
     if (!isOrdinaryProductionRuntime(live)) return;
     const ledger = this.#deps.ledger;
     let run: CurationRun | null = null, harness: PrimaryAgentHarnessHandle | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, producer: ModelRequestProducer | null = null;
-    let usage: UsageFacts | null = null, sent = false;
+    let usage: UsageFacts | null = null, sent = false, missingCredential = false;
     try {
       if (!this.#backgroundIdle || signal.aborted) return;
-      run = store.nextLearningCuration();
+      const control = store.pendingLearningControl();
+      if (!control?.envelope.tidying) return;
+      for (const binding of [control.envelope.tidying.binding, control.envelope.binding]) {
+        if (await this.#broker.checkPlanReadiness(binding.credentialSlot, binding.credentialReference) !== 'present') return;
+      }
+      if (!this.#backgroundIdle || signal.aborted) return;
+      run = store.nextLearningCuration(control.entryId);
       if (run === null) return;
       const frozen = run;
       const flash = frozen.envelope.tidying;
@@ -638,6 +644,7 @@ export class BaselineAnalysisExecutionOwner {
               slotBinding: { bindingDigest: stageDigest, modelRole: tidying ? 'Fast Interaction Role' : 'Main Editorial Role', isCurrent: current, slot: binding.credentialSlot, credentialReference: binding.credentialReference },
               tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
               promptContractDigest, codes, signal, beforeSend: requireCurrent,
+              onRequestNotSent: error => { missingCredential = error instanceof CredentialBrokerError && error.code === 'CREDENTIAL_MISSING'; },
               profile: { ...routeProfile, maxOutputTokens, taskOutputTokenLimit: maxOutputTokens }, modelProfile: productionModelProfile(binding.route, binding.model),
               ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
               sessionId: () => sessionId, transport: (url, init) => { requireCurrent(); sent = true; return live.nativeFetch(url, init); } });
@@ -670,12 +677,12 @@ export class BaselineAnalysisExecutionOwner {
         const packet = JSON.parse(frozen.bundle.emittedText) as Record<string, unknown>;
         const message = canonicalJson({ ...packet, examples, classifications: kept.map(({ example, editorialDimension }) => ({ exampleId: example.exampleId, editorialDimension })) });
         text = await turn('learning-curation', message);
-        if (!parseCurationResult(text, examples)) throw new ExecutionAdmissionError('CURATION_RESULT_INVALID', '归纳结果未对应已整理样例。');
       }
-      store.publishLearningCuration(frozen, text, { usage, transmitted: sent });
+      store.publishLearningCuration(frozen, text, examples.map(example => example.exampleId), { usage, transmitted: sent });
     } catch {
       if (run !== null) ledger.settleCuration(run, sent ? 'interrupted' : 'failed', { usage, proposals: 0, transmitted: sent,
-        reason: sent ? '学习整理结果未发布或结果不确定；保留预算与来源，不自动重发。' : '学习整理在发送前停止；没有发布候选。' });
+        retryAfterCredential: !sent && missingCredential,
+        reason: !sent && missingCredential ? '学习整理所需的凭据已不可用，恢复后可重试。' : sent ? '学习整理结果未发布或结果不确定；保留预算与来源，不自动重发。' : '学习整理在发送前停止；没有发布候选。' });
     } finally {
       try { await (harness as PrimaryAgentHarnessHandle | null)?.finish(); } finally { if (producer !== null) this.#deps.requestGovernor.unregisterProducer(producer); }
     }

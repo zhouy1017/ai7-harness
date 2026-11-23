@@ -1,3 +1,4 @@
+import * as modelService from '../../src/shared/protocol/model-service.js';
 import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
@@ -24,6 +25,29 @@ afterEach(async () => { store.close(); requestGovernor.close(); await requestGov
 
 const roles = () => store.getModelRoles().map((role) => [role.roleId, role.binding?.modelId ?? null, role.binding?.reasoningEffort ?? null, role.source]);
 const binding = (role: 'main-editorial' | 'fast-interaction') => store.getConfiguredModelRoleBinding(role);
+
+// These M1/R5-F1a cases exercise the retained fallback when a channel offers no recommendation.
+beforeEach(() => { vi.spyOn(modelService, 'modelServiceRecommendedModels').mockReturnValue(undefined); });
+afterEach(() => vi.restoreAllMocks());
+
+it('uses the primary channel recommendation before a different foreground choice and restores it after clearing an explicit underlying choice', async () => {
+  vi.restoreAllMocks();
+  store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
+  store.saveModelServiceConnection('Synthetic other', null, 'ready', 'openai-platform');
+  store.selectMainRoleModel('opencode-go', 'deepseek-v4-pro', 'high');
+  store.selectForegroundFlashModel('openai-platform', 'sample-foreground', 'low');
+  expect(store.getModelRoles().find(role => role.roleId === 'underlying-flash')).toMatchObject({
+    source: 'channel-recommended-flash', binding: { providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' } });
+  expect(store.getConfiguredModelRoleBinding('foreground-flash')?.model).toBe('sample-foreground');
+  const pinned = binding('fast-interaction');
+  expect(pinned?.reasoningEffort).toBeUndefined();
+  store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'explicit', reasoningEffort: 'high' });
+  store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  expect(binding('fast-interaction')).toMatchObject({ model: 'explicit', reasoningEffort: 'high' });
+  store.selectUnderlyingModel({ roleId: 'underlying-flash', inherit: true });
+  expect(binding('fast-interaction')).toEqual(pinned);
+  expect(storedRoles()).not.toContain('underlying-flash');
+});
 
 describe('the four Model Roles (Issue #1620)', () => {
   it('runs every role on the Pro model when only a Pro model is chosen, with its 思考强度', () => {
@@ -245,6 +269,8 @@ it('keeps the advanced underlying Flash choice across changes to foreground Flas
   store.saveModelServiceConnection('Synthetic test', null, 'ready', 'opencode-go');
   store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'glm-5.3-flash', reasoningEffort: 'low' });
   store.selectForegroundFlashModel('opencode-go', 'deepseek-v4.1-flash');
+  store.selectFastRoleModel('opencode-go', 'deepseek-v4.1-flash');
+  store.selectBothRoleModels('opencode-go', 'deepseek-v4.1-flash');
   store.clearFlashModel();
   expect(binding('fast-interaction')).toMatchObject({ model: 'glm-5.3-flash', reasoningEffort: 'low' });
   store.selectUnderlyingModel({ roleId: 'underlying-flash', inherit: true });

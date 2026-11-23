@@ -43,11 +43,15 @@ function structured<Input, Output>(kindId: string, label: string, productionCate
   validate: (answer: unknown, source: Input) => Output | null, fallback: (source: Input) => Output | null = () => null,
   message: (source: Input) => string = canonicalJson): FlashTaskContract<Input, Output> {
   return { kindId, label, role: 'underlying-flash', outboundCategory: 'public-or-synthetic', productionCategory, systemPrompt,
-    promptContractDigest: sha256Hex(canonicalJson({ kindId, version: 1, systemPrompt })), slice: 'S80',
+    promptContractDigest: sha256Hex(canonicalJson({ kindId, version: 2, systemPrompt })), slice: 'S80',
     budget: { maxInputBytes: 131072, maxOutputTokens: 4096, firstByteSeconds: DEFAULT_TRANSPORT_SETTINGS.firstByteSeconds,
       idleSeconds: DEFAULT_TRANSPORT_SETTINGS.idleSeconds }, message, fallback,
     validateAndTrace(rawText, source) {
-      try { return validate(JSON.parse(rawText), source); } catch { return null; }
+      try {
+        const answer: unknown = JSON.parse(rawText);
+        // Older responses used the array directly. New requests use JSON object mode.
+        return validate(isRecord(answer) && hasExactKeys(answer, ['items']) ? answer.items : answer, source);
+      } catch { return null; }
     } };
 }
 
@@ -57,17 +61,17 @@ function strings(value: unknown, max: number): value is string[] {
 }
 
 export const queryExpansion = structured<string, string[]>('retrieval-query-expansion', '扩展检索词', 'frozen-material-reference-excerpt',
-  '只输出 JSON 字符串数组，含三至五个同义检索词，每项最多64字符。', value =>
+  '只输出 JSON 对象 {"items":[...]}，items 为字符串数组，含三至五个同义检索词，每项最多64字符。', value =>
     strings(value, 5) && value.length >= 3 && value.every(term => term.length <= 64) ? value : null, query => [query]);
 
 export interface RerankInput { query: string; candidates: readonly { id: string; preview: string }[] }
 export const retrievalRerank = structured<RerankInput, string[]>('retrieval-rerank', '整理检索候选', 'frozen-material-reference-excerpt',
-  '按相关度输出候选 id 的 JSON 数组，可排除无关候选，不添加新 id。', (value, source) =>
+  '只输出 JSON 对象 {"items":[...]}，items 按相关度列出候选 id，可排除无关候选，不添加新 id。', (value, source) =>
     strings(value, source.candidates.length) && value.every(id => source.candidates.some(item => item.id === id)) ? value : null,
   source => source.candidates.map(candidate => candidate.id));
 
 export const guidelineClauses = structured<readonly string[], string[]>('guideline-clause-formatting', '整理审阅规范条款', 'house-review-guideline-clause',
-  '按原文顺序分为最多40条条款，每条最多300字。仅返回原文片段的 JSON 数组。', (value, paragraphs) => {
+  '按原文顺序分为最多40条条款，每条最多300字。仅返回 JSON 对象 {"items":[...]}，items 数组逐项列出原文片段。', (value, paragraphs) => {
     if (!strings(value, 40) || value.length === 0 || value.some(clause => graphemesOf(clause).length > 300)) return null;
     const source = paragraphs.join('\n');
     let cursor = 0;
@@ -81,7 +85,7 @@ export const guidelineClauses = structured<readonly string[], string[]>('guideli
 
 export interface StandardRow { paragraph: number; recommended: string; discouraged: string[]; status: '待确认' | '未识别'; reason: string }
 export const standardsTable = structured<readonly string[], StandardRow[]>('standards-table-formatting', '整理字表与词表', 'frozen-material-reference-excerpt',
-  '返回 JSON 行数组，每行含 paragraph（从1起）、recommended、discouraged。recommended 为推荐词形，discouraged 为不推荐词形数组（可为空）。逐项引用所在段落的原文。', (value, source) => {
+  '返回 JSON 对象 {"items":[...]}，items 为行数组，每行含 paragraph（从1起）、recommended、discouraged。recommended 为推荐词形，discouraged 为不推荐词形数组（可为空）。逐项引用所在段落的原文。', (value, source) => {
     if (!Array.isArray(value) || value.length > 500) return null;
     const rows: StandardRow[] = [];
     for (const row of value) {
@@ -102,7 +106,7 @@ function digests(example: QualifiedLearningExample) {
   return { beforeDigest: sha256Hex(canonicalJson(example.before)), afterDigest: sha256Hex(canonicalJson(example.after)) };
 }
 export const learningTidying = structured<readonly QualifiedLearningExample[], TidiedExample[]>('learning-sample-tidying', '预整理学习样例',
-  'qualified-learning-example-bundle', '筛去重复与偶然修改，只输出 JSON 数组。每项保留输入 exampleId、beforeDigest、afterDigest，添加审阅类别标识 editorialDimension。不创作文字或规则。',
+  'qualified-learning-example-bundle', '筛去重复与偶然修改，只输出 JSON 对象 {"items":[...]}。items 数组的每项保留输入 exampleId、beforeDigest、afterDigest，添加审阅类别标识 editorialDimension。不创作文字或规则。',
   (value, examples) => {
     if (!Array.isArray(value) || value.length > examples.length) return null;
     const kept: TidiedExample[] = [];

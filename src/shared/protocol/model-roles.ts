@@ -76,12 +76,13 @@ export const MODEL_ROLE_LABELS: Readonly<Record<ModelRoleId, { readonly roleLabe
  * chosen; or following 前台 Pro, its choice kept, because the chosen Flash model's key is not usable now or its channel cannot
  * send that model (#1582).
  */
-export type ModelRoleSource = 'pro-tier' | 'flash-tier' | 'follows-foreground-pro' | 'flash-unavailable-follows-foreground-pro'
+export type ModelRoleSource = 'channel-recommended-flash' | 'pro-tier' | 'flash-tier' | 'follows-foreground-pro' | 'flash-unavailable-follows-foreground-pro'
   | 'flash-not-served-follows-foreground-pro';
 
 export const MODEL_ROLE_SOURCE_LABELS: Readonly<Record<ModelRoleSource, string>> = {
   'pro-tier': '使用所选 Pro 模型',
   'flash-tier': '使用所选 Flash 模型',
+  'channel-recommended-flash': '使用渠道推荐的 Flash 模型',
   'follows-foreground-pro': '跟随前台 Pro',
   'flash-unavailable-follows-foreground-pro': '已选的 Flash 模型暂时不可用，现在跟随前台 Pro',
   'flash-not-served-follows-foreground-pro': '这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro',
