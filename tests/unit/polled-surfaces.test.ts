@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { createGlobalAttentionReader, mountGlobalAttention } from '../../src/renderer/global-attention.js';
 import { createBaselineAnalysisCard } from '../../src/renderer/baseline-analysis-card.js';
 import { mountEvaluation, type MountEvaluationOptions } from '../../src/renderer/evaluation.js';
@@ -17,13 +18,16 @@ vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: as
 
 it.each([false, true])('retains attention action or disclosure focus across two changed polls (developer=%s, #1375)', async (developer) => {
   setTechnicalLayerVisible(developer); const root = rootNode(); let tick = 0;
-  const reader = createGlobalAttentionReader({ inspectGlobalAttention: async (): Promise<GlobalAttentionProjection> => ({
+  const attention = (): GlobalAttentionProjection => ({
     actionableCount: 0, running: true, processing: { state: 'local' }, groups: [{ key: 'active', total: 1, items: [{
-      itemId: 'task', group: 'active', state: tick === 0 ? 'analysis-running' : tick === 1 ? 'analysis-pausing' : 'analysis-paused', blocked: false, at: new Date().toISOString(), book: { bookId: 'book', title: '公开合成书' },
-      object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: { stage: 'units', unitsSettled: ++tick, unitsTotal: 10 }, categories: [], revisionOrdinal: null }, nextStep: 'view-run',
+      // An interrupted task 待我处理 lists among its exceptions (Issue #1680), whose reading changes on each poll.
+      itemId: 'task', group: 'active', state: 'analysis-resumable', blocked: false, at: new Date(Date.now() + tick * 1000).toISOString(), book: { bookId: 'book', title: '公开合成书' },
+      object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: { stage: 'units', unitsSettled: tick, unitsTotal: 10 }, categories: [], revisionOrdinal: null, stopReason: 'shutdown' }, nextStep: 'view-run',
       target: { kind: 'analysis', bookId: 'book', taskIntentId: 'task' }, technical: [],
     }] }],
-  }) });
+  });
+  const inspectTaskOverview = vi.fn(async () => composeTaskOverview(attention(), 2, () => null));
+  const reader = createGlobalAttentionReader({ inspectGlobalAttention: async () => { tick++; return attention(); }, inspectTaskOverview });
   const surface = mountGlobalAttention({ root: root as unknown as HTMLElement, reader, technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '', open: async () => undefined, openNetworkProxySettings: vi.fn() });
   surface.start(); await vi.advanceTimersByTimeAsync(0);
   const selector = developer ? '.global-attention-facts summary' : '[data-attention-open]';
@@ -34,7 +38,7 @@ it.each([false, true])('retains attention action or disclosure focus across two 
     expect(document.activeElement).toBe(root.querySelector(selector)); expect(root.scrollTop).toBe(60);
     if (developer) expect(root.querySelector('.global-attention-facts')!.open).toBe(true);
   }
-  expect(tick).toBe(3); surface.destroy(); reader.interrupt();
+  expect(tick).toBe(3); expect(inspectTaskOverview).toHaveBeenCalledTimes(3); surface.destroy(); reader.interrupt();
 });
 
 it('keeps evaluation More, summary focus and its page heading across two changed polls (#1375, #1383)', async () => {

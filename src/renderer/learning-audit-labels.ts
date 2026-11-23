@@ -97,7 +97,7 @@ export const LEARNING_AUDIT_ORDINARY_STANDING_LABELS: Readonly<Record<LearningAu
 export const LEARNING_AUDIT_DEFAULT_USED = '默认用于学习';
 /** A row's standing as the page's mode words it: a pending material AI7 already uses by default reads as used. */
 export function learningAuditStandingLabel(entry: { readonly standing: LearningAuditStanding; readonly automaticAdmission?: { readonly choice: 'house' } | null }, ordinary: boolean): string {
-  if (!ordinary) return LEARNING_AUDIT_STANDING_LABELS[entry.standing];
+  if (!ordinary) return LEARNING_AUDIT_STANDING_LABELS[entry.standing] + (entry.standing === 'pending' && entry.automaticAdmission?.choice === 'house' ? ' · 默认用于学习' : '');
   return entry.standing === 'pending' && entry.automaticAdmission?.choice === 'house' ? LEARNING_AUDIT_DEFAULT_USED : LEARNING_AUDIT_ORDINARY_STANDING_LABELS[entry.standing];
 }
 /** Whether a row waits for the editor's decision here: undecided, changed or put off, and not used by default. */
@@ -414,3 +414,5 @@ export const LEARNING_AUDIT_STATUS = {
 export function learningRemediationRereadFailed(outcome: string): string {
   return `${outcome}但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。`;
 }
+
+export const LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH = '所选材料须来自同一本书、同一类型，且用于学习的范围相同（仅本书或本社），才能一起停止今后使用。';

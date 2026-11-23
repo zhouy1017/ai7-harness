@@ -1,3 +1,5 @@
+import { chooseImportTarget } from './import-page.mjs';
+import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -624,7 +626,7 @@ async function createEmptyBook(renderer, title) {
 async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)})??document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -1451,11 +1453,15 @@ async function main() {
     requireJourney(editedPreference.items.length === 1 && editedPreference.items[0].itemId === createdRule.itemId && editedPreference.items[0].state === 'active' &&
       editedPreference.items[0].bookId === null && editedPreference.items[0].categoryId === 'style-and-format' &&
       replacedPreference.items.every((item) => item.state !== 'active') && editedPreference.directives === directivesBeforePreference + 2, 'ordinary-preference-edited-same-rule');
-    await assertRenderer(primary, `(() => { const stop=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='停用'); if(!stop||stop.disabled)return false; stop.click(); return true; })()`, 'ordinary-preference-stop');
-    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return !row||(row.querySelectorAll('p')[1]?.textContent.endsWith('已停用')&&!Array.from(row.querySelectorAll('.preference-actions > button')).some(node=>node.textContent==='停用'||node.textContent==='编辑偏好')); })()`, 'ordinary-preference-stopped-row');
+    // Lifecycle stage proves the existing stop with real input as well.
+    at('review-preference-lifecycle');
+    const initialStop = `[data-review-preference="${createdRule.itemId}"] .preference-actions > button`;
+    await inWindowPress(primary, waitFor)(initialStop, 'lifecycle-initial-stop');
+    await waitFor(primary, `(() => { const row=document.querySelector('[data-disabled-preferences] [data-review-preference="${createdRule.itemId}"]'); return Boolean(row)&&!Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用'||button.textContent==='编辑偏好'); })()`, 'ordinary-preference-stopped-row');
     const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
     requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
-    const directivesAfterPreference = stoppedPreference.directives;
+    await reviewPreferenceLifecycle(primary, waitFor, requireJourney, createdRule.itemId);
+    const directivesAfterPreference = (await primary.evaluate(preferenceState(editedPreferenceText))).directives;
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
@@ -2043,11 +2049,11 @@ async function main() {
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
     await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
-    await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
+    await chooseImportTarget(primary, waitFor, `existing-book:${bookA}`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     // Issue #1410 item 32B: the same-Book match is chosen to begin with.
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse && (reuse instanceof HTMLInputElement ? reuse.checked : reuse.textContent.includes('沿用')); })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     // #1519: from the instant the bar appears, a press on 导入来源材料到所选图书 reaches that button — never the bar's ×. Hit-tested

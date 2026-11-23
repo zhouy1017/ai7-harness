@@ -517,6 +517,7 @@ const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-t
 
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    'import-page-primary-visible', 'fidelity-one-sentence', 'single-answer-sentences',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
@@ -813,6 +814,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
+    'reply-draft-kept',
     'comments-inline-reply-column',
     'comments-inline-reply-overlay',
     'comments-connector-reply-overlay',
@@ -835,6 +837,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'snapshot-none-comparison',
   ]),
   'J-12': Object.freeze([
+    'review-preference-lifecycle',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
@@ -1123,8 +1126,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-relaunch',
     'review-destination',
     'dispatch-model-choice',
+    'evaluation-relaunch-references',
     'task-status-finished',
     'review-sheet',
+    'review-sheet-form',
     'review-prepare',
     'review-bar-ready',
     'review-offline-bar',
@@ -1179,6 +1184,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    'selection-menu-swatches', 'comments-header-add', 'mark-draft-kept',
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
     'comments-connector-apply-overlay',
@@ -1499,6 +1505,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-revoked-no-dispatch',
     'idle-start-choice',
     'idle-yield-to-foreground',
+    'idle-yield-card-words',
     'idle-result-in-place',
     'model-question-launch',
     'model-question-notice',
@@ -1542,13 +1549,14 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'partial-revision-kept',
     'nothing-sent-after',
     'redo-from-cancelled',
-    'redo-plan-edit',
+    'redo-launch-bar',
     'redo-run-completed',
     'relaunch-for-second-book',
     'second-book-import',
     'second-run-held',
     'closed-under-run',
     'relaunched-resumable',
+    'resumable-task-card',
     'resumed-after-restart',
     'third-book-import',
     'third-run-paused',
@@ -1596,6 +1604,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-controls-pause-resume',
     'review-controls-cancel-impact',
     'review-controls-redo-plan',
+    'review-interrupted-relaunch',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1742,6 +1751,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-saved',
     'model-credential-removed',
     'panel-open',
+    'panel-launch-menu',
     'panel-prepare',
     'panel-start',
     'panel-stop-wording',

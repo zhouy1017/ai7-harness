@@ -95,6 +95,7 @@ import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } fro
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { mountTaskNavigationBadge } from './task-navigation-badge.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -142,7 +143,7 @@ const overviewApi = taskOverviewApi(api, () => overviewDrawerBookId);
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
   shell: document.body,
-  api: overviewApi,
+  api: overviewApi, overviewApiForBook: bookId => overviewDrawerBookId === null ? undefined : taskOverviewApi(api, () => bookId),
   openTaskOverview: () => void leaveThen(async () => renderTaskOverview()),
   technicalDetails,
   errorMessage: rendererErrorMessage,
@@ -174,6 +175,7 @@ const taskDrawer = mountTaskDrawer({
     if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
     else openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi);
   },
+  configureBookTask: (bookId, kind) => configureBookTask(bookId, kind),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -818,22 +820,8 @@ const shell = mountShell({
   },
 });
 
-// 任务's sidebar badge follows the same read-only projection as the page (Issue #1328).
-const taskNavigationBadge = element('span', 'task-navigation-badge');
-taskNavigationBadge.setAttribute('aria-hidden', 'true');
-const taskNavigationLink = document.querySelector<HTMLElement>('[data-nav-destination="tasks"]');
-if (taskNavigationLink !== null) {
-  taskNavigationLink.append(taskNavigationBadge);
-  const refreshTaskBadge = (): void => {
-    void api.inspectTaskOverview().then((projection) => {
-      const count = projection.runningCount + projection.queuedCount + projection.actionableCount;
-      taskNavigationBadge.textContent = count > 0 ? String(count) : '';
-      taskNavigationBadge.hidden = count === 0;
-    }, () => undefined);
-  };
-  taskNavigationBadge.hidden = true;
-  globalAttentionReader.subscribe((reading) => { if (reading.kind === 'projection') refreshTaskBadge(); });
-}
+// 任务's sidebar badge: the tasks in progress, from the same read-only projection as the page (Issue #1328, #1680).
+const taskNavigationBadge = mountTaskNavigationBadge(document.querySelector<HTMLElement>('[data-nav-destination="tasks"]'), globalAttentionReader, () => element('span'));
 
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
@@ -3472,7 +3460,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
-const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+const { configureBookTask, openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
   technicalDetails,
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
@@ -3500,6 +3488,7 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
   requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
   jumpToSelectionText: (...args) => jumpToSelectionText(...args),
   renderBookReview: (...args) => renderBookReview(...args),
+  openManuscriptWriting: () => manuscriptOnScreen?.openWriting(),
   renderBookManuscript: (...args) => renderBookManuscript(...args),
   button: (...args) => button(...args),
   element: (...args) => element(...args),

@@ -2,10 +2,9 @@ import { navigation, type NavigationCheckpoint } from './navigation-generation.j
 
 import { technicalLayerVisible, technicalDisclosure, technicalWords } from './technical-layer.js';
 
-import type { BookTaskItemProjection, BookWorkbenchRoute, BookWorkOverviewProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, GlobalAttentionTarget, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportStartupProjection, ManuscriptWindowProjection, ResolvedBookWorkbenchRoute, TaskPlanKind } from '../shared/protocol.js';
+import type { BookTaskItemProjection, BookWorkbenchRoute, BookWorkOverviewProjection, GlobalAttentionItemProjection, GlobalAttentionTarget, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportStartupProjection, ManuscriptWindowProjection, ResolvedBookWorkbenchRoute, TaskPlanKind } from '../shared/protocol.js';
 
 import { NOTIFICATION_BOOK_LIST_LINE } from './notification-labels.js';
-import { GLOBAL_ATTENTION_COUNTED_GROUPS } from '../shared/protocol.js';
 
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 
@@ -21,6 +20,7 @@ import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { paintTaskNavigationBadge } from './task-navigation-badge.js';
 import { finishedResultRoute, type ResultEntrance } from './result-destination.js';
 import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
 
@@ -47,6 +47,7 @@ interface Options {
   requestBookWorkbenchRoute: (route: BookWorkbenchRoute, onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>, recoveryReturn?: RecoveryReturnContext, navigationRoute?: NavigationCheckpoint) => Promise<void>;
   jumpToSelectionText: (bookId: string, selection: { readonly manuscriptId: string; readonly fromBlockId: string; readonly toBlockId: string; }) => Promise<boolean>;
   renderBookReview: (bookId: string, bookTitle: string, focus?: ReviewFocus | null, procedureId?: string | null) => void;
+  openManuscriptWriting(): void;
   renderBookManuscript: (bookId: string, bookTitle: string, route?: NavigationCheckpoint) => Promise<NavigationCheckpoint | undefined>;
   button: (label: string, className: "primary" | "secondary" | "quiet", action: () => void | Promise<void>) => HTMLButtonElement;
   element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -107,23 +108,12 @@ function renderGlobalAttention(bookId?: string | null): void {
   const content = panel();
   content.classList.add('global-attention');
   // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
-  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
-    const groups = projection.groups.map((group) => {
-      const items = group.items.filter((item) => item.book.bookId === bookId);
-      return { ...group, items, total: items.length };
-    });
-    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
-    return { ...projection, groups, actionableCount };
-  };
   const surface = mountGlobalAttention({
     openTasks: () => renderTaskOverview(),
     startTask: () => { renderTaskOverview(); state.taskOverviewSurface?.showStart(); },
     root: content,
-    reader: bookId === undefined ? globalAttentionReader : {
-      ...globalAttentionReader,
-      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
-        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
-    },
+    ...(bookId === undefined ? {} : { bookId }),
+    reader: globalAttentionReader,
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -137,12 +127,12 @@ function renderGlobalAttention(bookId?: string | null): void {
 }
 
 /** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
-function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
+function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' | 'cancel' | 'unconfirmed' = 'run'): void {
   state.overviewDrawerBookId = item.bookId;
   const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
   if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
   else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
-  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo', row: item });
+  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' || view === 'cancel' ? 'plan' : view === 'unconfirmed' ? 'run' : view, redo: view === 'redo', cancel: view === 'cancel', unconfirmed: view === 'unconfirmed', row: item });
 }
 /**
  * A task's notice. A finished task opens its result where the editor is (查看结果, #1528), without the global 任务 page; any other
@@ -177,23 +167,28 @@ async function openResult(item: TaskOverviewItemProjection, from: ResultEntrance
   if (route.via === 'page') await openGlobalAttentionTarget(route.target, route.analysisRevisionId);
   else if (route.via === 'window') await openResultWindow(item);
 }
+function configureBookTask(bookId: string, kind: 'review' | 'writing', returnToOverview = false): void {
+  void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+    if (kind === 'review') renderBookReview(bookId, route.bookTitle);
+    else {
+      const shown = await renderBookManuscript(bookId, route.bookTitle, navigation.route());
+      if (!shown?.isCurrent()) return;
+      if (!returnToOverview) state.openManuscriptWriting();
+    }
+    if (returnToOverview) screen.firstElementChild?.append(button('返回任务总览', 'quiet', () => renderTaskOverview()));
+  });
+}
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
   const content = panel(); content.classList.add('task-overview');
   const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
     onChanged: () => globalAttentionReader.refresh(),
-    onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
-    openTarget: openOverviewTask,
+    onProjection: (projection) => paintTaskNavigationBadge(taskNavigationBadge, projection),
+    openTarget: openOverviewTask, openRecord: (item) => void openGlobalAttentionTarget(item.target), openNetworkProxySettings: () => void renderModelServiceSettings(),
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
     openResult: (item) => void openResult(item, 'overview'), closeDrawer: () => taskDrawer.close(true),
-    configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
-      const current = navigation.route();
-      if (kind === 'review') renderBookReview(bookId, route.bookTitle);
-      // 写作 lives on 稿件 (Issue #1403).
-      else { const shown = await renderBookManuscript(bookId, route.bookTitle, current); if (!shown?.isCurrent()) return; }
-      const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
-    }),
+    configure: (bookId, kind) => configureBookTask(bookId, kind, true),
   });
   replaceScreen('task-overview', content); state.taskOverviewSurface = surface;
   if (focusItemId) { const page = navigation.read(content); surface.focus(focusItemId); window.setTimeout(() => { if (page.isCurrent()) surface.focus(focusItemId); }, 300); }
@@ -355,5 +350,5 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
   }
 }
 
-return { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
+return { configureBookTask, openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
 }

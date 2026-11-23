@@ -2,7 +2,8 @@ import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import { showToast } from './components/toast.js';
 import { attentionPillLabel } from './notification-labels.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
+import { taskNavigationCount } from './task-navigation-badge.js';
+import { GLOBAL_ATTENTION_COUNTED_GROUPS, type GlobalAttentionItemProjection, type GlobalAttentionProjection, type RendererApi, type TaskOverviewProjection } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_ENTRY_LABEL,
   GLOBAL_ATTENTION_HEADING,
@@ -10,6 +11,8 @@ import {
   GLOBAL_ATTENTION_NONE,
   GLOBAL_ATTENTION_START,
   GLOBAL_ATTENTION_STATUS_LINES,
+  GLOBAL_ATTENTION_VIEW_TASKS,
+  globalAttentionInProgressLine,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
   globalAttentionGroupCounts,
@@ -34,20 +37,33 @@ import {
 /** Keep new and changed items following while the service is available. */
 export const GLOBAL_ATTENTION_POLL_MS = 2_000;
 
-type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
+type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention' | 'inspectTaskOverview'>;
 
-/** Ordinary attention counts only the reachable items in this bounded reading, like a Book-filtered list. */
-export function visibleGlobalAttention(projection: GlobalAttentionProjection, developerMode: boolean): GlobalAttentionProjection {
-  if (developerMode) return projection;
-  const groups = projection.groups.map((group) => {
-    const items = group.items.filter((item) => item.target.kind !== 'learning-materials');
-    return { ...group, items, total: items.length };
+/** A task that cannot go on without the editor, listed among the exceptions though the service files it under 运行中 (Issue #1680). */
+const NEEDS_THE_EDITOR: ReadonlySet<GlobalAttentionItemProjection['state']> = new Set(['analysis-resumable', 'review-continuable', 'analysis-waiting-connection']);
+
+/**
+ * What 待我处理 lists (Issue #1680; item 8.2 of #1539): only 异常与结果待确认 and 等待你的决定 — a task that cannot go on without the
+ * editor among the exceptions — and how many tasks are in progress, which the 任务 page lists. Its count is the count of what it
+ * lists, in ordinary and developer mode; ordinary mode also leaves out what it cannot reach (学习材料, a developer page).
+ */
+export function visibleGlobalAttention(projection: GlobalAttentionProjection, tasks: Pick<TaskOverviewProjection, 'groups'>, developerMode: boolean, bookId?: string | null): GlobalAttentionProjection & { inProgress: number } {
+  const reachable = (item: GlobalAttentionItemProjection): boolean => (bookId === undefined || item.book.bookId === bookId) && (developerMode || item.target.kind !== 'learning-materials');
+  const counted = projection.groups.filter(group => GLOBAL_ATTENTION_COUNTED_GROUPS.some(key => key === group.key));
+  const listed = new Set(counted.flatMap(group => group.items.map(item => item.itemId)));
+  const moved = tasks.groups.flatMap(group => group.items.map(row => row.attention))
+    .filter(item => item.group === 'active' && NEEDS_THE_EDITOR.has(item.state) && !listed.has(item.itemId));
+  const groups = GLOBAL_ATTENTION_COUNTED_GROUPS.map(key => {
+    const base = counted.find(group => group.key === key)?.items ?? [];
+    const items = (key === 'exceptions' ? [...base, ...moved] : base).filter(reachable);
+    return { key, items, total: items.length };
   });
-  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + (globalAttentionGroupCounts(group.key) ? group.total : 0), 0) };
+  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + group.total, 0),
+    inProgress: taskNavigationCount(tasks, bookId) };
 }
 
 export type GlobalAttentionReading =
-  | { readonly kind: 'projection'; readonly projection: GlobalAttentionProjection }
+  | { readonly kind: 'projection'; readonly projection: GlobalAttentionProjection; readonly tasks: Pick<TaskOverviewProjection, 'groups'> }
   | { readonly kind: 'error'; readonly error: unknown };
 
 export interface GlobalAttentionReader {
@@ -92,8 +108,8 @@ export function createGlobalAttentionReader(api: AttentionApi): GlobalAttentionR
       return;
     }
     inFlight = true;
-    void api.inspectGlobalAttention().then(
-      (projection) => publish({ kind: 'projection', projection }),
+    void Promise.all([api.inspectGlobalAttention(), api.inspectTaskOverview()]).then(
+      ([projection, tasks]) => publish({ kind: 'projection', projection, tasks }),
       (error: unknown) => publish({ kind: 'error', error }),
     ).finally(() => {
       inFlight = false;
@@ -159,7 +175,7 @@ export function mountGlobalAttentionEntry(options: { button: HTMLButtonElement; 
   };
   paint(null);
   options.reader.subscribe((reading) => {
-    if (reading.kind === 'projection') paint(visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount);
+    if (reading.kind === 'projection') paint(visibleGlobalAttention(reading.projection, reading.tasks, technicalLayerVisible).actionableCount);
   });
   button.addEventListener('click', () => options.open());
 }
@@ -173,7 +189,7 @@ export function mountAttentionPill(options: { button: HTMLElement; reader: Globa
   button.dataset['attentionPill'] = 'true';
   options.reader.subscribe((reading) => {
     if (reading.kind !== 'projection') return;
-    const count = visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount;
+    const count = visibleGlobalAttention(reading.projection, reading.tasks, technicalLayerVisible).actionableCount;
     if (button.textContent !== attentionPillLabel(count)) button.textContent = attentionPillLabel(count);
     button.setAttribute('aria-label', `${attentionPillLabel(count)}，打开${GLOBAL_ATTENTION_ENTRY_LABEL}`);
     button.dataset['attentionCount'] = String(count);
@@ -192,6 +208,7 @@ export interface GlobalAttentionSurface {
 }
 
 export interface MountGlobalAttentionOptions {
+  readonly bookId?: string | null;
   openTasks?(): void;
   /** 发起任务 when nothing waits: the 任务 page with its 发起任务 sheet open. */
   startTask?(): void;
@@ -285,12 +302,23 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     return node;
   }
 
-  function nothingWaiting(): HTMLElement {
+  function nothingWaiting(inProgress: number): HTMLElement {
     const none = el('section', 'global-attention-none');
     const start = el('button', 'primary', GLOBAL_ATTENTION_START); start.type = 'button'; start.dataset['attentionStart'] = '';
     start.addEventListener('click', () => options.startTask?.());
     none.append(el('p', undefined, GLOBAL_ATTENTION_NONE), start);
+    if (inProgress > 0) none.append(inProgressLine(inProgress));
     return none;
+  }
+
+  /** 「有 N 项任务正在进行。」 with 查看任务: what is under way is the 任务 page's, never listed here (Issue #1680). */
+  function inProgressLine(count: number): HTMLElement {
+    const line = el('p', 'global-attention-in-progress');
+    line.dataset['attentionInProgress'] = String(count);
+    const open = el('button', 'quiet', GLOBAL_ATTENTION_VIEW_TASKS); open.type = 'button'; open.dataset['attentionViewTasks'] = '';
+    open.addEventListener('click', () => options.openTasks?.());
+    line.append(el('span', undefined, globalAttentionInProgressLine(count)), ' ', open);
+    return line;
   }
 
   function groupNode(view: GlobalAttentionGroupView, projection: GlobalAttentionProjection): HTMLElement {
@@ -308,18 +336,17 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     section.setAttribute('aria-labelledby', headingId);
     section.append(groupHeading);
     const list = el('ol', 'global-attention-items');
-    for (const item of view.key === 'active' ? view.items.slice(0, 3) : view.items) {
+    for (const item of view.items) {
       const entry = group?.items.find((candidate) => candidate.itemId === item.itemId);
       if (entry !== undefined) list.append(itemNode(item, entry));
     }
     section.append(list);
-    if (view.key === 'active') { const all = el('button', 'quiet', '在任务总览里看全部'); all.addEventListener('click', () => options.openTasks?.()); section.append(all); }
     return section;
   }
 
-  function paint(reading: GlobalAttentionProjection): void {
+  function paint(reading: Extract<GlobalAttentionReading, { kind: 'projection' }>): void {
     if (pollControlEngaged(host, false)) return;
-    const projection = visibleGlobalAttention(reading, technicalLayerVisible);
+    const projection = visibleGlobalAttention(reading.projection, reading.tasks, technicalLayerVisible, options.bookId);
     const key = JSON.stringify(projection);
     if (key === painted) return;
     painted = key;
@@ -332,7 +359,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     loading.remove();
     // A group is drawn only while it holds an item; with none at all the page is one sentence and the way to start a task.
     const shown = globalAttentionView(projection).filter((view) => view.empty === null);
-    host.replaceChildren(...(shown.length > 0 ? shown.map((view) => groupNode(view, projection)) : [nothingWaiting()]));
+    host.replaceChildren(...(shown.length > 0 ? [...shown.map((view) => groupNode(view, projection)), ...(projection.inProgress > 0 ? [inProgressLine(projection.inProgress)] : [])] : [nothingWaiting(projection.inProgress)]));
     lede.hidden = readAll.hidden = shown.length === 0;
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     restoreInteraction();
@@ -373,7 +400,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
       if (destroyed || unsubscribe !== null) return;
       unsubscribe = options.reader.subscribe((reading) => {
         if (destroyed) return;
-        if (reading.kind === 'projection') paint(reading.projection);
+        if (reading.kind === 'projection') paint(reading);
         else paintUnavailable(reading.error);
         if (focusHeading && painted !== '') {
           focusHeading = false;

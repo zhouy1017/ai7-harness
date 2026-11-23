@@ -54,6 +54,11 @@ export const GLOBAL_ATTENTION_HEADING = '待我处理';
 /** Nothing waits for the editor: the page says so once, beside the way to start a task. */
 export const GLOBAL_ATTENTION_NONE = '现在没有需要你处理的事项。';
 export const GLOBAL_ATTENTION_START = '发起任务';
+/** Below the groups, or alone beside 发起任务 when nothing waits (Issue #1680): the tasks in progress are the 任务 page's. */
+export function globalAttentionInProgressLine(count: number): string {
+  return `有 ${count} 项任务正在进行。`;
+}
+export const GLOBAL_ATTENTION_VIEW_TASKS = '查看任务';
 export const GLOBAL_ATTENTION_LEDE = '所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。';
 /** IA-013: a Book's own findings stay in that Book's 待办汇总; this view keeps only what crosses Books. */
 export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「待办汇总」里。';
@@ -288,7 +293,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'resolve-conflict': RESOLVE_CONFLICT_LABEL,
   'answer-clarification': '回答问题',
   // The drawer's own action for a Run the ceiling stopped (Issue #51, S16a; MODEL-017).
-  'adjust-budget-redo': '调整预算并重做',
+  'adjust-budget-redo': TASK_BAR_REDO,
   // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
   'resolve-model-service': '处理模型服务',
   'open-network-proxy': '去设置 › 模型服务 › 网络代理',
@@ -435,8 +440,8 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     // Issue #541: under developer-live the launch set the ceiling, and the plan cannot raise it.
     case 'analysis-budget-reached':
       return item.nextStep === 'redo'
-        ? '已到本次启动的预算上限，保留结果后停下；提高启动预算后可重做。'
-        : '已到你设的预算上限，保留结果后停下；调整预算后可重做。';
+        ? '已到本次启动的预算上限，保留结果后停下；提高启动预算后可以重新开始。'
+        : technicalWords('已到你设的预算上限，保留结果后停下；调整预算后可以重新开始。', '已到你设的用量上限，保留结果后停下；调整用量后可以重新开始。');
     case 'analysis-account-limit':
       return '模型服务的账户限额已用尽，处理后可从已保存的进度继续。';
     case 'analysis-outcome-unknown':
@@ -452,7 +457,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-plan-revision':
       return '计划依据已有变化，请确认新计划后再开始。';
     case 'analysis-plan-moved':
-      return '等待联网期间计划依据已有变化，需要另做一份计划。';
+      return '等待联网期间计划依据已有变化，需要重新开始。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
       if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题，回答后或等待 24 小时后接着处理。';

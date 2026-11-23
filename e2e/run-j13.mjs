@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -198,10 +199,20 @@ async function createRendererManager(browser) {
 }
 
 async function waitFor(renderer, expression, name, timeout = 60_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  const deadline = performance.now() + timeout;
+  let timer;
+  const expired = new Promise(resolve => { timer = setTimeout(resolve, timeout, false); });
+  try {
+    while (performance.now() < deadline) {
+      const predicate = renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false);
+      const matched = await Promise.race([predicate, expired]);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) break;
+      if (matched) return;
+      await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)));
+    }
+  } finally {
+    clearTimeout(timer);
   }
   throw journeyCheckFailure('J-13', name);
 }
@@ -392,8 +403,7 @@ async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);

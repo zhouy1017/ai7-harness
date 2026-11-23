@@ -1,3 +1,5 @@
+import { chooseImportTarget } from './import-page.mjs';
+import { pressReachable, assertReachable, wheelIntoView } from './task-card-reach.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { HOUSE_DRAFT_MEASURE, ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, pressEscape, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
@@ -158,7 +160,7 @@ async function createRendererManager(browser) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if ((await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false)) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-15', name);
@@ -427,19 +429,23 @@ function reachableExpression(selector) {
 }
 
 /** The editor's own mouse wheel over the control's scroller, a turn at a time, until the control is reachable. */
-async function wheelIntoView(renderer, selector, name) {
+async function wheelToSearchControl(renderer, selector, name) {
   for (let turn = 0; turn < 60; turn += 1) {
     const at = await renderer.evaluate(reachableExpression(selector));
     requireJourney(at !== null, `${name}-present`, at);
     if (at.reachable) return;
-    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY: at.down ? 120 : -120 });
+    // An on-screen control can still sit behind a fixed control. Wheel it towards the visible scroller centre.
+    const deltaY = at.inWindow && at.inScroller ? Math.round(at.y - at.wheelY) : at.down ? 120 : -120;
+    if (deltaY === 0) break;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY });
     await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
   }
   requireJourney(false, `${name}-wheel-reachable`, await renderer.evaluate(reachableExpression(selector)));
 }
 
 /** A real press at the centre of a control asserted reachable, two frames apart, with no scripted scroll before it. */
-async function pressReachable(renderer, selector, name) {
+async function pressSearchControl(renderer, selector, name) {
+  await wheelToSearchControl(renderer, selector, name);
   const before = await renderer.evaluate(reachableExpression(selector));
   await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
   const at = await renderer.evaluate(reachableExpression(selector));
@@ -838,18 +844,20 @@ async function main() {
     await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-segments-back');
     await clickSelector(renderer, '[data-library-action="segments-close"]', 'library-segments-close');
     await waitFor(renderer, `document.querySelector('.material-segments [data-library-action="segments"]') === document.activeElement`, 'library-segments-closed', 10_000);
-    // 索引完成 sits in 最近完成, names the item and asks nothing: the count stays the decisions'.
-    const indexItem = `library-index:${materialId}`;
-    const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
-    const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
-    requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
-    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
-    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 资料「${LIBRARY_TITLE}」` &&
-      indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
-    await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
-    await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
+    await setDeveloperMode(renderer, waitFor, false, 'library-reading-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), 'library-index-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host[data-attention-count="0"]') && !document.querySelector('[data-attention-state="indexing-completed"]')`, 'library-index-attention-clear');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-category');
+    const indexState = `article.library-material[data-material-id="${materialId}"] .knowledge-file-summary .knowledge-file-index`;
+    await readLibrary(renderer, page => page.cards.some(card => card.id === materialId && card.index === 'complete'), 'library-index-complete');
+    await wheelIntoView(renderer, waitFor, indexState, 'library-index-reading');
+    await assertReachable(renderer, waitFor, requireJourney, indexState, 'library-index-reading');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(indexState)}).textContent === '可阅读'`, 'library-index-reading-words');
+    await setDeveloperMode(renderer, waitFor, true, 'library-index-details-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-details-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-details-category');
+    await pressReachable(renderer, waitFor, requireJourney, `article.library-material[data-material-id="${materialId}"] > details > summary`, 'library-index-details');
 
     // 相似段落检索 (Issue #892; R5-F2c): there as soon as the index is built, nothing to build, ranked on this machine by words.
     // The editor wheels the page to the field, writes the runner's own words and presses 检索. Each control is asserted inside
@@ -859,10 +867,9 @@ async function main() {
     const searchCard = `article.library-material[data-material-id="${materialId}"]`;
     const searchField = `${searchCard} [data-library-field="vector-query"]`;
     const searchButton = `${searchCard} [data-library-action="vector-search"]`;
-    await wheelIntoView(renderer, searchField, 'library-search-field');
-    await pressReachable(renderer, searchField, 'library-search-field');
+    await pressSearchControl(renderer, searchField, 'library-search-field');
     await renderer.send('Input.insertText', { text: '他们说话' });
-    await pressReachable(renderer, searchButton, 'library-search-button');
+    await pressSearchControl(renderer, searchButton, 'library-search-button');
     const searchFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-search-found');
     const search = searchFound.cards.find((card) => card.id === materialId).vectorSearch;
     requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&
@@ -1242,7 +1249,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-landing');
     await click(renderer, '导入稿件', 'word-lineage-pick');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-lineage-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-new-book');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'word-lineage-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');

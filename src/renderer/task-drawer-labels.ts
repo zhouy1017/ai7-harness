@@ -430,8 +430,8 @@ export const TASK_BAR_RECONFIRM_AND_START = '确认新计划并开始';
  */
 export const TASK_BAR_REPREPARE = '另做一份计划';
 export const TASK_BAR_REPREPARE_FAILED = '无法另做一份计划。';
-export function taskBarReprepareNote(reason: string): string {
-  return `${reason}「另做一份计划」按同样的目标和范围做一份新计划；看过之后再开始任务。`;
+export function taskBarReprepareNote(reason: string, relaunch = false): string {
+  return relaunch ? `${reason}「重新开始…」按同样的目标和范围开始一项新任务。` : `${reason}可以另做一份计划。`;
 }
 /** Every place of the governor taken (S74a A2; Issue #49, S14): a Review Run's approval is refused with this reason. */
 export const TASK_BAR_SLOT_BUSY = '现在不能开始：正在运行的任务结束后再开始';
@@ -448,7 +448,7 @@ export const TASK_BAR_START_WHEN_ONLINE = '联网后开始任务';
 /** §6 离线: the draft action in the words OFF-004 gives it beside 联网后开始任务. Neither of the two is preselected. */
 export const TASK_BAR_SAVE_DRAFT_ONLY = '仅保存任务草稿';
 /** §6 AUTH-007 `等待网络`（取消）: a waiting Run's one direct control (OFF-010) — nothing ran, so nothing to weigh first. */
-export const TASK_BAR_CANCEL_WAIT = '取消';
+export const TASK_BAR_CANCEL_WAIT = '取消任务';
 /** A cancelled wait, as the status line states it: nothing was sent. */
 export const TASK_BAR_CANCELLED = '已取消 · 未发送任何内容';
 /** The sentence beside 取消 on a Run that never started (Issue #764): blocked after it waited, so nothing ran or was sent. */
@@ -456,6 +456,11 @@ export const TASK_BAR_BLOCKED_CANCEL_NOTE = '这项任务没有开始，也没�
 /** A kind whose blocked Run the bar can cancel: a ledger kind's, which no other surface may be able to prepare again (Issue #764). */
 function blockedRunCancellable(plan: TaskPlanProjection): boolean {
   return plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite' || plan.kind === 'writing';
+}
+/** 重新开始… wherever the plan offers a relaunch (Issue #1680), or — without one — the legacy redo it still offers; else nothing. */
+function relaunchActions(plan: TaskPlanProjection, tone: TaskBarAction['tone'] = 'secondary'): TaskBarAction[] {
+  return plan.relaunch != null ? [{ name: 'redo', label: TASK_BAR_REDO, tone, disabledReason: null }]
+    : plan.redo != null ? [{ name: 'redo', label: '调整原计划', tone, disabledReason: null }] : [];
 }
 /** The fallback when 取消 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
@@ -481,21 +486,21 @@ export const TASK_BAR_YIELDED_NOTE = '下次空闲后接着处理；运行授权
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '取消任务';
-export const TASK_BAR_REDO = '重新开始';
+export const TASK_BAR_REDO = '重新开始…';
 /**
  * 改计划重做 on a stopped Run (Issue #422, S76c; AUTH-010): its summary says, before anything is recorded, what stops,
  * what is kept and what the new Task does; its confirmation cancels the Run, and the new Task is prepared once it has.
  */
 export const TASK_BAR_REDO_HEADING = '重新开始摘要';
 export const TASK_BAR_REDO_CONFIRM = '确认重新开始';
-export const TASK_BAR_REDO_KEEP = '先不重做';
+export const TASK_BAR_REDO_KEEP = '收起';
 /** While the Run stops for the redo, the bar says what comes next. */
 export const TASK_BAR_REDOING_NOTE = '已记下重新开始：这次运行正在取消，取消完成后准备新任务';
 export const TASK_BAR_REDO_FAILED = '无法重新开始。';
 /** CTRL-004: 取消任务 opens this summary inline, and only its confirmation records anything. */
 export const TASK_BAR_CANCEL_IMPACT_HEADING = '取消影响摘要';
 export const TASK_BAR_CANCEL_CONFIRM = '确认取消任务';
-export const TASK_BAR_CANCEL_KEEP = '继续运行';
+export const TASK_BAR_CANCEL_KEEP = '不取消';
 /** The fallback when 取消任务 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
 /** CTRL-005: what 正在取消 says beside itself until the Run has stopped — never a spinner, never 已取消 early. */
@@ -514,7 +519,7 @@ export const TASK_BAR_RESUME_FAILED = '无法继续这项任务。';
  * 已停止 · 预算已达上限 (Issue #51, S16a; §6 授权后: `调整预算并重做` / `查看部分结果`; MODEL-016, MODEL-017): the way on is a new
  * Task under a ceiling raised or removed, and the partial results are ②A's to show. No 续行 and no 重试.
  */
-export const TASK_BAR_ADJUST_BUDGET_REDO = '调整预算并重做';
+export const TASK_BAR_ADJUST_BUDGET_REDO = TASK_BAR_REDO;
 /** Under developer-live the launch sets the ceiling (ADR 0070): the plan cannot raise it, so the redo is 改计划重做's. */
 export const TASK_BAR_BUDGET_LAUNCH_NOTE = '预算上限由开发者实时启动参数决定：以更高的 --run-budget-ceiling 重新启动后再重做，新任务才会用新的上限';
 export const TASK_BAR_VIEW_PARTIAL = '查看部分结果';
@@ -800,6 +805,11 @@ function openQuestions(plan: TaskPlanProjection): { count: number; more: boolean
   return { count, more: plan.listPages?.['clarifications']?.nextOrdinal != null && count === plan.clarifications.length };
 }
 
+/** Superseded reviews can still continue or be cancelled. This plan state is the service's canContinue result. */
+export function betweenReviewCategories(plan: TaskPlanProjection): boolean {
+  return plan.kind === 'review-run' && plan.runControl === null && plan.state.key === 'stopped' && plan.state.label === '中途停止 · 可继续审阅';
+}
+
 export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
@@ -896,7 +906,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           status: asked.count === 0 ? stateWords(plan.state) : TASK_BAR_AWAITING_ANSWER,
           actions: [
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             runLink,
           ],
         };
@@ -941,7 +951,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
             { name: 'connect', label: TASK_BAR_RESOLVE_MODEL_SERVICE, tone: 'secondary', disabledReason: null },
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             ...unconfirmedLink,
             runLink,
           ],
@@ -966,7 +976,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
               ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             ...unconfirmedLink,
             runLink,
           ],
@@ -983,7 +993,6 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         actions: [
           { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },
           { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-          { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
           runLink,
         ],
       };
@@ -995,9 +1004,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: taskBarReprepareNote(plan.reprepare.reason),
+        note: taskBarReprepareNote(plan.reprepare.reason, plan.relaunch != null),
         status: stateWords(plan.state),
-        actions: [{ name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
+        actions: [plan.relaunch != null ? { name: 'redo', label: TASK_BAR_REDO, tone: 'primary', disabledReason: null } : { name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, { name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
     // The same for a kind whose drawer prepares nothing (Issue #760, S74c): what moved, and where its own surface prepares it
@@ -1009,18 +1018,18 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         statement: null,
         note: `${plan.planMovedReason ?? `${stateWords(plan.state)}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
         status: stateWords(plan.state),
-        actions: blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink] : [runLink],
+        actions: [...(blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null } as const] : []), ...relaunchActions(plan), runLink],
       };
     }
     // 派发前已阻止 of a ledger kind (Issue #764): it never started; 取消 ends it and takes its item out of 待我处理.
-    if (plan.state.key === 'blocked' && blockedRunCancellable(plan)) {
+    if (plan.state.key === 'blocked' && (blockedRunCancellable(plan) || plan.kind === 'baseline-analysis')) {
       return {
         readiness,
         summary,
         statement: taskBarRestartStatement(plan.state),
         note: TASK_BAR_BLOCKED_CANCEL_NOTE,
         status: stateWords(plan.state),
-        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
+        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, ...relaunchActions(plan), runLink],
       };
     }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
@@ -1032,9 +1041,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         note: plan.budgetStop.launchSetsCeiling ? `${taskBarBudgetStopNote(plan.budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}` : taskBarBudgetStopNote(plan.budgetStop),
         status: stateWords(plan.state),
         actions: [
-          ...(plan.redo === null ? [] : [{
-            name: 'redo', label: plan.budgetStop.launchSetsCeiling ? TASK_BAR_REDO : TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null,
-          } as const]),
+          ...relaunchActions(plan, 'primary'),
           { name: 'run-link', label: TASK_BAR_VIEW_PARTIAL, tone: 'secondary', disabledReason: null },
         ],
       };
@@ -1046,7 +1053,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       note: null,
       status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : stateWords(plan.state),
       // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.
-      actions: plan.redo === null ? [runLink] : [{ name: 'redo', label: TASK_BAR_REDO, tone: 'secondary', disabledReason: null }, runLink],
+      actions: [...relaunchActions(plan), ...(betweenReviewCategories(plan) ? [{ name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: null } as const] : []), runLink],
     };
   }
   if (readiness === 'offline') {

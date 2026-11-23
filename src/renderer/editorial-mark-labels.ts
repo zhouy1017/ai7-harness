@@ -28,7 +28,8 @@ export const COMMENTS_TRIAGE_WORDS = {
  * A window that holds more marks than the 批注栏 has loaded says so in the words a 审阅 list read in part uses (Issue #1604):
  * 「已显示 N / M 条。」 with 显示更多, which reads the next page of them.
  */
-export { reviewShownLine as marksShownLine } from './review-labels.js';
+export const marksShownLine = (shown: number, total: number): string => `已显示 ${shown} · 本段共 ${total} 条`;
+export const marksShownFullLine = (shown: number, total: number): string => `已显示 ${shown} 条 · 这一段共 ${total} 条`;
 export const MARKS_MORE = '显示更多';
 export const MARKS_MORE_NAME = '显示更多批注';
 export const MARKS_PAGE_FAILED = '没能读取更多批注；已显示的保持原样，可以再试。';

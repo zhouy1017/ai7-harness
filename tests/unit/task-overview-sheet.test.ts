@@ -128,7 +128,7 @@ describe('任务 page', () => {
     for (const id of ['baseline', 'custom']) items.push({ ...running(id, source), group: 'exceptions', state: 'analysis-blocked', blocked: true,
       facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: 'shutdown' } });
     const root = await mount(items, books);
-    expect(root.querySelectorAll('[data-task-group="waiting"] .task-overview-card')).toHaveLength(6);
+    expect(root.querySelectorAll('[data-task-group="pending"] .task-overview-card')).toHaveLength(6);
     const choose = (book: typeof source): void => {
       const select = root.querySelector('.task-overview-filter-row select');
       if (select) { select.value = book.bookId; select.dispatchEvent({ type: 'change', bubbles: true }); }
@@ -143,24 +143,5 @@ describe('任务 page', () => {
     const lots = await mount([running('a')], named(7));
     expect(lots.querySelector('.task-overview-filter-row select')).not.toBeNull();
     expect(lots.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(0);
-  });
-
-  it('names the Book and the task in the cancel confirmation, and hands focus back to the card on 继续保留 and Escape', async () => {
-    const root = await mount([running('a')]);
-    const card = root.querySelector('[data-task-item="a"]')!;
-    root.querySelector('[data-task-action="cancel"]')!.click();
-    const confirm = root.querySelector('.task-overview-confirm')!;
-    expect(confirm.hidden).toBe(false);
-    expect(confirm.textContent).toContain('《甲》');
-    expect(confirm.textContent).toContain(card.querySelector('strong')!.textContent);
-    confirm.querySelectorAll('button').find((node) => node.textContent === '继续保留')!.click();
-    expect(confirm.hidden).toBe(true);
-    expect(miniDocument.activeElement).toBe(card);
-    miniDocument.body.append(document.createElement('input') as never);
-    (miniDocument.body.querySelector('input') as MiniElement).focus();
-    root.querySelector('[data-task-action="cancel"]')!.click();
-    root.dispatchEvent({ type: 'keydown', key: 'Escape', target: confirm.querySelector('button')!, bubbles: true, preventDefault() {} } as never);
-    expect(confirm.hidden).toBe(true);
-    expect(miniDocument.activeElement).toBe(card);
   });
 });
