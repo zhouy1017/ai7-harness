@@ -1,3 +1,4 @@
+import { collectCompletionDiagnostic } from './completion-diagnostic.mjs';
 import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
@@ -48,6 +49,8 @@ if (args.length !== 0) {
       // Issue #652: which check in that stage failed, as the child named it: a content-free label, never page text.
       const check = collectJourneyCheck(result, journey, failure);
       if (check !== null) console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/check/${check}`);
+      const completion = collectCompletionDiagnostic(result, journey, failure);
+      if (completion !== null) console.error(`COMPLETION_DIAGNOSTIC/J-09/${completion}`);
       const readingSize = collectReadingSizeFailure(result, journey, check);
       if (readingSize !== null) console.error(`READING_SIZE_FAILURE/${journey}/${check}/${readingSize}`);
       const pointer = collectJourneyPointerFailure(result, journey, failure);
