@@ -2,7 +2,7 @@ import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOK_PEOPLE_ROLE_LISTS, BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
@@ -50,6 +50,48 @@ const FIRST: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, start
 const SECOND: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 20, blocks: 6, title: '人员之书乙' };
 
 describe('作者 · 责编 · 相关人 (S83)', () => {
+  it('dates library cards from persisted work and orders prior work by activity rather than creation (I-8)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2030-01-01T08:00:00Z'));
+      const first = await importBook(store, FIRST);
+      vi.setSystemTime(new Date('2030-01-01T09:00:00Z'));
+      const second = await importBook(store, SECOND);
+      expect(store.listPriorWork().map(item => item.bookId)).toEqual([second, first]);
+      const anchor = store.getBookOverview(first).manuscriptAnchor!;
+      const window = store.getManuscriptWindow(anchor.manuscriptId, anchor.branchId, null);
+      vi.setSystemTime(new Date('2030-01-01T10:00:00Z'));
+      store.recordManuscriptEntryPosition(anchor.manuscriptId, anchor.branchId, window.blocks[0]!.blockId, 0);
+      const card = store.listBooks(null).items.find(item => item.bookId === first)!;
+      expect(card.lastWorkedAt).toBe('2030-01-01T10:00:00.000Z');
+      expect(store.listPriorWork().map(item => item.bookId)).toEqual([first, second]);
+      expect(store.listPriorWork()[0]!.library?.lastWorkedAt).toBe(card.lastWorkedAt);
+      vi.setSystemTime(new Date('2030-01-01T11:00:00Z'));
+      expect(store.listBooks(null).items.find(item => item.bookId === first)!.lastWorkedAt).toBe(card.lastWorkedAt);
+    } finally { vi.useRealTimers(); store.close(); }
+  });
+
+  it('supplies current series names and finds internal numbers through the existing all-fields filter (I-8)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = store.prepareBookCreation('书库卡片测试', 'CAT-42');
+      const created = store.commitBookCreation({ ...preview.proposed, reviewDigest: preview.reviewDigest });
+      const bookId = created.overview.book.bookId;
+      const seriesId = store.createSeries({ title: '山水文丛', note: '' }).series.seriesId;
+      const change = (kind: 'add' | 'remove') => {
+        const impact = store.previewSeriesMembershipChange({ seriesId, bookId, kind });
+        store.changeSeriesMembership({ seriesId, bookId, kind, previewDigest: impact.previewDigest });
+      };
+      change('add');
+      const card = store.listBooks(null, { field: 'all', text: 'cat-42' }).items[0]!;
+      expect(card.bookId).toBe(bookId); expect(card.seriesNames).toEqual(['山水文丛']);
+      expect(Number.isFinite(Date.parse(card.lastWorkedAt!))).toBe(true);
+      change('remove');
+      expect(store.listBooks(null).items[0]!.seriesNames).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it('records a Book\'s people as versions, lists them on the card, and finds a Book by 书名, 作者 or 责编', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let first: string;
