@@ -14,3 +14,21 @@ export function watchReturnArrival(chip) {
   chip.addEventListener('click', begin, { capture: true, once: true });
   return { arrived: () => arrived, disconnect: () => { observer.disconnect(); chip.removeEventListener('click', begin, true); } };
 }
+
+/** The observer belongs to the whole action; cleanup must not replace its original failure. */
+export async function withReturnArrival(renderer, chip, action) {
+  let failed = false;
+  try {
+    await renderer.evaluate(`globalThis.__j16ReturnArrival = (${watchReturnArrival.toString()})(${chip})`);
+    return await action();
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    try {
+      await renderer.evaluate(`try { globalThis.__j16ReturnArrival.disconnect(); } finally { delete globalThis.__j16ReturnArrival; } true`);
+    } catch (error) {
+      if (!failed) throw error;
+    }
+  }
+}
