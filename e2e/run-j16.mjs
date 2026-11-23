@@ -1956,15 +1956,9 @@ async function main() {
     for (let round = 0; round < 80; round += 1) {
       await waitFor(renderer, `document.querySelector('[data-reimport-mappings="failed"]') || (document.querySelector('[data-reimport-mappings="ready"]') && (document.querySelector('[data-accept-reimport-degradation]:not(:disabled)') || document.querySelector('[data-reimport-verb-choice]:not(:disabled)') || document.querySelector('[data-reimport-next-page]:not(:disabled)') || document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'))`, 'selection-task-gone-mapping-page', 120_000);
       requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
-      if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
-        const before = await reviewVersion();
-        await clickSelector(renderer, '[data-accept-reimport-degradation]', 'selection-task-gone-degradation');
-        await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
-        continue;
-      }
       const row = await renderer.evaluate(`(() => { const row = document.querySelector('article.reimport-group[data-reimport-group-verb=""]'); return row ? { groupId: row.dataset.reimportGroupId, verbs: Array.from(row.querySelectorAll('[data-reimport-verb-choice]'), (choice) => choice.dataset.reimportVerbChoice) } : null; })()`);
       if (row === null) {
-        if (await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`)) break;
+        if (await renderer.evaluate(`Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`)) break;
         const firstGroup = await renderer.evaluate(`document.querySelector('article.reimport-group')?.dataset.reimportGroupId ?? null`);
         await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, 'selection-task-gone-next-page');
         await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && document.querySelector('article.reimport-group')?.dataset.reimportGroupId !== ${JSON.stringify(firstGroup)}`, 'selection-task-gone-next-page-ready', 60_000);
@@ -1977,7 +1971,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-resolution-persisted', 60_000);
       requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
     }
-    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
+    await waitFor(renderer, `Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`, 'selection-task-gone-commit-ready', 60_000);
     // Force the reimport acknowledgement to finish after the refused jump by holding its presentation frames, as J-01 does.
     // This reproduces a stale status overwrite consistent with Issue #807's failure marker; the hosted macOS ordering was
     // not observed. Releasing the frames below proves the refusal survives that late acknowledgement on any platform.

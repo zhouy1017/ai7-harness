@@ -24,6 +24,8 @@ const record = vi.fn(async (_request: unknown): Promise<unknown> => { throw new 
 const listBooks = vi.fn();
 const lineagePage = vi.fn();
 const serviceWait = vi.fn();
+const returnEditing = vi.fn();
+const continueDraft = vi.fn();
 const settle = async () => { for (let i=0;i<4;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
 const control = (selector: string) => root.querySelector(selector) as unknown as MiniElement;
 const change = (selector: string) => control(selector).dispatchEvent({ type: 'change' });
@@ -34,8 +36,12 @@ const draw = (relationship: 'source-only' | 'reimport' = 'source-only', projecti
 
 beforeEach(async () => {
   restore = installMiniDom(); setTechnicalLayerVisible(false); record.mockClear(); status.mockClear(); listBooks.mockReset(); lineagePage.mockReset(); serviceWait.mockReset();
+  returnEditing.mockReset(); continueDraft.mockReset();
   vi.stubGlobal('Event', class { constructor(public type: string) {} });
+  vi.stubGlobal('Option', function (text: string, value: string) { const option = document.createElement('option'); option.textContent = text; option.value = value; return option; });
   vi.stubGlobal('window', { ai7: { prepareSourceImportReview: record, prepareManuscriptReimport: record,
+    prepareNewBookReview: record, returnImportToEditing: returnEditing, continueImportDraft: continueDraft,
+    getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }),
     listBooks, getReimportLineageSourceVersionPage: lineagePage }, setTimeout, clearTimeout });
   roots = await createServiceTestRoots('ai7-import-page-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -45,7 +51,7 @@ beforeEach(async () => {
   view = createImportReview({ appendRecoveryReturnAction: vi.fn(), technicalDetails: (_class, ...rows) => {
     const details=document.createElement('details'); details.className='technical-details'; details.append(...rows); return technicalDisclosure(details);
   }, replaceScreen: (_state, content) => root.replaceChildren(content), rendererErrorMessage: (_error, fallback) => fallback,
-    abandonAndContinue: vi.fn(), awaitServiceJob: serviceWait, hasErrorCode: () => false,
+    abandonAndContinue: vi.fn(), awaitServiceJob: serviceWait, hasErrorCode: (error, code) => (error as { code?: string }).code === code,
     identityFindingDisclosure: () => document.createElement('div'), initializeStartup: vi.fn(), instantValue: () => document.createElement('span'),
     renderError: vi.fn(), renderImported: vi.fn(), setStatus: status, sourceCard: () => document.createElement('div') });
 });
@@ -61,6 +67,76 @@ it('keeps the distinct-work label first, selected target and changing target not
   expect(root.querySelector('[id="book-title"]')).not.toBeNull();
   expect(root.textContent).toContain('用文件名作为书名。');
   expect((root.querySelector('option') as HTMLOptionElement).selected).toBe(true);
+});
+
+it('returns from details with title, Word, text-box and editable structure choices, then uses the returned version', async () => {
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+    { kind: 'new-book', choiceId: newBook().id as 'new-book', confirmedTitle: '修改后的书名' }, true);
+  const returned = store.returnImportToEditing(staged.draftId, review.draftVersion);
+  if (returned.state !== 'staged') throw new Error('Expected editable import');
+  const word = { mode: 'accepted-baseline' as const, learnFromEdits: false, acceptedBaselineConfirmed: true };
+  const structure = { headings: [{ position: 1, level: 2 }], longParagraphs: 'blocks' as const };
+  returnEditing.mockResolvedValue({ ...returned, editingChoices: { ...returned.editingChoices, textBoxDisposition: 'merge', trackedChanges: word, structure },
+    staged: { ...returned.staged, fidelity: staged.fidelity.map(row => row.key === 'text-boxes' ? { ...row, count: 1, status: 'retained' } : row),
+      wordTrackedChanges: { compatibility: 'ready', previewReading: 'accepted', readings: { accepted: { usable: true, blockCount: 1 }, rejected: { usable: true, blockCount: 1 } }, savedChoice: null },
+      structure: { headings: [{ position: 1, suggestedLevel: 1, rule: 'numbered', excerpt: '' }], headingsTruncated: false, softBreakSplits: [],
+        longParagraphs: [{ sourceOrdinal: 2, firstPosition: 2, pieceCount: 2, choice: { sentences: 2, blocks: 3 }, excerpt: '' }] } } });
+  view.renderReview(review);
+  control('[data-return-import-to-editing]').click(); await settle();
+  expect(returnEditing).toHaveBeenCalledWith({ draftId: review.draftId, expectedDraftVersion: review.draftVersion });
+  expect(control('[id="book-title"]').value).toBe('修改后的书名');
+  expect(control('[data-import-relationship="first-manuscript"]').checked).toBe(true);
+  expect(control('[data-text-box-disposition="merge"]').checked).toBe(true);
+  expect(control('[data-word-import-mode="accepted-baseline"]').checked).toBe(true);
+  expect(control('[data-word-learn-from-edits]').checked).toBe(false);
+  expect(control('[data-structure-candidate="1"]').disabled).toBe(false);
+  expect(control('[data-structure-level="1"]').value).toBe('2');
+  expect(control('[data-long-paragraph-choice="blocks"]').checked).toBe(true);
+  Array.from(root.querySelectorAll('button')).find(button => button.textContent === '导入')!.click(); await settle();
+  expect(record).toHaveBeenCalledWith(expect.objectContaining({ expectedDraftVersion: returned.draftVersion, acceptDegradation: true,
+    textBoxDisposition: 'merge', trackedChanges: word, structure }));
+});
+
+it('returns source-only details to the same Book and relationship', async () => {
+  const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion,
+    { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: staged.identityFindings[0]!.sourceVersionId });
+  const returned = store.returnImportToEditing(staged.draftId, review.draftVersion);
+  returnEditing.mockResolvedValue(returned);
+  view.renderSourceImportReview(review);
+  control('[data-return-import-to-editing]').click(); await settle();
+  expect((root.querySelector(`option[data-book-id="${bookId}"]`) as HTMLOptionElement).selected).toBe(true);
+  expect(control('[data-import-relationship="source-only"]').checked).toBe(true);
+  control('[data-prepare-source-import-review]').click(); await settle();
+  expect(record).toHaveBeenCalledWith(expect.objectContaining({ expectedDraftVersion: returned.draftVersion, target: expect.objectContaining({ bookId, relationship: 'source-only' }) }));
+});
+
+it.each(['first-manuscript', 'source-only'] as const)('recovers REVIEW_CHANGED from %s details with a fresh target and the service notice', async (relationship) => {
+  const query = miniDocument.querySelector.bind(miniDocument);
+  vi.spyOn(miniDocument, 'querySelector').mockImplementation(selector => selector.startsWith('#screen') ? null : query(selector));
+  const review = relationship === 'first-manuscript'
+    ? store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: newBook().id as 'new-book', confirmedTitle: '旧书名' }, true)
+    : store.prepareSourceImportReview(staged.draftId, staged.draftVersion, { kind: 'existing-book', bookId, relationship, reuseSourceVersionId: staged.identityFindings[0]!.sourceVersionId });
+  returnEditing.mockRejectedValue({ code: 'REVIEW_CHANGED' });
+  continueDraft.mockResolvedValue({ state: 'target-review-required', staged: { ...staged, draftVersion: review.draftVersion + 1 }, notice: '导入目标已变化，请重新选择导入目标。' });
+  if ('retainedBoundary' in review) view.renderSourceImportReview(review); else view.renderReview(review);
+  control('[data-return-import-to-editing]').click(); await settle();
+  expect(continueDraft).toHaveBeenCalledWith({ draftId: review.draftId, expectedDraftVersion: review.draftVersion });
+  expect(root.textContent).toContain('导入目标已变化，请重新选择导入目标。');
+  expect(control('[id="book-title"]').value).not.toBe('旧书名');
+  Array.from(root.querySelectorAll('button')).find(button => button.textContent === '导入')!.click(); await settle();
+  expect(record).toHaveBeenCalledWith(expect.objectContaining({ expectedDraftVersion: review.draftVersion + 1 }));
+});
+
+it('opens a restart form with only the saved Word and structure choices', () => {
+  const structure = { headings: [{ position: 1, level: 3 }], longParagraphs: null };
+  view.renderTargetChoice({ ...staged, savedStructureChoice: structure,
+    structure: { headings: [{ position: 1, suggestedLevel: 1, rule: 'numbered', excerpt: '' }], headingsTruncated: false, softBreakSplits: [], longParagraphs: [] },
+    wordTrackedChanges: { compatibility: 'ready', previewReading: 'rejected', readings: { accepted: { usable: true, blockCount: 1 }, rejected: { usable: true, blockCount: 1 } },
+      savedChoice: { mode: 'suggestions', learnFromEdits: false, acceptedBaselineConfirmed: false } } }, newBook().id);
+  expect(control('[id="book-title"]').value).toBe('sample1');
+  expect(control('[data-structure-candidate="1"]').checked).toBe(true);
+  expect(control('[data-structure-level="1"]').value).toBe('3');
+  expect(control('[data-word-learn-from-edits]').checked).toBe(false);
 });
 
 it('states same-Book reuse without a radio and sends the same source-only request', async () => {
