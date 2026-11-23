@@ -2,11 +2,11 @@ import type { LocalCheckOptions, ProcedureDefinitionPin, ProcedureDefinitionDocu
 import { validateProcedureEdit } from '../../procedures/editable.js';
 import { BLOCK_ID_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../../analysis/canonical.js';
 import { graphemeCount } from '../../analysis/factual-review-contract.js';
-import { LOCAL_CHECK_PROCEDURE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2 } from './rules.js';
+import { LOCAL_CHECK_PROCEDURE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, TABLE_RULE_IDS } from './rules.js';
 import type { HouseWordListDocument, HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
 import { validateHouseWordListSnapshot } from '../house-word-list.js';
 import { localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3 } from '../../procedures/preinstalled.js';
-import { STANDARD_TABLE_VERSION, TABLE_RULE_IDS, validLocalTables } from './tables.js';
+import { validLocalTables } from '../../../shared/protocol/deterministic.js';
 
 import { validLibraryPins, type LibraryPin } from './library-check.js';
 
@@ -37,7 +37,7 @@ export interface LocalCheckPlanV2 extends Omit<LocalCheckPlan, 'schema' | 'rules
 }
 export interface LocalCheckPlanV3 extends Omit<LocalCheckPlanV2, 'schema' | 'houseWordList'> {
   readonly schema: 'ai7.review.local-plan/3';
-  readonly standardTableVersion: typeof STANDARD_TABLE_VERSION;
+  readonly standardTableVersion: 1;
   readonly houseWordList: LocalCheckPlanV2['houseWordList'] | null;
 }
 export interface LocalCheckPlanV4 extends Omit<LocalCheckPlanV3, 'schema'> {
@@ -134,7 +134,7 @@ export function validateLocalPlanV2(value: unknown): asserts value is LocalCheck
 
 export function freezeLocalPlanV3(input: Omit<LocalCheckPlanV3, 'schema' | 'rules' | 'digest' | 'grammarVersion' | 'exclusionVersion' | 'standardTableVersion'>): LocalCheckPlanV3 {
   const body = { schema: 'ai7.review.local-plan/3' as const, ...structuredClone(input), grammarVersion: 1 as const, exclusionVersion: 1 as const,
-    standardTableVersion: STANDARD_TABLE_VERSION, rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map((id) => ({ id, version: 1 })) };
+    standardTableVersion: 1 as const, rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map((id) => ({ id, version: 1 })) };
   const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
   validateLocalPlanV3(plan); return plan;
 }
@@ -144,7 +144,7 @@ export function validateLocalPlanV3(value: unknown): asserts value is LocalCheck
 }
 export function freezeLocalPlanV4(input: Omit<LocalCheckPlanV4, 'schema' | 'rules' | 'digest' | 'grammarVersion' | 'exclusionVersion' | 'standardTableVersion'>): LocalCheckPlanV4 {
   const body = { schema: 'ai7.review.local-plan/4' as const, ...structuredClone(input), grammarVersion: 1 as const, exclusionVersion: 1 as const,
-    standardTableVersion: STANDARD_TABLE_VERSION, rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map((id) => ({ id, version: 1 })) };
+    standardTableVersion: 1 as const, rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map((id) => ({ id, version: 1 })) };
   const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
   validateLocalTablePlan(plan); return plan;
 }
@@ -161,7 +161,7 @@ function validateLocalTablePlan(value: Record<string, unknown>): void {
   const editable = library || value.schema === 'ai7.review.local-plan/4';
   requireLocal(hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList', library ? 'standardTables' : 'standardTableVersion', ...(editable ? ['procedureDefinition'] : [])]));
   const { digest, ...body } = value;
-  requireLocal((editable || value.schema === 'ai7.review.local-plan/3') && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && (library ? validLibraryPins(value.standardTables) : value.standardTableVersion === STANDARD_TABLE_VERSION));
+  requireLocal((editable || value.schema === 'ai7.review.local-plan/3') && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && (library ? validLibraryPins(value.standardTables) : value.standardTableVersion === 1));
   validateLocalFields(value, 3, [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS]);
   requireLocal(isRecord(value.procedure) && isRecord(value.options) && validLocalTables(value.options.tables));
   if (!library) requireLocal(value.options.tables.tableIds === undefined);

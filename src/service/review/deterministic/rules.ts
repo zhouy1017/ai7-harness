@@ -6,6 +6,8 @@ export type LocalRuleId = (typeof LOCAL_RULE_IDS)[number];
 /** H01 belongs only to the successor; the five-rule v1 registry is immutable. */
 export const LOCAL_RULE_IDS_V2 = [...LOCAL_RULE_IDS, 'H01'] as const;
 export type LocalRuleIdV2 = (typeof LOCAL_RULE_IDS_V2)[number];
+export const TABLE_RULE_IDS = ['C01', 'C02', 'V01', 'T01'] as const;
+export type TableRuleId = typeof TABLE_RULE_IDS[number];
 export const HOUSE_RULE = { id: 'H01', version: 1, title: '命中本社词条，请编辑判断',
   limitation: '只匹配编辑保存并明确选定的字面词条；区分大小写，不规范化，不判断法律或标准合规，不生成替换。' } as const;
 const P = 'https://www.moe.gov.cn/ewebeditor/uploadfile/2015/01/13/20150113091548267.pdf';

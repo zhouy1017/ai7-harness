@@ -1,4 +1,5 @@
 import { loadLibraryCheck, libraryDetail, selectedStandardTables } from '../../src/service/review/deterministic/library-check.js';
+import { readSeedRows } from '../../src/service/standard-table-seed.cjs';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,7 +10,6 @@ import {
   STANDARD_TABLE_SCHEMA_SQL,
   type PreinstalledTableKey,
 } from '../../src/service/standard-tables.js';
-import { cycb2SeedText } from '../../src/service/standard-tables/seed/cycb-2.js';
 
 // R5-L1 (ADR 0106 §2, §5, §9, §10): the library's relations and its four pre-installed tables.
 
@@ -19,13 +19,6 @@ const DIGESTS: Readonly<Record<PreinstalledTableKey, string>> = {
   'tgh-2013-annex-1': 'b67f3b918aecd7b3d6372f166e0a657ecb8b32d7ad50cbec84b078bb6ad369df',
   'gf-1001-2001': '265c376ab6b64437930b5ebbc569239d3ebc1b4ca2290d7cc7cac9464d466d33',
   'cycb-2': '95279be022dc555b207a5a4828963e930c1fdb1e448ff9cde4eef1bdd326c01f',
-};
-
-const today = JSON.parse(readFileSync('src/service/review/deterministic/standard-data.json', 'utf8')) as {
-  membership: string;
-  characterForms: [string, string, string][];
-  variantWords: { preferred: string; variants: string[]; note: string }[];
-  appendixWords: { preferred: string; variants: string[]; note: string }[];
 };
 
 function library(keys?: readonly PreinstalledTableKey[]): DatabaseSync {
@@ -100,30 +93,22 @@ describe('the 字表与词表 library (R5-L1)', () => {
     } finally { db.close(); }
   });
 
-  it('holds the three national tables equal to standard-data.json entry by entry, and every non-empty note as the condition', () => {
-    const db = library();
+  it('installs the original national editions with their source order and conditions', () => {
+    const db = library(['tgh-2013', 'tgh-2013-annex-1', 'gf-1001-2001']);
     try {
       const characters = entriesOf(db, 'tgh-2013');
-      expect(characters.map((row) => row.recommended)).toEqual([...today.membership]);
-      expect(characters.map((row) => row.source)).toEqual([...today.membership].map((_, index) => `第${index + 1}号`));
-      expect(characters.every((row) => row.discouraged === '[]' && row.condition_note === null && row.rank === null)).toBe(true);
-
-      const forms = entriesOf(db, 'tgh-2013-annex-1');
-      expect(forms.map((row) => [JSON.parse(String(row.discouraged)) as string[], row.recommended, row.condition_note ?? ''])).toEqual(today.characterForms.map(([form, targets, note]) => [[form], targets, note]));
-
+      expect(characters.every((row, index) => row.source === `第${index + 1}号`)).toBe(true);
       const words = entriesOf(db, 'gf-1001-2001');
-      const expected = [...today.variantWords.map((word) => ({ word, source: null })), ...today.appendixWords.map((word) => ({ word, source: '附录' }))];
-      expect(words.map((row) => ({ recommended: row.recommended, variants: JSON.parse(String(row.discouraged)), note: row.condition_note ?? '', source: row.source })))
-        .toEqual(expected.map(({ word, source }) => ({ recommended: word.preferred, variants: word.variants, note: word.note, source })));
-      expect(words.filter((row) => row.source === '附录')).toHaveLength(44);
-      expect(words.filter((row) => row.condition_note !== null)).toHaveLength(10 + 44);
+      expect(words.slice(0, 338).every(row => row.source === null)).toBe(true);
+      expect(words.slice(338).every(row => row.source === '附录' && row.condition_note !== null)).toBe(true);
+      expect(words.filter(row => row.condition_note !== null)).toHaveLength(10 + 44);
     } finally { db.close(); }
   });
 
   it('holds the 常用词表 as words and first ranks only: no discouraged form, no condition, no source', () => {
-    const lines = cycb2SeedText().split('\n');
-    expect(lines).toHaveLength(56462);
-    expect(lines.every((line) => /^[1-9]\d*\t[^\t]+$/u.test(line))).toBe(true);
+    const seed = readSeedRows('cycb-2');
+    expect(seed.length).toBe(56462);
+    expect(seed.every(row => row.length === 2 && /^[1-9]\d*$/u.test(row[0]!) && row[1]!.length > 0)).toBe(true);
     const db = library(['cycb-2']);
     try {
       const rows = entriesOf(db, 'cycb-2');
