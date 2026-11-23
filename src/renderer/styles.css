@@ -2730,6 +2730,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar-link, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; box-sizing: border-box; min-height: 34px; padding: .35rem .75rem; border: 1px solid var(--boundary-strong); border-radius: 7px; font: inherit; line-height: 1.4; cursor: pointer; color: var(--action-text); background: var(--action-secondary); }
+.btn[hidden] { display: none; }
 .btn.small, .btn.sidebar-pin { min-height: 28px; padding: .15rem .6rem; font-size: .8rem; }
 .btn.primary { color: var(--action-primary-text); background: var(--action-primary); border-color: var(--action-primary); }
 .btn.quiet { background: transparent; border-color: transparent; }
