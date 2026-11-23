@@ -111,15 +111,16 @@ it('polls a synchronous J-13 predicate until its value becomes truthy', async ()
   }
 });
 
-it.each(['late', 'pending', 'clock-advanced'])('enforces the J-13 deadline for a %s renderer response', async (scenario) => {
+it.each(['late', 'pending', 'clock-advanced', 'wall-clock-rollback'])('enforces the J-13 deadline for a %s renderer response', async (scenario) => {
   vi.useFakeTimers();
   try {
     const renderer = {
       evaluate: async () => {
         if (scenario === 'clock-advanced') {
-          vi.setSystemTime(Date.now() + 20);
+          vi.advanceTimersByTime(20);
           return true;
         }
+        if (scenario === 'wall-clock-rollback') vi.setSystemTime(Date.now() - 150);
         return new Promise<boolean>(resolve => {
           if (scenario === 'late') setTimeout(resolve, 93, true);
         });

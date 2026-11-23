@@ -199,14 +199,14 @@ async function createRendererManager(browser) {
 }
 
 async function waitFor(renderer, expression, name, timeout = 60_000) {
-  const deadline = Date.now() + timeout;
+  const deadline = performance.now() + timeout;
   let timer;
   const expired = new Promise(resolve => { timer = setTimeout(resolve, timeout, false); });
   try {
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       const predicate = renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false);
       const matched = await Promise.race([predicate, expired]);
-      const remaining = deadline - Date.now();
+      const remaining = deadline - performance.now();
       if (remaining <= 0) break;
       if (matched) return;
       await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)));
