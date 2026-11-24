@@ -10,6 +10,7 @@ import { transmitOnce, type LiveModelFetch } from '../../src/service/provider/li
 import { fixtureToolResultDigest } from '../../src/service/provider/local-deterministic-adapter.js';
 import { fixtureEntryKey, parseModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
+import { ruleNamedToolSchemas, type ToolSchemaVersion } from '../../src/service/provider/platform-tools.js';
 import { RetrievalIndex, type RetrievalSource } from '../../src/service/retrieval/index.js';
 import { normalizeToolExchange, toolTurnRequestDigest, type ToolExchangeRound } from '../../src/service/provider/tool-turn-digest.js';
 import { replayTransport, type ReplayTally } from '../editorial-cases/runner/session.js';
@@ -19,7 +20,7 @@ import { replayTransport, type ReplayTally } from '../editorial-cases/runner/ses
 // identities are renamed before the hash and nothing else is. Everything runs on a synthetic cache in a temporary directory.
 
 type Tool = {
-  parseCachedRequest: (requestBody: string) => { requestDigest: string; contentDigest: string | null; identities: Array<{ placeholder: string; identity: string }> };
+  parseCachedRequest: (requestBody: string, promptContractDigest: string) => { requestDigest: string; contentDigest: string | null; identities: Array<{ placeholder: string; identity: string }> };
   generateModelFixture: (request: { selector: string; cacheRoot: string; identity: string; description: string; out: string }) => Promise<Record<string, unknown>>;
   normalizeToolExchange: (rounds: ReadonlyArray<ToolExchangeRound>, ownBlockIds: ReadonlyArray<string>) => unknown;
   toolTurnRequestDigest: (unitRequestDigest: string, normalized: unknown) => string;
@@ -60,6 +61,9 @@ function wireBody(own: ReadonlyArray<string>, rounds: ReadonlyArray<Round>, ordi
     ]),
   ] };
 }
+
+const wireToolSchemas = (version: ToolSchemaVersion) =>
+  ruleNamedToolSchemas(false, true, version).map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } }));
 
 const retrieveRound = (own: ReadonlyArray<string>, candidate: string, preview = PREVIEW): Round => ({
   calls: [{ id: 'call_a', name: 'retrieve', arguments: { query: '合成之城', k: 2, sourceKinds: ['manuscript'], near: own[0] } }],
@@ -109,9 +113,10 @@ describe('tool-turn fixtures (Issue #1598)', () => {
 
   /** The synthetic exchange of the first test: retrieve, then exact_fetch, then the unit result. */
   async function recordedEntries(): Promise<Array<Record<string, any>>> {
-    const first = await convert(wireBody(OWN, []), callsMessage([{ name: 'retrieve', arguments: { query: '合成之城', k: 2, sourceKinds: ['manuscript'], near: OWN[0] } }]));
-    const second = await convert(wireBody(OWN, [retrieveRound(OWN, CANDIDATE)]), callsMessage([{ name: 'exact_fetch', arguments: { candidateId: CANDIDATE } }]));
-    const third = await convert(wireBody(OWN, [retrieveRound(OWN, CANDIDATE), fetchRound(CANDIDATE)]), { role: 'assistant', content: UNIT_RESULT(CANDIDATE) });
+    const captureBody = (rounds: ReadonlyArray<Round>) => ({ ...wireBody(OWN, rounds), tools: wireToolSchemas(1) });
+    const first = await convert(captureBody([]), callsMessage([{ name: 'retrieve', arguments: { query: '合成之城', k: 2, sourceKinds: ['manuscript'], near: OWN[0] } }]));
+    const second = await convert(captureBody([retrieveRound(OWN, CANDIDATE)]), callsMessage([{ name: 'exact_fetch', arguments: { candidateId: CANDIDATE } }]));
+    const third = await convert(captureBody([retrieveRound(OWN, CANDIDATE), fetchRound(CANDIDATE)]), { role: 'assistant', content: UNIT_RESULT(CANDIDATE) });
     return [first, second, third];
   }
   const sealed = (entries: ReadonlyArray<Record<string, any>>): ReturnType<typeof parseModelFixture> => parseModelFixture({ schema: 'ai7.model-fixture/1', identity: 'tool-turn-synthetic', description: '合成', basedOn: null,
@@ -143,15 +148,18 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     expect(JSON.stringify([...fixture.entries.values()])).not.toContain(PREVIEW);
   });
 
-  it('replays the recorded turns on a fresh import, filling its own identities and running no tool itself', async () => {
+  it.each([1, 2] as const)('replays the first and continuation turns with version %s declarations on a fresh import', async (version) => {
     const fixture = await recordedFixture();
-    const firstTurn = await ask(fixture, wireBody(FRESH_OWN, []));
+    const replayBody = (rounds: ReadonlyArray<Round>) => ({ ...wireBody(FRESH_OWN, rounds), tools: wireToolSchemas(version) });
+    const firstBody = replayBody([]);
+    expect(tool.parseCachedRequest(JSON.stringify(firstBody), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe([...fixture.entries.values()][0]!.requestDigest);
+    const firstTurn = await ask(fixture, firstBody);
     expect(firstTurn.message!.tool_calls[0].function.name).toBe('retrieve');
     expect(JSON.parse(firstTurn.message!.tool_calls[0].function.arguments)).toEqual({ k: 2, near: FRESH_OWN[0], query: '合成之城', sourceKinds: ['manuscript'] });
     expect(firstTurn.message!.content).toBeNull();
-    const secondTurn = await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE)]));
+    const secondTurn = await ask(fixture, replayBody([retrieveRound(FRESH_OWN, FRESH_CANDIDATE)]));
     expect(JSON.parse(secondTurn.message!.tool_calls[0].function.arguments)).toEqual({ candidateId: FRESH_CANDIDATE });
-    const last = await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE), fetchRound(FRESH_CANDIDATE)]));
+    const last = await ask(fixture, replayBody([retrieveRound(FRESH_OWN, FRESH_CANDIDATE), fetchRound(FRESH_CANDIDATE)]));
     expect(last.message!.content).toContain(FRESH_CANDIDATE);
     expect(last.message!.content).not.toContain(CANDIDATE);
   });

@@ -22,6 +22,7 @@ import { graphemeCount, parseFactualReviewUnitMessageHeader } from '../../src/se
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { modelRequestNotSent } from '../../src/service/provider/deepseek-adapter.js';
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
+import * as platformTools from '../../src/service/provider/platform-tools.js';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
@@ -254,6 +255,30 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it.each([1, 2] as const)('sends the exact retrieve declaration from a frozen version %s review plan', async (version) => {
+  // Create the version 1 plan through the same writer, with the pre-versioning choice at the freeze boundary.
+  const legacyFreeze = version === 1 ? vi.spyOn(platformTools, 'toolSchemaPinForNewPlan').mockReturnValue({}) : undefined;
+  let preparedDigest: string | null | undefined;
+  try {
+    const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ready: ({ store, bookId, reviewRunId }) => {
+      if (legacyFreeze !== undefined) {
+        expect(legacyFreeze).toHaveBeenCalled();
+        legacyFreeze.mockRestore();
+      }
+      preparedDigest = store.inspectReviewWorkspace(bookId, reviewRunId).run?.categories[0]?.planEnvelopeDigest;
+    } });
+    const { ledger, runRecordId } = latestReviewExecution(result.store);
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    expect(facts.planEnvelopeDigest).toBe(preparedDigest);
+    expect(facts.compositionOptions?.toolSchemaVersion).toBe(version === 1 ? undefined : 2);
+    const request = JSON.parse(result.requests.find((entry) => entry.ordinal === 1)!.body) as { tools: Array<{ function: platformTools.PlatformToolSchema }> };
+    expect(request.tools.find((tool) => tool.function.name === 'retrieve')?.function)
+      .toEqual(platformTools.ruleNamedToolSchemas(false, true, version).find(({ name }) => name === 'retrieve'));
+  } finally {
+    legacyFreeze?.mockRestore();
+  }
+});
 
 it.each(['style-and-format', 'plot-consistency'])('runs one bounded %s synthesis and materializes its exact anchored card', async (category) => {
   let evidence: ReviewCrossChapterInput['evidence'][number] | undefined;
