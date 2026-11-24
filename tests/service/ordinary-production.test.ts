@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { evidenceTranslator } from '../../src/service/fast-role/material-translation-contract.js';
 import { STRUCTURED_FLASH_TASKS } from '../../src/service/fast-role/flash-task-contract.js';
 import * as egressGate from '../../src/service/provider/egress-gate.js';
@@ -1178,9 +1179,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
 
   it.each([{ model: 'deepseek-flash', effort: undefined, label: 'DeepSeek V4.1 Flash' },
     { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' },
-    { model: 'account-custom-model', effort: 'vendor-future-level', label: 'account-custom-model@vendor-future-level' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
+    { model: 'account-custom-model', effort: 'high', label: 'account-custom-model@high' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
     const { store, production } = await openProductionStore();
     const credentialReference = await configure(store, production, 'deepseek-open-platform');
+    if (model === 'account-custom-model') seedModelEfforts(store, 'deepseek-open-platform', { [model]: ['low', 'high'] });
     store.selectMainRoleModel('deepseek-open-platform', model, effort ?? 'off');
     const selected = store.getConfiguredModelRoleBinding('main-editorial')!;
     const configured = { ...OFFICIAL, model, credentialReference,
@@ -1545,6 +1547,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
   it('validates each new underlying Flash answer on the configured route without replaying an earlier result', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Synthetic formatter', null, 'ready', 'openai-platform');
+    seedModelEfforts(store, 'openai-platform', { 'synthetic-formatter': ['low'] });
     store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'synthetic-formatter', reasoningEffort: 'low' });
     const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, binding);
@@ -1568,6 +1571,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
   it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Fast effort', null, 'ready', 'openai-platform');
+    seedModelEfforts(store, 'openai-platform', { 'custom-fast-model': ['low', 'high'] });
     store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'custom-fast-model', reasoningEffort: 'high' });
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);

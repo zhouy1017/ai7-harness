@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -451,7 +452,8 @@ it('freezes separate scoped launch bindings and replays a command after role set
   const second = await importSample1Book(store, roots.codeRoot, '并行局部修改');
   const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
   const connection = store.saveModelServiceConnection('局部修改连接', null, 'ready', binding.route);
-  store.selectFastRoleModel(binding.route, binding.model, 'medium');
+  seedModelEfforts(store, binding.route, { 'scoped-choice-one': ['high'], 'scoped-choice-two': ['low'] });
+  store.selectFastRoleModel(binding.route, binding.model, 'low');
   const defaults = store.getConfiguredModelRoleBinding('foreground-flash')!;
   const configured = { ...binding, credentialReference: connection.credentialReference };
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured, defaults);

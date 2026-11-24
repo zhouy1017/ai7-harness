@@ -15,6 +15,7 @@ export const CONFIGURED_ROUTE_IDS = [
   'opencode-go',
   'opencode-go-messages',
   'opencode-go-responses',
+  'opencode-go-gemini',
   'opencode-zen',
   'opencode-zen-messages',
   'opencode-zen-responses',
@@ -52,6 +53,7 @@ export const CONFIGURED_ROUTE_REASONING = {
   'opencode-go': null,
   'opencode-go-messages': null,
   'opencode-go-responses': null,
+  'opencode-go-gemini': null,
   'opencode-zen': null,
   'opencode-zen-messages': null,
   'opencode-zen-responses': null,
@@ -62,6 +64,18 @@ export const CONFIGURED_ROUTE_REASONING = {
 
 export interface ConfiguredReasoningDeclaration { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string }
 export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReasoningDeclaration>> = {
+  'anthropic-claude/claude-opus-5-5': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+    readOn: '2026-11-24',
+  },
+  'anthropic-claude/claude-sonnet-5-5': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+    readOn: '2026-11-24',
+  },
   'deepseek-open-platform/deepseek-v4-pro': {
     control: 'deepseek-thinking',
     efforts: ['low', 'high', 'max'],
@@ -91,6 +105,42 @@ export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReaso
     efforts: ['128', '1024', '8192', '32768'],
     source: 'https://ai.google.dev/gemini-api/docs/generate-content/thinking',
     readOn: '2026-11-14',
+  },
+  'google-gemini/gemini-4-argon': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high'],
+    source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+    readOn: '2026-11-24',
+  },
+  'google-gemini/gemini-4-hydrogen': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high', 'xhigh'],
+    source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+    readOn: '2026-11-24',
+  },
+  'openai-platform/gpt-6.2-sol': {
+    control: 'openai-responses',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/guides/deployment-checklist#set-up-reasoningeffort',
+    readOn: '2026-11-24',
+  },
+  'openai-platform/gpt-6.1-terra': {
+    control: 'openai-responses',
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/models/gpt-6.1-terra',
+    readOn: '2026-11-24',
+  },
+  'opencode-go/deepseek-v4.1-flash': {
+    control: 'openai-chat-completions',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/deepseek-v4.1-flash.toml ; https://api-docs.deepseek.com/api/create-chat-completion/ (documented; acceptance on the Go gateway is unverified)',
+    readOn: '2026-11-24',
+  },
+  'opencode-go-gemini/gemini-4-argon': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high'],
+    source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml',
+    readOn: '2026-11-24',
   },
 };
 export const PRE114_MODEL_REASONING_DEFAULTS: Readonly<Record<string, string>> = { 'deepseek-open-platform/deepseek-v4-pro': 'high' };
@@ -142,26 +192,30 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
         model: 'gemini-4-argon',
         credentialSlot: 'google-gemini',
+        reasoningEffort: 'high',
       },
       flash: {
         route: 'google-gemini',
         endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
         model: 'gemini-4-hydrogen',
         credentialSlot: 'google-gemini',
+        reasoningEffort: 'high',
       },
     },
     'opencode-go': {
       pro: {
-        route: 'opencode-go',
-        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
         model: 'gemini-4-argon',
         credentialSlot: 'opencode-go',
+        reasoningEffort: 'high',
       },
       flash: {
         route: 'opencode-go',
         endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
         model: 'deepseek-v4.1-flash',
         credentialSlot: 'opencode-go',
+        reasoningEffort: 'high',
       },
     },
   },
@@ -311,6 +365,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
     fast: [
       {
@@ -451,6 +511,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
   },
   ordinaryProduction: {
@@ -521,6 +587,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
     fast: [
       {
@@ -589,6 +661,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
   },
 } as const;
@@ -618,6 +696,7 @@ export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> =
   'opencode-zen-responses/gpt-6-astra': 'GPT 6 Astra（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-sol': 'GPT 5.6 Sol（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-luna': 'GPT 5.6 Luna（OpenCode Zen）',
+  'opencode-go-gemini/gemini-4-argon': 'Gemini 4 Argon（OpenCode Go）',
 };
 
 /** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */
@@ -637,6 +716,7 @@ export const CONFIGURED_RECOMMENDED_MODELS: Readonly<Record<string, { readonly p
 export const CONFIGURED_ALTERNATE_ROUTE_MODELS: Readonly<Record<string, readonly string[]>> = {
   'opencode-go-messages': ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
   'opencode-go-responses': ['grok-4.6', 'gpt-5.6-luna'],
+  'opencode-go-gemini': ['gemini-4-argon'],
   'opencode-zen-messages': ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
   'opencode-zen-responses': ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
 };
@@ -679,6 +759,7 @@ export const CONFIGURED_PROVIDER_LABELS: Readonly<Record<ConfiguredRouteId, stri
   'opencode-go': 'OpenCode Go',
   'opencode-go-messages': 'OpenCode Go',
   'opencode-go-responses': 'OpenCode Go',
+  'opencode-go-gemini': 'OpenCode Go',
   'opencode-zen': 'OpenCode Zen',
   'opencode-zen-messages': 'OpenCode Zen',
   'opencode-zen-responses': 'OpenCode Zen',

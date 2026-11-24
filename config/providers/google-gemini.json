@@ -105,12 +105,14 @@
           "modelId": "gemini-4-argon",
           "displayName": "Gemini 4 Argon",
           "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "google-generate-content", "efforts": ["low", "medium", "high"], "source": "https://aistudio.google.com/docs/thinking?generate-content=true", "readOn": "2026-11-24" },
           "note": "Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108)."
         },
         {
           "modelId": "gemini-4-hydrogen",
           "displayName": "Gemini 4 Hydrogen",
           "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "google-generate-content", "efforts": ["low", "medium", "high", "xhigh"], "source": "https://aistudio.google.com/docs/thinking?generate-content=true", "readOn": "2026-11-24" },
           "note": "Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108)."
         }
       ]

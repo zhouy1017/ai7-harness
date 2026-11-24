@@ -14,7 +14,9 @@ import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
-import { effectiveModelReasoningEffort } from '../provider/model-profile.js';
+import { effectiveModelReasoningEffort, modelProfileFor } from '../provider/model-profile.js';
+import { modelEffortRefusal } from '../provider/model-efforts.js';
+import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -638,6 +640,11 @@ export async function testModelServiceConnection(
   }
   if (connection === null || connection.credentialOperationState !== 'ready') {
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '请先保护凭据并选择已准入的文本模型；没有发送任何内容。');
+  }
+  if (sentReasoningEffort(input.reasoningEffort) !== null) {
+    const evidence = store.getModelServiceModels(input.route).find(model => model.modelId === input.modelId);
+    const refusal = modelEffortRefusal(evidence, modelProfileFor(allowed.route, allowed.model), input.reasoningEffort);
+    if (refusal !== null) throw new FastRoleError('MODEL_EFFORT_INVALID', refusal);
   }
   if (cancelled()) {
     const cancelledStatus: ModelConnectionTestStatus = { modelId: input.modelId, credentialUpdatedAt: connection.credentialUpdatedAt,

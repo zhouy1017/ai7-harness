@@ -131,7 +131,9 @@ describe('account model discovery', () => {
       .mockResolvedValueOnce(page('gemini-3.8-flash', true));
     expect(await refreshModelServiceModels(store, syntheticRuntime(send), route, syntheticResolver)).toEqual({ status: 'success', modelCount: 2 });
     const models = channelModels(store, route);
-    expect(models.find((model) => model.modelId === 'gemini-custom')).not.toHaveProperty('supportedEfforts');
+    expect(models.find((model) => model.modelId === 'gemini-custom')?.supportedEfforts).toMatchObject({
+      status: 'unsupported', levels: [], provenance: { kind: 'discovered' },
+    });
     expect(models.find((model) => model.modelId === 'gemini-3.8-flash')?.supportedEfforts).toMatchObject({
       status: 'supported', levels: ['low', 'medium', 'high'], completeness: 'partial',
       provenance: { kind: 'documented', source: expect.any(String), readOn: expect.any(String) },

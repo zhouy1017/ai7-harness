@@ -27,10 +27,19 @@ it('routes a scoped launch preview through the fast-role owner at the service en
   const previewScopedEdit = vi.fn(() => answer), previewTaskLaunch = vi.fn(() => { throw new Error('wrong owner'); });
   const input = { instruction: '检查所选文字' };
   expect(await response({ store: { replacementWaiting: () => false, previewTaskLaunch }, fastRole: { requests: { previewScopedEdit } },
+    policy: { operationalScope: 'development-ci' },
     request: { id: 'request', op: 'previewTaskLaunch', input: { bookId: 'book', launch: { operation: 'startScopedAiEdit', input } } } }))
     .toMatchObject({ ok: true, result: answer });
   expect(previewScopedEdit).toHaveBeenCalledExactlyOnceWith('book', input);
   expect(previewTaskLaunch).not.toHaveBeenCalled();
+});
+
+it('refuses a new prepared plan with a stale effort before starting the job', async () => {
+  const stale = Object.assign(new Error('之前选的强度现在不可用，请重新选择。'), { code: 'MODEL_EFFORT_INVALID' });
+  const requireCurrentModelRoleEffort = vi.fn(() => { throw stale; });
+  await expect(response({ store: { replacementWaiting: () => false, requireCurrentModelRoleEffort },
+    policy: { operationalScope: 'ordinary-production' }, request: { id: 'request', op: 'prepareBaselineAnalysis', input: {} } })).rejects.toBe(stale);
+  expect(requireCurrentModelRoleEffort).toHaveBeenCalledExactlyOnceWith('foreground-pro');
 });
 
 it('holds an idle review launch until the service execution owner reports quiet (#1657 F6)', async () => {

@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -320,6 +321,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
       : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, controls);
+  seedModelEfforts(store, 'opencode-go', { 'account-future-model': ['low', 'high'] });
   launchPolicy = capture.policy;
   const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries, seeded: true };
   try { await body(session, await importBook(session)); } finally { await close(session); }
@@ -2704,6 +2706,7 @@ async function openLayeredSelection(controls: Parameters<typeof capturedOrdinary
           : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), ...controls });
+  seedModelEfforts(store, 'opencode-go', { 'account-future-model': ['low', 'high'] });
   launchPolicy = capture.policy;
   return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, seeded: seed };
 }
@@ -3281,6 +3284,10 @@ it('reconnects an offline ordinary review with every category on its launched mo
       executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
     const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');
+    seedModelEfforts(session.store, 'opencode-go', { 'account-future-model': ['low'] });
+    expect(() => session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy)).toThrowError(expect.objectContaining({
+      code: 'MODEL_EFFORT_INVALID', message: '之前选的强度现在不可用，请重新选择。',
+    }));
     const repeated = session.store.launchReviewRun(input, launchPolicy);
     expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
     await driveLaunchedReviewRun(session.driver, repeated);

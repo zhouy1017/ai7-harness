@@ -124,16 +124,16 @@ describe('导入数据库 over the real store', () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const connection = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
-      store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
+      store.selectMainRoleModel('anthropic-claude', 'claude-opus-5-5', 'high');
       const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
-        writeModelRoleChoice(db, 'underlying-pro', { connectionId: connection.connectionId, modelId: 'claude-sonnet-5', reasoningEffort: 'xhigh' });
-        writeModelRoleChoice(db, 'underlying-flash', { connectionId: connection.connectionId, modelId: 'claude-haiku-4-5', reasoningEffort: 'low' });
+        writeModelRoleChoice(db, 'underlying-pro', { connectionId: connection.connectionId, modelId: 'claude-sonnet-5-5', reasoningEffort: 'xhigh' });
+        writeModelRoleChoice(db, 'underlying-flash', { connectionId: connection.connectionId, modelId: 'claude-opus-5-5', reasoningEffort: 'low' });
       } finally { db.close(); }
       const original = store.getModelRoles();
       const source = await exported(store, 'role-choices.ai7db');
       store.selectFastRoleModel('anthropic-claude', 'claude-fable-5-1');
-      store.selectMainRoleModel('anthropic-claude', 'claude-sonnet-5');
+      store.selectMainRoleModel('anthropic-claude', 'claude-sonnet-5', 'off');
       expect(store.getModelRoles()).not.toEqual(original);
       const preview = await store.inspectDatabaseImport(source);
       await store.prepareDatabaseReplacement(preview.previewId, T);

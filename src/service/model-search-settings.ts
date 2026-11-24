@@ -10,6 +10,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
+import { modelEffortRefusal, MODEL_EFFORT_STALE_REASON } from './provider/model-efforts.js';
+import { modelProfileFor } from './provider/model-profile.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { isRecord } from './analysis/canonical.js';
 import {
@@ -40,12 +42,14 @@ import {
   type ModelRoleSource,
   type ModelServiceConnectionProjection,
   type ModelServiceRouteId,
+  type TrustedOperationalScope,
 } from '../shared/protocol.js';
 import { MODEL_SERVICE_ROW_COLUMNS, readModelRoleChoices, writeModelRoleChoice, type ModelRoleChoiceInput } from './model-service-connections.js';
 import { DatabaseSync } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, asString, requireStore, type SqlRow } from './store-records.js';
 import { readModelConnectionTest } from './store-schema.js';
-import { resolveRuntimeExecutionConfig, validReasoningEffort, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { resolveRuntimeExecutionConfig, sentReasoningEffort, validReasoningEffort, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import type { LaunchChoice } from './task-launch-snapshots.js';
 
 export interface ModelSearchSettingsHost {
   assertAvailable: () => void;
@@ -253,6 +257,7 @@ export function selectModelServiceRoute(host: ModelSearchSettingsHost, route: Mo
   const current = target.connectionId === undefined ? null : host.getModelServiceRouteConnection(route);
   requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
   requireStore(current !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
+  requireModelEffort(host, route, current.binding.modelId, 'main', current.binding.reasoningEffort);
   host.transaction(host.authority, () => {
     writeModelRoleChoice(host.authority, 'foreground-pro', { connectionId: current.connectionId, modelId: current.binding.modelId,
       ...(current.binding.reasoningEffort === undefined ? {} : { reasoningEffort: current.binding.reasoningEffort }) });
@@ -262,6 +267,19 @@ export function selectModelServiceRoute(host: ModelSearchSettingsHost, route: Mo
   return host.getModelServiceRouteConnection(route)!;
 }
 
+function modelChoiceEffortRefusal(host: ModelSearchSettingsHost, channel: ModelServiceRouteId,
+  record: NonNullable<ReturnType<typeof modelServiceRuntimeBinding>>, choice: string | undefined): string | null {
+  if (sentReasoningEffort(choice) === null) return null;
+  const evidence = host.getModelServiceModels(channel).find(model => model.modelId === record.model);
+  return modelEffortRefusal(evidence, modelProfileFor(record.route, record.model), choice);
+}
+
+function requireModelEffort(host: ModelSearchSettingsHost, channel: ModelServiceRouteId, model: string, tier: 'main' | 'fast', choice?: string): void {
+  const record = modelServiceRuntimeBinding(channel, model, tier);
+  requireStore(record !== undefined || sentReasoningEffort(choice) === null, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+  if (record !== undefined) requireStore(modelChoiceEffortRefusal(host, channel, record, choice) === null, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+}
+
 /** A role's effective model under the cascade of Issue #1620, and where it comes from. */
 export interface ResolvedModelRole {
   readonly roleId: ModelRoleId;
@@ -269,7 +287,7 @@ export interface ResolvedModelRole {
   readonly connection: ModelServiceConnectionProjection | null;
   readonly model: import('../shared/protocol.js').ModelServiceBindingProjection | null;
   readonly binding: ConfiguredProviderBinding | null;
-  /** Why the effective model cannot be sent although its key is ready (#1582); `null` otherwise. */
+  /** Why the effective model or effort cannot be used although the credential is ready. */
   readonly refusal: string | null;
   /** The actual model/effort used, after cascade and per-Task overrides; internal, never a wire member. */
   readonly usedChoice: ModelRoleChoiceInput | null;
@@ -329,6 +347,8 @@ export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleI
     ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }) }, override);
   const record = modelServiceRuntimeBinding(model.providerId, execution.modelId!, flash ? 'fast' : 'main');
   if (record === undefined) return { ...resolved, binding: null, refusal: modelServiceRouteRefusal(model.providerId, execution.modelId!, flash ? 'fast' : 'main') };
+  const refusal = modelChoiceEffortRefusal(host, model.providerId, record, execution.reasoningEffort);
+  if (refusal !== null) return { ...resolved, binding: null, refusal };
   const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint,
     ...(execution.reasoningEffort === undefined ? {} : { reasoningEffort: execution.reasoningEffort }) };
   return { ...resolved, binding: (flash ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding };
@@ -337,6 +357,33 @@ export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleI
 /** The binding a role's Tasks take; the legacy ids still name the roles they always did (ADR 0107 §1 aliases). */
 export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
   return resolveModelRole(host, role, override).binding;
+}
+
+/** Prepare and launch resolve a new choice. A remembered channel may fall back, while a stale effort needs explicit selection. */
+export function resolveModelLaunchChoice(host: ModelSearchSettingsHost, scope: TrustedOperationalScope,
+  role: 'main-editorial' | 'foreground-flash' | 'fast-interaction', override: RuntimeExecutionConfig, remembered: boolean): LaunchChoice {
+  let notice: string | undefined;
+  if (remembered && Object.keys(override).length > 0) {
+    const connection = resolveModelRole(host, role, override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }).connection;
+    if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
+        (!host.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId) ||
+          modelServiceRouteRefusal(connection.binding.providerId, override.modelId, role === 'main-editorial' ? 'main' : 'fast') !== null))) {
+      override = {};
+      notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
+    }
+  }
+  const { binding, connection, refusal } = resolveModelRole(host, role, override);
+  requireStore(scope !== 'ordinary-production' || refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+  requireStore(scope !== 'ordinary-production' || binding !== null,
+    refusal === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', refusal ?? '请先在设置中连接可用模型。');
+  return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: binding === null ? {} : {
+    ...(connection === null ? {} : { modelConnectionId: connection.connectionId }), modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off',
+  } };
+}
+
+/** Legacy preparation and direct turns use a current default. Replaying a frozen plan bypasses this check. */
+export function requireCurrentModelRoleEffort(host: ModelSearchSettingsHost, role: ModelRoleId): void {
+  requireStore(resolveModelRole(host, role).refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
 }
 
 /** The four roles as 设置 › 模型服务 lists them (Issue #1620). */
@@ -373,6 +420,7 @@ export function selectUnderlyingModel(host: ModelSearchSettingsHost, input: impo
   const connection = host.getModelServiceRouteConnection(input.route);
   requireStore(connection?.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
   requireStore(input.reasoningEffort === undefined || validReasoningEffort(input.reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
+  requireModelEffort(host, input.route, input.modelId, tier, input.reasoningEffort);
   writeModelRoleChoice(host.authority, input.roleId, { connectionId: connection.connectionId, modelId: input.modelId,
     ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }) });
 }
@@ -386,12 +434,15 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
   requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
   requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
+  const requestedEffort = (item: 'main' | 'fast'): string | undefined => item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+  for (const item of roles) requireModelEffort(host, route, modelId, item,
+    requestedEffort(item) ?? (item === 'main' ? connection.binding : connection.fastBinding)?.reasoningEffort);
   host.transaction(host.authority, () => {
     for (const item of roles) {
       const model = item === 'main' ? 'model_id' : 'fast_model_id';
       host.authority.prepare(`UPDATE model_service_connections SET ${model} = ?, updated_at = ? WHERE connection_id = ?`)
         .run(modelId, new Date().toISOString(), connection.connectionId);
-      const chosenEffort = item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+      const chosenEffort = requestedEffort(item);
       if (chosenEffort !== undefined) {
         const effort = item === 'main' ? 'reasoning_effort' : 'fast_reasoning_effort';
         host.authority.prepare(`UPDATE model_service_connections SET ${effort} = ? WHERE connection_id = ?`).run(chosenEffort === 'off' ? null : chosenEffort, connection.connectionId);

@@ -48,7 +48,7 @@
   },
   "definitions": {
     "reasoning": {
-      "description": "Wire encoding and suggested effort identifiers, never model or effort admission. Unlisted identifiers reach the vendor unchanged.",
+      "description": "A wire encoding hint on a route, or documented supported effort identifiers on an exact model and route. Frozen requests keep their original choices.",
       "type": "object",
       "additionalProperties": false,
       "required": [

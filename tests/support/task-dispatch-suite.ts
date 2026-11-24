@@ -28,6 +28,7 @@ import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-rep
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
+import { seedModelEfforts } from './model-effort-catalogue.js';
 import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 import { READERS_REPORT_FIXTURE_IDENTITY } from '../support/readers-report.js';
 
@@ -375,11 +376,15 @@ function selectInstruction(kind: Kind, bookId: string, instruction = INSTRUCTION
   store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
 }
 
-function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, route?: ModelServiceRouteId): void {
+function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, route: ModelServiceRouteId = 'opencode-go'): void {
   const search = store.getSearchBackendConnections().find(connection => connection.backendId === 'search-tinyfish') ?? store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
   store.selectSearchBackend('search-tinyfish');
   capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer, controls, route);
+  seedModelEfforts(store, route, {
+    'account-future-model': ['high'], 'account-future-a': ['high'], 'account-future-b': ['low'],
+    'custom-relaunch-model': ['low'], 'account-baseline': ['high'], 'account-writing': ['low'], 'service-a-model': ['high'],
+  });
 }
 
 async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
@@ -995,6 +1000,7 @@ if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('
     const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')
       ?? store.saveModelServiceConnection('另一渠道', null, 'needs-attention', 'deepseek-open-platform');
     store.saveModelServiceConnection(alternative.connectionName, alternative.credentialReference, 'ready', 'deepseek-open-platform');
+    seedModelEfforts(store, 'deepseek-open-platform', { 'account-future-model': ['low'] });
     const current = typeBeforeLaunch(a);
     const clientCommandId = randomUUID();
     const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
@@ -1183,6 +1189,7 @@ describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
     const connection = store.getModelServiceRouteConnection('deepseek-open-platform')
       ?? store.saveModelServiceConnection('本次预览 B', null, 'needs-attention', 'deepseek-open-platform');
     const ready = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'deepseek-open-platform');
+    seedModelEfforts(store, 'deepseek-open-platform', { 'service-b-first': ['high'], 'service-b-second': ['low'] });
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       const original = db.prepare('SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? ORDER BY component').all(first.taskIntentId);

@@ -349,12 +349,12 @@ describe('model capability profiles', () => {
   });
 
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
-    // The rows of the four routes that predate the provider documents, unchanged by moving into them,
-    // and the one row the DeepSeek official document adds (`deepseek-flash`, inert).
-    const PREDATING_ROUTE = /^(deepseek-open-platform|opencode-go|opencode-go-messages|opencode-go-responses)\//u;
-    expect(Object.keys(PROVIDER_MODEL_PROFILES).filter((key) => PREDATING_ROUTE.test(key)).sort()).toEqual([
+    // Route identity keeps the two Go protocols and Google's own Argon catalogue independent.
+    const GO_AND_DEEPSEEK_ROUTES = /^(deepseek-open-platform|opencode-go(?:-gemini|-messages|-responses)?)\//u;
+    expect(Object.keys(PROVIDER_MODEL_PROFILES).filter((key) => GO_AND_DEEPSEEK_ROUTES.test(key)).sort()).toEqual([
       'deepseek-open-platform/deepseek-flash',
       'deepseek-open-platform/deepseek-v4-pro',
+      'opencode-go-gemini/gemini-4-argon',
       // The same plan's `/messages` models, keyed by the second route that reaches them (S54b).
       'opencode-go-messages/minimax-m2.5', 'opencode-go-messages/minimax-m2.7', 'opencode-go-messages/minimax-m3',
       'opencode-go-messages/qwen3.6-plus', 'opencode-go-messages/qwen3.7-plus',
@@ -362,7 +362,6 @@ describe('model capability profiles', () => {
       'opencode-go-responses/gpt-5.6-luna', 'opencode-go-responses/grok-4.6',
       // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
       'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro', 'opencode-go/deepseek-v4.1-flash',
-      'opencode-go/gemini-4-argon',
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
       'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
@@ -424,13 +423,14 @@ describe('model capability profiles', () => {
     expect(profile.capabilities).toMatchObject({ answerChannel: 'message-content-string', toolCalling: 'function', streaming: 'chat-completions-sse', structuredOutput: 'none' });
   });
 
-  it('declares every other model inert beside official, historical V4 and current V4.1 profiles, whichever path reaches it', () => {
+  it('keeps the undocumented legacy Go models inert in the evidence catalogue', () => {
     // The OpenCode Go plan's rows; every other document's rows are pinned inert in provider-configuration.test.ts.
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
-      .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
+      .filter((profile) => profile.route.startsWith('opencode-go') && profile.route !== 'opencode-go-gemini' &&
+        profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
     // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
-    // five it admits on `/messages` (S54b), two on `/responses` (S54c), and Argon (ADR 0108).
-    expect(inert).toHaveLength(17);
+    // five it admits on `/messages` (S54b) and two on `/responses` (S54c).
+    expect(inert).toHaveLength(16);
     // One evidence record for one reading of the documentation pair, shared rather than restated —
     // by both paths, because reading which path a model is served on is the same reading.
     const documentation = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3-flash')!.evidence.requestShape;
@@ -471,7 +471,7 @@ describe('model capability profiles', () => {
     const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
       .filter((profile) => profile.route === OPENCODE_GO_ROUTE && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
-    expect(inert).toHaveLength(10);
+    expect(inert).toHaveLength(9);
 
     for (const profile of inert) {
       // Assembly needed no branch for any of them: each sends the live route's bytes with its own

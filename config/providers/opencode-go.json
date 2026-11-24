@@ -83,6 +83,12 @@
       "observedOn": "2026-10-15",
       "note": "Issue #473, ADR 0080 §7.7: one exact-sample1 factual-review unit at 65d361aa74e3fd9e495c490d1aefe2ba4cdceb42 under developer-live v16, policy-selection/wave6-tool-evidence-bootstrap. Exact Go deepseek-v4.1-flash emitted an AI7 websearch call, received one TinyFish result and closed the unit; reasoning was present. A different second query was refused; no webfetch was sent. The remaining seven units were deliberately cancelled. Query class only: public background fact derived from exact sample1. Two model calls cost 6802 input and 7442 output tokens; Go subscription monetary amount was not returned; TinyFish search cost USD 0. Ledger SHA-256: S40/whole-manuscript/1 7c03d9ba993f7dd82ce437f7aad6d327ce95ef5cb96ff893e20803523257fa34; S87/whole-manuscript/1 cff7dad7496618a7a38e1067d6b6808dce2deeb3a3867ec16c9fc3ea2b340d72; S40/whole-manuscript/2 df205304ea856bf12f847c8cf5012badbb04d41da09674615d099b8a20eb5e5c. Protected responses and Research Snapshots remain in the external development cache. This observes the client function-tool loop only, not server-side search, structured-output guarantees or editorial quality."
     },
+    "go-native-gemini-docs": {
+      "kind": "vendor-documentation",
+      "source": "https://opencode.ai/docs/console/go/#endpoints ; https://opencode.ai/docs/console/api/inference/#gemini ; https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml",
+      "readOn": "2026-11-24",
+      "note": "The Go prefix and exact Argon models.dev base URL identify the native Gemini route. The inference documentation gives the bearer header, model-in-path generateContent method and streaming method. The catalogue documents function tools and low, medium and high thinking levels. These records are documentation, not a Go account inference result."
+    },
     "unverified": { "kind": "unverified" }
   },
   "routes": [
@@ -120,6 +126,7 @@
         {
           "modelId": "deepseek-v4.1-flash",
           "displayName": "DeepSeek V4.1 Flash",
+          "reasoning": { "control": "openai-chat-completions", "efforts": ["low", "high", "max"], "source": "https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/deepseek-v4.1-flash.toml ; https://api-docs.deepseek.com/api/create-chat-completion/ (documented; acceptance on the Go gateway is unverified)", "readOn": "2026-11-24" },
           "capabilities": {
             "toolCalling": { "value": "function", "evidence": "v41-platform-tools-loop" },
             "streaming": { "value": "chat-completions-sse", "evidence": "v41-dialogue-sse" },
@@ -140,7 +147,7 @@
             "tokens": null,
             "evidence": "unverified"
           },
-          "note": "The developer-live product binding of Provider Processing v18 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v18. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities."
+          "note": "The developer-live product binding of Provider Processing v18 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v18. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Explicit reasoning_effort is documented in the exact catalogue row and vendor API. Gateway acceptance of the field is unverified. Old V4 items establish none of this model's capabilities."
         },
         {
           "modelId": "deepseek-v4-pro",
@@ -153,7 +160,6 @@
         },
         { "modelId": "glm-5.3-flash", "displayName": "GLM-5.3-Flash（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "glm-5.3", "displayName": "GLM-5.3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
-        { "modelId": "gemini-4-argon", "displayName": "Gemini 4 Argon（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" }, "note": "OpenCode Go catalogue entry selected for the 0.7.9 uses in ADR 0108." },
         { "modelId": "glm-5.2", "displayName": "GLM-5.2（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "glm-5.1", "displayName": "GLM-5.1（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "kimi-k3", "displayName": "Kimi K3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
@@ -207,6 +213,34 @@
       "models": [
         { "modelId": "grok-4.6", "displayName": "Grok 4.6（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "gpt-5.6-luna", "displayName": "GPT 5.6 Luna（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    },
+    {
+      "routeId": "opencode-go-gemini",
+      "displayName": "OpenCode Go · generateContent",
+      "endpoint": "https://opencode.ai/inference/go/google/v1beta/models",
+      "requestShape": "google-generate-content",
+      "requestShapeEvidence": "go-native-gemini-docs",
+      "limitPolicy": "account-limit-terminal",
+      "limitPolicyEvidence": "adr-0067-go-docs",
+      "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
+      "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
+      "maxOutputTokens": null,
+      "models": [
+        {
+          "modelId": "gemini-4-argon",
+          "displayName": "Gemini 4 Argon（OpenCode Go）",
+          "capabilities": {
+            "answerChannel": { "value": "candidate-parts-text", "evidence": "go-native-gemini-docs" },
+            "streaming": { "value": "generate-content-sse", "evidence": "go-native-gemini-docs" },
+            "toolCalling": { "value": "function", "evidence": "go-native-gemini-docs" }
+          },
+          "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "google-generate-content", "efforts": ["low", "medium", "high"], "source": "https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml", "readOn": "2026-11-24" },
+          "note": "The native path selected for Go Argon in ADR 0108. AI7 appends the model and method to the configured collection endpoint."
+        }
       ]
     }
   ],

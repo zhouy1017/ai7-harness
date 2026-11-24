@@ -35,7 +35,7 @@ import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } 
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts, overviewUsage, withBookTaskWork, withRunningProgress } from './task-overview.js';
 import { TaskWorkReader } from './task-work.js';
-import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
+import { customAnalysisModeGoal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -2550,24 +2550,10 @@ export class EditorialStore {
   }
 
   #launchChoice(role: 'main-editorial' | 'foreground-flash' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
-    let notice: string | undefined;
-    if (remembered && Object.keys(override).length > 0) {
-      const connection = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, { ...(override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }) }).connection;
-      // A remembered model the channel can no longer send (#1582) falls back like one no longer listed.
-      if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
-          (!this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId) ||
-            modelServiceRouteRefusal(connection.binding.providerId, override.modelId, role === 'main-editorial' ? 'main' : 'fast') !== null))) {
-        override = {};
-        notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
-      }
-    }
-    const { binding, refusal } = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, override);
-    requireStore(this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production' || binding !== null,
-      refusal === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', refusal ?? '请先在设置中连接可用模型。');
-    const connection = binding === null ? undefined : this.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference);
-    return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: { ...(connection === undefined ? {} : { modelConnectionId: connection.connectionId }),
-      ...(binding === null ? {} : { modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off' }) } };
+    return modelSearchSettings.resolveModelLaunchChoice(this.#modelSearchSettingsHost, this.#baselineAnalysis.launch.operationalScope, role, override, remembered);
   }
+
+  requireCurrentModelRoleEffort(role: ModelRoleId): void { modelSearchSettings.requireCurrentModelRoleEffort(this.#modelSearchSettingsHost, role); }
 
   #launchInitialHost(execution: import('./analysis/baseline-analysis-store.js').LaunchBinding): initialEvaluationOperations.InitialEvaluationOperationsHost {
     const host: initialEvaluationOperations.InitialEvaluationOperationsHost = { ...this.#initialEvaluationOperationsHost,

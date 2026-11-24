@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { modelServiceSettingsProjection } from '../../src/main/model-service-settings-projection.js';
 import { MODEL_ROLE_IDS, type ModelServiceStoredStateProjection } from '../../src/shared/protocol.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
@@ -30,8 +31,10 @@ it.each(['requests', 'revision-116 mapping'])('keeps M1 answers through %s (#165
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const pro = store.saveModelServiceConnection('Synthetic Claude', '00000000-0000-4000-8000-000000001650', 'ready', 'anthropic-claude');
+      seedModelEfforts(store, 'anthropic-claude', { 'claude-opus-5': ['high'], 'claude-haiku-4-5': ['low'] });
       store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
       const go = store.saveModelServiceConnection('Synthetic Go', '00000000-0000-4000-8000-000000001651', 'ready', 'opencode-go');
+      seedModelEfforts(store, 'opencode-go', { 'glm-5.3-flash': ['low'] });
       if (name === 'same-channel') store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5', 'low');
       if (['two-channels', 'cleared', 'missing-flash', 'refused-flash', 'task-flash', 'task-other'].includes(name)) store.selectFastRoleModel('opencode-go', 'glm-5.3-flash', 'low');
       if (name === 'cleared') store.clearFlashModel();
