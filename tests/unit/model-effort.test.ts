@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelServiceSupportedEfforts } from '../../src/shared/protocol.js';
 import { MODEL_DEFAULT_EFFORT, effortChoices, paintEffortChoices } from '../../src/renderer/model-effort.js';
-import { effortValueLabel } from '../../src/renderer/model-effort-labels.js';
+import { effortValueLabel, modelEffortWords } from '../../src/renderer/model-effort-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 
@@ -66,6 +66,16 @@ describe('the 思考强度 list of one model', () => {
     expect(effortChoices(supported(['low']), 'vendor-future-level').options.at(-1)!.label).toBe('vendor-future-level（现在不可用）');
     expect(effortValueLabel('off')).toBe('模型默认');
     expect(effortValueLabel('high')).toBe('高（high）');
+  });
+
+  it('says a frozen 名称@档位 label in the list’s words, and leaves the record’s own form to developer mode', () => {
+    expect(modelEffortWords('模型甲@high')).toBe('模型甲@高');
+    expect(modelEffortWords('模型甲@none')).toBe('模型甲@不启用思考');
+    expect(modelEffortWords('模型甲@8192')).toBe('模型甲@思考上限 8192');
+    // No level, a level with no word of its own, and a name that merely holds an @ are shown as recorded.
+    for (const label of ['模型甲', '模型甲@vendor-level', 'team@model', '']) expect(modelEffortWords(label)).toBe(label);
+    setTechnicalLayerVisible(true);
+    for (const label of ['模型甲@high', '模型甲@8192', '模型甲']) expect(modelEffortWords(label)).toBe(label);
   });
 
   it('paints the list, what is chosen and the note', () => {

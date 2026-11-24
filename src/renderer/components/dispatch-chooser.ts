@@ -3,6 +3,7 @@ import type { ModelFavourites } from '../../shared/preferences.js';
 import { resolveRuntimeExecutionConfig, type RuntimeExecutionConfig } from '../../shared/runtime-execution-config.js';
 import { modelServiceRuntimeBinding } from '../../shared/protocol/model-service.js';
 import { MODEL_DEFAULT_EFFORT, effortChoices, paintEffortChoices } from '../model-effort.js';
+import { modelEffortWords } from '../model-effort-labels.js';
 
 /** A local choice over settings already read from the instance; it never tests or saves a model binding. */
 export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-interaction'; changed(config: RuntimeExecutionConfig): void }) {
@@ -59,7 +60,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     if (choice === undefined) { summary.textContent = '模型 待设置 ▾'; effortLabel.hidden = true; effortNote.hidden = true; return; }
     effortLabel.hidden = false;
     paintEffortChoices(efforts, effortNote, effortChoices(choice.supported, effort, choice.route));
-    summary.textContent = `模型 ${choice.label}${efforts.value === MODEL_DEFAULT_EFFORT ? '' : `@${efforts.value}`} ▾`;
+    summary.textContent = `模型 ${efforts.value === MODEL_DEFAULT_EFFORT ? choice.label : modelEffortWords(`${choice.label}@${efforts.value}`)} ▾`;
     placePanel();
   };
   const notify = (): void => {

@@ -8,6 +8,7 @@ import { createButton } from './components/controls.js';
 import { createTaskStatusCard, type TaskStatusCard } from './components/task-status-card.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import type {
   EvidenceAssuranceLevel,
   BaselineAnalysisGoal,
@@ -1581,7 +1582,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
       begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true, true); else if (offline) void startWhenOnline(); else void start(); });
       // The fixed 「沿用本次计划的模型与思考强度」 line is retired (Issue #1680): the plan says its model where it states one.
-      const model = el('span', 'task-launch-retained-model', next.work?.finished?.modelLabel ?? '');
+      const model = el('span', 'task-launch-retained-model', modelEffortWords(next.work?.finished?.modelLabel ?? ''));
       const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
       parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: optionRows }, preview));
       // 更新计划 stays beside the start, which itself revises then starts (保存并开始): the edited plan can be saved without starting.
