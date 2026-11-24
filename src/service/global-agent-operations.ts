@@ -1,4 +1,5 @@
 import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
+import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../shared/public-samplebooks.js';
 import type { ResolvedModelRole } from './model-search-settings.js';
 import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
@@ -145,6 +146,14 @@ export function internalPinGlobalAgentScope(host: GlobalAgentOperationsHost, inp
 }
 
 export function globalAgentScopeCurrent(host: GlobalAgentOperationsHost, scope: GlobalAgentScope): boolean {
+  if (host.baselineAnalysis.launch.operationalScope === 'developer-live' && host.baselineAnalysis.launch.liveForKind !== undefined) {
+    // Only the unedited import revision of the public sample. The title is part of the emitted scope.
+    if (scope.procedures.length > 0 || scope.books.length !== 1 || !scope.books.every(book => book.title === 'sample1' &&
+      host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
+        WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ? AND mr.parent_revision_id IS NULL AND mr.ordinal = 1
+        AND sv.source_digest = ?`).get(book.bookId, book.manuscriptId, book.revisionId, SAMPLE1_PUBLIC_SAMPLEBOOK.sha256))) return false;
+  }
   const excluded = host.memoryFacade().controls().excludedBooks;
   return scope.books.every((book) => !excluded.has(book.bookId) && host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
       ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)

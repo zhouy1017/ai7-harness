@@ -19,7 +19,7 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  * a slot is a place for a key, not a permission to enrol one. ADR 0073 §5 authorizes no credential and ADR 0080 §5
  * defers keys (「先支持后添加key」): no other slot is enrolled until a record names it.
  * ADR 0108 admits `google-gemini`, `opencode-go`, `openai-platform` and `anthropic-claude` for the
- * Owner-authorized 0.8.0 recording, live test and local human-test preset.
+ * Owner-authorized 0.7.9 recording, live test and local human-test preset.
  *
  * It is the only thing that ever reads the Owner's key file, and it exists so that no agent, prompt,
  * log, or repository file has to. It writes the value straight into the OS Protected Secret Store

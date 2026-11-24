@@ -49,6 +49,8 @@
       },
       "note": "Buffered text only with max_output_tokens 8192. The explicit synthetic connection test narrows this to 512; neither probe nor saved credential proves tools or native streaming.",
       "models": [
+        { "modelId": "gpt-6.2-sol", "displayName": "GPT-6.2 Sol", "context": { "tokens": null, "evidence": "unverified" }, "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)." },
+        { "modelId": "gpt-6.1-terra", "displayName": "GPT-6.1 Terra", "context": { "tokens": null, "evidence": "unverified" }, "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)." },
         {
           "modelId": "gpt-6-astra",
           "displayName": "GPT-6 Astra",

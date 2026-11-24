@@ -108,20 +108,24 @@ The shape requires a per-turn output cap; the route declares the same 32,768 as 
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
+| `claude-opus-5-5` | Claude Opus 5.5 | none | `none` | `provider-tool` |
+| `claude-sonnet-5-5` | Claude Sonnet 5.5 | none | `none` | `provider-tool` |
 | `claude-opus-5` | Claude Opus 5 | 1,000,000 | `none` | `provider-tool` |
 | `claude-fable-5-1` | Claude Fable 5.1 | 1,000,000 | `none` | `provider-tool` |
 | `claude-sonnet-5` | Claude Sonnet 5 | 1,000,000 | `none` | `provider-tool` |
 | `claude-haiku-4-5` | Claude Haiku 4.5 | 200,000 | `none` | `provider-tool` |
 
-Dispositions (`anthropic-messages`): text supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; stream supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; functionTools supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`.
+Dispositions (`anthropic-messages`): text supported for `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; stream supported for `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; functionTools supported for `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`.
 
-Inert: 0 of 4 (no declared answer channel). Established:
+Inert: 2 of 6 (no declared answer channel). Established:
 
 - every model · `requestShape: anthropic-messages` — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
-- every model · `answerChannel: content-text-blocks` — `vendor-documentation`, https://platform.claude.com/docs/en/about-claude/models/overview ; https://platform.claude.com/docs/en/models/opus-5/overview ; https://platform.claude.com/docs/en/models/sonnet-5/overview ; https://platform.claude.com/docs/en/models/haiku-4-5/overview ; https://platform.claude.com/docs/en/build-with-claude/working-with-messages, read 2026-10-31
 - every model · `webSearchTool: provider-tool` — `vendor-documentation`, Claude Platform documentation, web search tool, platform.claude.com, read 2026-09-10
+- `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5` · `answerChannel: content-text-blocks` — `vendor-documentation`, https://platform.claude.com/docs/en/about-claude/models/overview ; https://platform.claude.com/docs/en/models/opus-5/overview ; https://platform.claude.com/docs/en/models/sonnet-5/overview ; https://platform.claude.com/docs/en/models/haiku-4-5/overview ; https://platform.claude.com/docs/en/build-with-claude/working-with-messages, read 2026-10-31
 - `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5` · context 1,000,000 — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
 - `claude-haiku-4-5` · context 200,000 — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
+- `claude-opus-5-5`: Listed by the test account's model discovery on 2026-11-24 (ADR 0108).
+- `claude-sonnet-5-5`: Listed by the test account's model discovery on 2026-11-24 (ADR 0108).
 
 Readings:
 
@@ -415,20 +419,24 @@ Buffered text only with max_output_tokens 8192. The explicit synthetic connectio
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
+| `gpt-6.2-sol` | GPT-6.2 Sol | none | `none` | `provider-tool` |
+| `gpt-6.1-terra` | GPT-6.1 Terra | none | `none` | `provider-tool` |
 | `gpt-6-astra` | GPT-6 Astra | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-sol` | GPT-5.6 Sol | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-terra` | GPT-5.6 Terra | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-luna` | GPT-5.6 Luna | 1,050,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-responses`): text supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; stream supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; functionTools supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`.
+Dispositions (`openai-responses`): text supported for `gpt-6.2-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; stream supported for `gpt-6.2-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; functionTools supported for `gpt-6.2-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`.
 
-Inert: 2 of 4 (no declared answer channel). Established:
+Inert: 4 of 6 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-responses` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
 - every model · `webSearchTool: provider-tool` — `vendor-documentation`, OpenAI API documentation, web search tool guide and models page, developers.openai.com/api/docs, read 2026-09-10
-- every model · context 1,050,000 — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
+- `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` · context 1,050,000 — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
 - `gpt-5.6-sol`, `gpt-5.6-luna` · `answerChannel: output-message-text` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
 - `gpt-5.6-sol`, `gpt-5.6-luna` · `usageAttribution: includes-reasoning` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
+- `gpt-6.2-sol`: Listed by the test account's model discovery on 2026-11-24 (ADR 0108).
+- `gpt-6.1-terra`: Listed by the test account's model discovery on 2026-11-24 (ADR 0108).
 
 Readings:
 
@@ -497,7 +505,7 @@ Inert: 10 of 12 (no declared answer channel). Established:
 - `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
 - `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v18 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v18. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
-- `gemini-4-argon`: OpenCode Go catalogue entry selected for the 0.8.0 uses in ADR 0108.
+- `gemini-4-argon`: OpenCode Go catalogue entry selected for the 0.7.9 uses in ADR 0108.
 
 ### `opencode-go-messages`
 

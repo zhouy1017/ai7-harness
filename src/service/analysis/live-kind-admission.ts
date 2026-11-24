@@ -32,10 +32,11 @@ export interface LiveKindRule {
 
 /** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
 export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding, kind: 'learning-curation' | 'learning-sample-tidying' = 'learning-curation'): AdmittedProviderRule | null {
-  if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
-    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34' && !supportsEditorialMemoryPolicy(policy.providerProcessing.version))) || policy.providerProcessing.decision !== 'eligible-only' ||
+  const recording = policy?.operationalScope === 'developer-live';
+  if (policy?.integrityState !== 'verified' || (!recording && (policy.operationalScope !== 'ordinary-production' ||
+    (policy.providerProcessing.version !== 'v31' && policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34' && !supportsEditorialMemoryPolicy(policy.providerProcessing.version)))) || policy.providerProcessing.decision !== 'eligible-only' ||
     policy.providerProcessing.liveTransmissionAllowed !== true) return null;
-  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-' + kind) ?? [];
+  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === (recording ? 'recording-080-' : 'ordinary-production-') + kind) ?? [];
   const rule = rules.length === 1 ? rules[0]! : null;
   return rule?.enabledLearningEnvelope?.disableStopsLaterDispatchAndUse === true && rule.taskKinds.length === 1 &&
     rule.taskKinds[0] === kind && rule.outboundDataCategories.includes(kind === 'learning-curation' ? 'editorial-learning-example' : 'qualified-learning-example-bundle') &&
@@ -272,9 +273,7 @@ export function liveKindAdmission(
   }
   const category = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === definition.kind ||
     (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
-  if (category?.categoryId === 'publication-risk' &&
-      (policy?.operationalScope !== 'ordinary-production' ||
-        liveKindRule(policy, definition.kind)?.taskKindOverrides?.[definition.kind]?.webSearch !== false)) return null;
+  if (category?.categoryId === 'publication-risk' && !liveNonWebReviewAllowed(policy, definition.kind)) return null;
   if (category !== undefined && category.searchEngine &&
       (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
   const expectation = liveKindExpectation(definition, policy);
@@ -299,6 +298,12 @@ export function liveKindContractCategories(kind: string, definition?: LiveKindDe
 export function modelAdmitsPlatformTools(route: string, model: string): boolean {
   const profile = modelProfileFor(route as RemoteExecutionRoute, model);
   return profile?.capabilities.toolCalling === 'function';
+}
+
+export function liveNonWebReviewAllowed(policy: LaunchPolicyProjection | undefined, kind: string): boolean {
+  const rule = liveKindRule(policy, kind, ['public-or-synthetic']);
+  return rule?.taskKindOverrides?.[kind]?.webSearch === false && (policy?.operationalScope === 'ordinary-production' ||
+    policy?.operationalScope === 'developer-live' && rule.ruleId === 'recording-080-review');
 }
 
 /** Local retrieval never changes web declarations. Baseline and enrolled background remain outside targeted retrieval. */

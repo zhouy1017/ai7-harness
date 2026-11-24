@@ -6,10 +6,9 @@ import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, developerLiveBindingFor, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import type { EditorialStore } from '../store.js';
 import type { ModelTextAttemptProvenance, FastModelSelectionInput, ModelConnectionTestStatus, LaunchPolicyProjection } from '../../shared/protocol.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRouteRefusal, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
@@ -41,6 +40,7 @@ import { EDITORIAL_POLISH_KIND, EDITORIAL_POLISH_PROMPT_CONTRACT, EDITORIAL_POLI
 
 import { FLASH_TASK_REGISTRY, connectionProbe, type ProbeModelEvidence } from './flash-task-registry.js';
 import { runStructuredFlashTask, STRUCTURED_FLASH_TASKS, type FlashTaskContract, type FlashTaskResult } from './flash-task-contract.js';
+import { isSyntheticRecordingInput, SYNTHETIC_FLASH_RECORDING_KINDS } from './recording-inputs.js';
 
 export { FastRoleError };
 
@@ -133,13 +133,18 @@ export interface FastRoleLiveRoutes {
 
 /** The fast-role routes of a developer-live launch: each kind's route as the verified projection's policy admits it, or none. */
 export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): FastRoleLiveRoutes {
-  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
+    const admitted = admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+    const { reasoningEffort } = developerLiveBindingFor(runtime.launch, kind.kindId);
+    return admitted === null || reasoningEffort === undefined ? admitted : { ...admitted, reasoningEffort };
+  };
   return {
     runtime,
     transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
-    routes: Object.fromEntries(Object.values(FAST_ROLE_KINDS).map(kind => [kind.kindId, kind.kindId === CONNECTION_TEST_KIND ? null : route(kind)])),
-    credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    routes: Object.fromEntries(Object.values(FAST_ROLE_KINDS).map(kind =>
+      [kind.kindId, kind.kindId === CONNECTION_TEST_KIND && runtime.launch.recordingProvider === undefined ? null : route(kind)])),
+    credentialReference: developerLiveBindingFor(runtime.launch, CONNECTION_TEST_KIND).credentialReference,
   };
 }
 
@@ -331,6 +336,10 @@ export class UnderlyingFlashService {
   async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
     const route = live === null ? null : live.routes[kind.kindId] ?? null;
+    const recording = live !== null && !isOrdinaryProductionRuntime(live.runtime) && live.runtime.launch.recordingProvider !== undefined;
+    if (recording && (SYNTHETIC_FLASH_RECORDING_KINDS as readonly string[]).includes(kind.kindId) && !isSyntheticRecordingInput(kind.kindId, message)) {
+      throw new FastRoleError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
+    }
     // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
     const credentialReference = live === null ? '' : live.credentialReference;
     const credentialGeneration = live?.credentialGeneration?.();
@@ -371,7 +380,7 @@ export class UnderlyingFlashService {
           : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       // The one message this request may send.
       admittedUserMessages: new Set([message]),
-      ...(route?.providerProcessingVersion === 'v36' && Object.hasOwn(FLASH_TASK_REGISTRY, kind.kindId)
+      ...((route?.providerProcessingVersion === 'v36' || recording) && Object.hasOwn(FLASH_TASK_REGISTRY, kind.kindId)
         ? { structuredTaskMessageDigest: sha256Hex(message) } : {}),
       ...(memory === null ? {} : { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt']) }),
       ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
@@ -430,7 +439,7 @@ export class UnderlyingFlashService {
             requireRunning(init.signal);
             return nativeFetch(url, init);
           };
-          const bounded = route.providerProcessingVersion === 'v36' ? kind.budget : undefined;
+          const bounded = route.providerProcessingVersion === 'v36' || recording ? kind.budget : undefined;
           const limit = bounded ? Math.min(bounded.maxOutputTokens, route.profile.maxOutputTokens ?? Infinity) : undefined;
           const profile = limit !== undefined ? { ...route.profile, maxOutputTokens: limit, taskOutputTokenLimit: limit }
             : kind.kindId === CONNECTION_TEST_KIND ? { ...route.profile, maxOutputTokens: CONNECTION_TEST_POLICY.maxOutputTokens } : route.profile;
@@ -574,6 +583,37 @@ export interface ModelConnectionTestExecution {
   readonly signal?: AbortSignal;
   /** The real service supplies its ordinary effect lane for the conditional final write. */
   readonly settle?: <Result>(operation: () => Result | Promise<Result>) => Promise<Result>;
+}
+
+/** One explicit synthetic probe on the recording launch's Underlying Flash binding. */
+export async function recordModelConnectionTest(
+  runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, input: FastModelSelectionInput,
+  secretResolver: SecretResolver, execution: ModelConnectionTestExecution,
+): Promise<ModelConnectionTestStatus> {
+  const selected = developerLiveBindingFor(runtime.launch, CONNECTION_TEST_KIND);
+  if (runtime.launch.recordingProvider === undefined || input.route !== selected.route || input.modelId !== selected.model ||
+      input.reasoningEffort != null && input.reasoningEffort !== selected.reasoningEffort) {
+    throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '连接测试需要本次录制指定的底层 Flash 模型。');
+  }
+  const owner = new UnderlyingFlashService({ requestGovernor: execution.requestGovernor,
+    ...(execution.producer === undefined ? {} : { producer: execution.producer }),
+    fixture: null, live: fastRoleLiveRoutes(runtime, policy, secretResolver) });
+  const stop = (): void => owner.dispose();
+  execution.signal?.addEventListener('abort', stop, { once: true });
+  const testedAt = new Date().toISOString();
+  try {
+    if (execution.signal?.aborted) stop();
+    const answer = await owner.ask(CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY.message, 'explicit-connection-test');
+    const passed = answer.kind === 'answered' && connectionProbe.validateAndTrace(answer.text, {
+      model: selected.model, reported: answer.probeModel,
+    }) !== null;
+    return { modelId: selected.model, credentialUpdatedAt: testedAt, testedAt, verified: 'buffered-text-only',
+      outcome: passed ? 'passed' : answer.kind === 'failed' && answer.outcomeUnknown ? 'outcome-unknown' : 'failed',
+      code: passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' };
+  } finally {
+    execution.signal?.removeEventListener('abort', stop);
+    stop();
+  }
 }
 
 export async function testModelServiceConnection(

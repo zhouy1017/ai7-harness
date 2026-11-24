@@ -103,6 +103,68 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
     model: 'deepseek-v4.1-flash',
     credentialSlot: 'opencode-go',
   },
+  recordingProviders: {
+    'openai-platform': {
+      pro: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-6.2-sol',
+        credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-6.1-terra',
+        credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
+      },
+    },
+    'anthropic-claude': {
+      pro: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-opus-5-5',
+        credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-sonnet-5-5',
+        credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
+      },
+    },
+    'google-gemini': {
+      pro: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'google-gemini',
+      },
+      flash: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-hydrogen',
+        credentialSlot: 'google-gemini',
+      },
+    },
+    'opencode-go': {
+      pro: {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
+      flash: {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+    },
+  },
   legacyDeepSeek: {
     route: 'deepseek-open-platform',
     endpoint: 'https://api.deepseek.com/chat/completions',

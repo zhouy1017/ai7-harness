@@ -715,8 +715,22 @@ function resolveRuntimeBindings(input, providers) {
     return { route, endpoint: declared.profile.endpoint, model, credentialSlot: declared.profile.credentialSlot };
   };
   const resolveRoles = (roles, readableRequired = true) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map((binding) => resolveBinding(binding, readableRequired))]));
+  const recordingProviders = Object.fromEntries(Object.entries(input.data.recordingProviders).map(([id, tiers]) => {
+    const provider = providers.find((entry) => entry.providerId === id);
+    refuse(provider?.credential.developmentCredentialReference != null, `PROVIDER_CONFIGURATION/recording-credential: ${id}`);
+    return [id, Object.fromEntries(Object.entries(tiers).map(([tier, binding]) => {
+      const route = provider.routes.find((route) => route.profile.route === binding.route);
+      refuse(route !== undefined, `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
+      const { reasoningEffort } = binding;
+      const reasoning = route.models.find(model => model.model === binding.model)?.reasoning ?? route.profile.reasoning;
+      refuse(reasoningEffort === undefined || reasoning?.efforts.includes(reasoningEffort) === true,
+        `PROVIDER_CONFIGURATION/recording-effort: ${id}/${tier}`);
+      return [tier, { ...resolveBinding(binding, false), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }];
+    }))];
+  }));
   const result = {
     developerLive: resolveBinding(input.data.developerLive),
+    recordingProviders,
     legacyDeepSeek: resolveBinding(input.data.legacyDeepSeek),
     policyBaseline: resolveRoles(input.data.policyBaseline, false),
     ordinaryProduction: resolveRoles(input.data.ordinaryProduction),

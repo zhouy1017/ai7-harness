@@ -542,7 +542,7 @@ export type AnalysisAuthorizationOrigin =
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
-  readonly learningBinding?: (role: 'underlying-pro' | 'underlying-flash') => OrdinaryProductionLaunchBinding | null;
+  readonly learningBinding?: (role: 'underlying-pro' | 'underlying-flash') => OrdinaryProductionLaunchBinding | DeveloperLiveLaunchBinding | null;
   /** Current editor-confirmed rules, frozen by new plans; never a startup scan or a second ledger. */
   readonly editorialMemory?: (bookId: string, taskKind: string) => import('../learning/editorial-memory.js').EditorialMemorySnapshot | null;
   readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;
@@ -555,16 +555,17 @@ export interface LaunchBinding {
    * model-calling action says 模型服务需设置 — read when each plan freezes, so a route switch reaches the next Task only.
    */
   readonly live: DeveloperLiveLaunchBinding | OrdinaryProductionLaunchBinding | null;
+  readonly liveForKind?: (kind: string) => DeveloperLiveLaunchBinding;
 }
 
-/** The developer-live binding: the one Go route, its fixed development Credential Reference, and the launch's ceiling. */
+/** The developer-live binding on a fixed development Credential Reference and the launch's ceiling. */
 export interface DeveloperLiveLaunchBinding {
   readonly reasoningEffort?: string;
   readonly scope?: undefined;
-  readonly route: 'opencode-go';
-  readonly model: 'deepseek-v4.1-flash';
+  readonly route: OrdinaryProductionAllowedBinding['route'];
+  readonly model: string;
   readonly endpoint: string;
-  readonly credentialSlot: 'opencode-go';
+  readonly credentialSlot: OrdinaryProductionAllowedBinding['credentialSlot'];
   readonly credentialReference: string;
   readonly runBudgetCeiling: DeveloperLiveCeiling;
 }

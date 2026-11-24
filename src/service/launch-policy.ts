@@ -11,6 +11,10 @@ import { modelProfileFor, validModelId, type ProviderModelProfile } from './prov
 import { GENERATED_MODEL_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { DEFAULT_TRANSPORT_SETTINGS } from './provider/request-deadlines.js';
+import { recordingBindingFor, recordingProviderFor, type RecordingProvider } from './recording-launch.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
+import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND } from '../shared/protocol/task-kinds.js';
+import { SYNTHETIC_FLASH_RECORDING_KINDS } from './fast-role/recording-inputs.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   isSupportedProviderProcessingVersion, selectedPolicyIdentityOf, localFixtureProfileOf, LOCAL_FIXTURE_RULE_IDS } from '../shared/protocol.js';
 
@@ -146,6 +150,7 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
  * development validation the launch performs.
  */
 export interface DeveloperLiveLaunch {
+  readonly recordingProvider?: RecordingProvider;
   /** The explicit form ceiling, or the policy's per-frozen-unit default when the form left it unset. */
   readonly runBudgetCeiling: DeveloperLiveCeiling;
   readonly providerCacheRoot: string;
@@ -215,7 +220,15 @@ export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot
   // developer-live is a developer-test scope: a launch that names no development validation fails closed here, before any
   // Run could dispatch, rather than sending outside the ledger.
   if (form.validation === null) throw new Error('LAUNCH_VALIDATION_INTENT_REQUIRED');
-  return { runBudgetCeiling, providerCacheRoot, validation: form.validation };
+  const recordingProvider = recordingProviderFor(form.validation);
+  return { runBudgetCeiling, providerCacheRoot, validation: form.validation, ...(recordingProvider === null ? {} : { recordingProvider }) };
+}
+
+export function developerLiveBindingFor(launch: DeveloperLiveLaunch, taskKind: string = BASELINE_ANALYSIS_KIND) {
+  const binding: ReturnType<typeof recordingBindingFor> = launch.recordingProvider === undefined
+    ? { ...CONFIGURED_RUNTIME_MODEL_TABLE.developerLive, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE }
+    : recordingBindingFor(launch.recordingProvider, taskKind);
+  return { ...binding, runBudgetCeiling: launch.runBudgetCeiling };
 }
 
 function deny(reason: string): LaunchPolicyProjection {
@@ -317,10 +330,28 @@ const NEW_FLASH_TASK_KINDS = new Set(Object.keys(STRUCTURED_FLASH_TASKS));
 interface UnderlyingBindings { pro: ConfiguredProviderBinding | null; flash: ConfiguredProviderBinding | null }
 
 function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBinding | null,
-  fastBinding: ConfiguredProviderBinding | null, underlying: UnderlyingBindings): AdmittedProviderRule[] {
-  const templates = scope === 'developer-live' ? defaults.developer : defaults.ordinary;
+  fastBinding: ConfiguredProviderBinding | null, underlying: UnderlyingBindings, recording?: DeveloperLiveLaunch): AdmittedProviderRule[] {
+  const recordingProvider = recording?.recordingProvider;
+  const recordingKinds = new Set<string>([...SYNTHETIC_FLASH_RECORDING_KINDS, CONNECTION_TEST_KIND]);
+  const factualStages = defaults.ordinary.find(rule => rule.taskKinds.includes(FACTUAL_REVIEW_KIND))?.claimScopedFactualStages;
+  const templates = scope !== 'developer-live' ? defaults.ordinary : recordingProvider === undefined ? defaults.developer :
+    [...defaults.developer.map(rule => rule.taskKinds.includes(FACTUAL_REVIEW_KIND) ? { ...rule, claimScopedFactualStages: factualStages } : rule),
+      ...defaults.ordinary.flatMap(rule => {
+        const caseId = recording?.validation?.case;
+        const reviewKind = caseId === 'plot-consistency' || caseId === 'publication-risk' ? 'editorial-review/' + caseId : null;
+        const review = reviewKind !== null && rule.taskKinds.includes(reviewKind);
+        const kind = review ? reviewKind : caseId !== undefined && rule.taskKinds.includes(caseId) ? caseId : rule.taskKinds[0]!;
+        const recordingOnly = kind === caseId && recordingKinds.has(kind);
+        const learning = caseId === 'learning-curation' && (kind === 'learning-curation' || kind === 'learning-sample-tidying');
+        const dialogue = kind === caseId && (kind === 'global-agent-dialogue' || kind === 'global-agent-scoped-dialogue');
+        const factualRecheck = caseId === 'factual-recheck' && kind === caseId;
+        if (!recordingOnly && !learning && !dialogue && !factualRecheck && !review) return [];
+        return [{ ...rule, ruleId: review ? 'recording-080-review' : rule.ruleId.replace('ordinary-production', 'recording-080'),
+          taskKinds: [kind], ...(factualRecheck ? { platformTools: 1 } : {}),
+          outboundDataCategories: recordingOnly || factualRecheck || review ? ['public-or-synthetic'] : rule.outboundDataCategories }];
+      })];
   return templates.flatMap((template) => {
-    const selected = scope === 'developer-live' ? DEVELOPER_LIVE_POLICY_BINDING
+    const selected = scope === 'developer-live' ? recordingProvider === undefined ? DEVELOPER_LIVE_POLICY_BINDING : recordingBindingFor(recordingProvider, template.taskKinds[0]!)
       : modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-pro' ? underlying.pro
       : template.modelRole === 'Fast Interaction Role' && modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-flash' ? underlying.flash
       : template.modelRole === 'Fast Interaction Role' ? fastBinding : binding;
@@ -336,13 +367,14 @@ function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBind
 export function resolveSourceCheckoutLaunchPolicySync(_codeRoot: string,
   requestedScope: TrustedOperationalScope = 'development-ci', configuredBinding: ConfiguredProviderBinding | null = null,
   configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
-  underlying: UnderlyingBindings = { pro: configuredBinding, flash: configuredFastBinding }): LaunchPolicyProjection {
+  underlying: UnderlyingBindings = { pro: configuredBinding, flash: configuredFastBinding },
+  recording?: DeveloperLiveLaunch): LaunchPolicyProjection {
   if (!isTrustedOperationalScope(requestedScope)) return deny('launch-scope-not-selectable');
   if (requestedScope === 'ordinary-production' && [configuredBinding, configuredFastBinding, underlying.pro, underlying.flash].some((binding) =>
     binding !== null && allowedProductionBindingOf(binding, 'fast-interaction') === null)) return deny('binding-not-allowed');
   const ci = requestedScope === 'development-ci';
   const ordinary = requestedScope === 'ordinary-production';
-  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding, underlying);
+  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding, underlying, recording);
   const configured = !ci && admittedRules.length > 0;
   return {
     integrityState: 'verified', denialReason: null, operationalScope: requestedScope, activePolicySetVersion: ACTIVE_SET_VERSION,
