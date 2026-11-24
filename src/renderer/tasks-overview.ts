@@ -4,6 +4,7 @@ import type { RendererApi, TaskOverviewItemProjection, TaskOverviewProjection, T
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { showToast } from './components/toast.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { menuPanel } from './components/controls.js';
 import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
 import { attentionSentence, globalAttentionTimeLine } from './global-attention-labels.js';
@@ -30,7 +31,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const work = taskWorkLine(item.work, Date.now());
   if (work !== null) facts.append(' · ', el('span', 'task-overview-usage', work));
   const modelLabel = item.work?.finished ? item.work.finished.modelLabel : item.attention.modelLabel;
-  if (modelLabel) facts.append(' · 模型 ', el('span', 'task-overview-model', modelLabel));
+  if (modelLabel) facts.append(' · 模型 ', el('span', 'task-overview-model', modelEffortWords(modelLabel)));
   if (view.pageGroup === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
   function actionButton(entry: (typeof view.actions)[number]): HTMLButtonElement {

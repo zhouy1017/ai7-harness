@@ -93,7 +93,7 @@ const lines = (root: MiniElement): string[] => root.querySelectorAll('h2, h3, h4
   .filter((node) => shown(node) && node.textContent.trim().length > 0 && node.closest('button, .task-bar-actions, .task-drawer-modes') === null).map((node) => node.textContent);
 const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-task-drawer-control]').filter((node) => shown(node) && !node.disabled)
   .map((node) => node.dataset['taskDrawerControl']!);
-const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
+const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高'));
 
 type ReferenceOperation = 'inspectTaskOverview' | 'inspectTaskPlan' | 'inspectEvaluation' | 'launchInitialEvaluation' | 'launchReadersReport';
 type ReferenceArgs = { [K in ReferenceOperation]: [K, ServiceOperationMap[K]['input']] }[ReferenceOperation];
@@ -440,7 +440,7 @@ describe('the running card and the times of a Task', () => {
       work: { workedMs: 45000, workingSince: null, finished: { requests: 0, modelLabel: 'recorded-model@high' } } }),
     { overview: async () => overviewOf(row('completed', { usage: { elapsed: 999999, calls: 500 }, attention: { modelLabel: 'other-model' } })) });
     expect(text(root, '.task-status-line')).toBe('用时 45 秒 · 0 次模型调用');
-    expect(text(root, '.task-status-model')).toBe('模型 recorded-model@high');
+    expect(text(root, '.task-status-model')).toBe('模型 recorded-model@高');
     expect(lines(root).join(' ')).not.toMatch(/tokens|处理用时|约 .*次调用|500/u);
   });
 
@@ -524,7 +524,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
     drawer.refresh('baseline-analysis');
     await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe('settled'));
-    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
+    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高');
     await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用'));
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
@@ -533,7 +533,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     const failing = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(overviewOf(row('completed')));
     const { root, drawer, open, inspectTaskOverview } = await openDrawer(finishedPlan(), { overview: failing });
     await vi.waitFor(() => expect(inspectTaskOverview).toHaveBeenCalledTimes(1));
-    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
+    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高');
     expect(controls(root)).not.toContain('view-result');
     drawer.close(false);
     await open();

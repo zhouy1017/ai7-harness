@@ -16,6 +16,7 @@ import type {
   UnconfirmedStageId,
 } from '../shared/protocol.js';
 import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
 import { RUN_LIVENESS_STAGE_LABELS, attemptStateLabel, elapsedLabel, localInstantLabel, runStepIsStale } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
@@ -1288,7 +1289,7 @@ export interface TaskStatusLines {
   readonly line: string | null;
   /** What the Run Budget Ceiling does, when the plan froze one and the Run is not over. */
   readonly ceiling: string | null;
-  /** `模型 名称@思考强度`. */
+  /** `模型 名称@思考强度`, the level in the editor's word (developer mode: the record's own level name). */
   readonly model: string | null;
   /** Whether 查看结果 has a result to open: the Task ended and formed one. */
   readonly resultReady: boolean;
@@ -1319,7 +1320,7 @@ export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts
   const control = plan.runControl;
   const activity = control?.activity ?? null;
   const modelLabel = plan.work?.finished ? plan.work.finished.modelLabel : facts.modelLabel;
-  const model = modelLabel === null ? null : `模型 ${modelLabel}`;
+  const model = modelLabel === null ? null : `模型 ${modelEffortWords(modelLabel)}`;
   const work = taskWorkLine(plan.work, nowMs);
   const ceiling = taskPlanCeilingLine(plan);
   const share = (settled: number, total: number): string => `已完成约 ${total === 0 ? 0 : Math.floor((settled / total) * 100)}%`;

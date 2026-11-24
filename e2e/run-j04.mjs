@@ -1,7 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { checkRetainedFindingSources } from './retained-finding-sources.mjs';
 import { pressReachable } from './task-card-reach.mjs';
-import { capturePointerFailure, chooseDispatch, pointerClick, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
+import { capturePointerFailure, chooseDispatch, frozenModelWords, pointerClick, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
@@ -4455,7 +4455,8 @@ async function main() {
         requireJourney(unknownLabel.includes('account-future-model') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values)==='["off"]' && unknownSeen.selected==='off' &&
           unknownSeen.note===EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside===true, 'dispatch-choice-unknown-default-only', unknownSeen);
         const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer', { model: levelModel.label, effort: level, seen: (facts) => { levelSeen = facts; } })).replace(/^模型 /u,'').replace(/ ▾$/u,'');
-        requireJourney(chosenLabel===`${levelModel.label}@${level}` && JSON.stringify(levelSeen.values)===JSON.stringify(['off', ...levelModel.levels]) && levelSeen.selected===level && levelSeen.note==='', 'dispatch-choice-model-and-effort', levelSeen);
+        // The chooser's summary says the level as this mode shows a frozen label: its word in ordinary mode, its recorded name in developer mode.
+        requireJourney(chosenLabel===await frozenModelWords(renderer, `${levelModel.label}@${level}`) && JSON.stringify(levelSeen.values)===JSON.stringify(['off', ...levelModel.levels]) && levelSeen.selected===level && levelSeen.note==='', 'dispatch-choice-model-and-effort', levelSeen);
         await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
         await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');
         const before = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -4491,14 +4492,14 @@ async function main() {
             // 查看结果 — at the wide window and at the Gate's. 查看结果 opens the result, and closing it brings the drawer back on the same Task.
             at('task-status-finished');
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
-            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-${planWidth}`,30_000);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: await frozenModelWords(renderer, `${levelModel.label}@${level}`) }),`task-status-finished-card-${planWidth}`,30_000);
             // The card's own controls, by pointer: 查看计划 and 运行 go to the plan and back, and 查看结果 opens the result.
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="full-link"]',`task-status-finished-plan-${planWidth}`);
             await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
             // #1616 (stage-4/5 rework R6): the review plan's 统合 step reads in the editor's words — 部分, 未完成的部分, 审阅偏好.
             await assertRenderer(renderer,`(() => {const text=document.querySelector('#task-drawer').innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('若覆盖多个部分') && text.includes('并说明未完成的部分、缩短与省略数量') && !/阅读范围|缺口|本社审阅偏好/u.test(text);})()`,`task-status-finished-plan-words-${planWidth}`);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
-            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: await frozenModelWords(renderer, `${levelModel.label}@${level}`) }),`task-status-finished-card-again-${planWidth}`,30_000);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
             await waitFor(renderer,`document.querySelector('.task-result-window [data-task-result-action="close"]') && document.querySelector('#task-drawer')?.hidden===true`,`task-status-finished-result-open-${planWidth}`);
             await pointerClick(renderer,waitFor,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
@@ -4508,7 +4509,7 @@ async function main() {
           await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
         }
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-choice-tasks');
-        await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenLabel)})`, 'dispatch-choice-frozen-task-row');
+        await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(await frozenModelWords(renderer, `${levelModel.label}@${level}`))})`, 'dispatch-choice-frozen-task-row');
         // #1616 (stage-4/5 rework R6): on 任务, in ordinary mode, a finished analysis that left parts unread counts them in the editor's words.
         if (width===1008) await waitFor(renderer, `(() => { const text=document.querySelector('[data-screen="task-overview"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && /已完成 · \\d+ 个部分中有 \\d+ 个没有读成/u.test(text) && !text.includes('单元未读成'); })()`, 'dispatch-choice-task-card-words');
       }

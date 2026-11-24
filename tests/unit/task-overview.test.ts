@@ -53,11 +53,12 @@ describe('task overview', () => {
     try {
       const card = taskOverviewCard(item, vi.fn(), inBook);
       expect(card.querySelector('.task-overview-usage')?.textContent).toBe('用时 45 秒 · 12 次模型调用');
-      expect(card.querySelector('.task-overview-model')?.textContent).toBe('recorded-model@high');
+      // The record keeps the service's level name; the card says it in the editor's word, and developer mode shows the record.
+      expect(card.querySelector('.task-overview-model')?.textContent).toBe('recorded-model@高');
       // One line of facts: the time, the working time and the model apart, 模型 before its name (stage-4/5 R3).
       const time = card.querySelector('.task-overview-card-time')!.textContent!;
       expect(time).not.toBe('');
-      expect(card.querySelector('.task-overview-card-facts')?.textContent).toBe(`${time} · 用时 45 秒 · 12 次模型调用 · 模型 recorded-model@high`);
+      expect(card.querySelector('.task-overview-card-facts')?.textContent).toBe(`${time} · 用时 45 秒 · 12 次模型调用 · 模型 recorded-model@高`);
       expect(card.textContent).not.toMatch(/tokens|约 .*次调用|999/u);
       const { work: _work, ...withoutWork } = item;
       for (const bare of [withoutWork, { ...withoutWork, work: null }]) {

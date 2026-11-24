@@ -24,6 +24,17 @@ export function staleEffortLabel(level: string): string {
   return `${known ? effortLevelLabel(level) : technicalWords(level, '之前选的强度')}（现在不可用）`;
 }
 
+/**
+ * A frozen `名称@档位` label as a chooser's summary or a task card shows it: the level in the same word the list uses. The record
+ * keeps the service's level name, and developer mode shows the record as it is.
+ */
+export function modelEffortWords(label: string): string {
+  const at = label.lastIndexOf('@');
+  const level = at < 0 ? '' : label.slice(at + 1);
+  const word = LEVEL_WORDS[level] ?? (/^\d+$/u.test(level) ? `思考上限 ${level}` : undefined);
+  return word === undefined ? label : technicalWords(label, `${label.slice(0, at)}@${word}`);
+}
+
 /** What a role or a record uses, in the same words as the list. */
 export function effortValueLabel(effort: string | null | undefined): string {
   return effort === undefined || effort === null || effort === 'off' ? MODEL_DEFAULT_EFFORT_LABEL : effortLevelLabel(effort);
