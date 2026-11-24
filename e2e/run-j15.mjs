@@ -581,6 +581,25 @@ async function main() {
     await click(renderer, '字表与词表', 'knowledge-standard-tables');
     await waitFor(renderer, `document.querySelectorAll('[data-standard-table-id]').length===4`, 'knowledge-preinstalled-tables');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-standard-table-id]')).every(card => card.textContent.includes('已识别') && card.textContent.includes('启用') && card.querySelector('[data-standard-table-action="import-version"]'))`, 'knowledge-table-status');
+    // Stage 4/5 rework R7: the four national tables say 预装, never 本社自建.
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-standard-table-id]')).every(card => (card.querySelector('.field-note')?.textContent ?? '').startsWith('预装 · ') && !card.textContent.includes('本社自建'))`, 'knowledge-table-preinstalled-words');
+    // R1: 删除 asks first, in the card. The question names the table and what goes; 取消 keeps all four; 确认删除 removes the
+    // table, and 恢复预装字表 brings the preinstalled one back. Every press is the pointer's, on a control asserted in view.
+    const doomed = await renderer.evaluate(`(() => { const card = document.querySelector('[data-standard-table-id]'); return { id: card?.dataset.standardTableId ?? null, name: card?.querySelector('h3')?.textContent ?? null }; })()`);
+    requireJourney(typeof doomed.id === 'string' && doomed.id.length > 0 && typeof doomed.name === 'string' && doomed.name.length > 0, 'knowledge-table-delete-target');
+    const doomedCard = `[data-standard-table-id=${JSON.stringify(doomed.id)}]`;
+    const tableCount = `document.querySelectorAll('[data-standard-table-id]').length`;
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="delete"]`, 'knowledge-table-delete');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${doomedCard} [data-standard-table-confirm] [data-standard-table-action="confirm-delete"]`)}) instanceof HTMLButtonElement`, 'knowledge-table-delete-question');
+    const asked = await renderer.evaluate(`(() => { const strip = document.querySelector(${JSON.stringify(`${doomedCard} [data-standard-table-confirm]`)}); return { question: strip?.querySelector('p')?.textContent ?? null, focus: document.activeElement?.dataset?.standardTableAction ?? null, tables: ${tableCount} }; })()`);
+    requireJourney(asked.question === `删除「${doomed.name}」？它的全部版本、条目和导入的原件会一起删除。之后可按「恢复预装字表」找回预装的内容，本社改过的内容不能找回。` && asked.focus === 'cancel-delete' && asked.tables === 4, 'knowledge-table-delete-asks', asked);
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="cancel-delete"]`, 'knowledge-table-delete-cancel');
+    await waitFor(renderer, `document.querySelector('[data-standard-table-confirm]') === null && document.querySelector(${JSON.stringify(doomedCard)}) !== null && ${tableCount} === 4`, 'knowledge-table-delete-cancelled');
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="delete"]`, 'knowledge-table-delete-again');
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="confirm-delete"]`, 'knowledge-table-delete-confirm');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(doomedCard)}) === null && ${tableCount} === 3 && document.querySelector('[data-standard-table-action="restore-preinstalled"]') instanceof HTMLButtonElement`, 'knowledge-table-deleted');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="restore-preinstalled"]', 'knowledge-table-restore');
+    await waitFor(renderer, `${tableCount} === 4 && document.querySelector('[data-standard-table-action="restore-preinstalled"]') === null && Array.from(document.querySelectorAll('[data-standard-table-id] h3')).some(title => title.textContent === ${JSON.stringify(doomed.name)})`, 'knowledge-table-restored');
     await pointerClick(renderer, waitFor, '[data-standard-table-action="inspect"]', 'knowledge-table-open');
     await waitFor(renderer, `document.querySelector('[data-standard-table-detail] [data-standard-table-row]') && document.querySelector('[data-standard-table-action="save-version"]')`, 'knowledge-table-entries');
     await click(renderer, '审阅规范文件', 'knowledge-open-category');

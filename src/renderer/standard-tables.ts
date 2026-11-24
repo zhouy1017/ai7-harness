@@ -4,6 +4,14 @@ import { mountStandardTableDetail, type TableWork } from './standard-table-detai
 import { mountStandardTableImport } from './standard-table-import.js';
 import { TABLE_KINDS, countsLabel, tableActions, tableButton, tableNode } from './standard-table-editor.js';
 
+/** Where a table came from, as its card says it: 预装 by the projection's origin, never by a missing source file. */
+export const tableSourceLabel = (table: Pick<StandardTableItem, 'origin' | 'sourceFileName'>): string =>
+  table.origin === 'preinstalled' ? ['预装', ...(table.sourceFileName === null ? [] : [table.sourceFileName])].join(' · ') : table.sourceFileName ?? '本社自建';
+/** What 删除 asks before anything goes: the table by name, what goes with it, and whether it can come back. */
+export const tableDeleteQuestion = (table: Pick<StandardTableItem, 'name' | 'origin'>): string =>
+  `删除「${table.name}」？它的全部版本、条目和导入的原件会一起删除。${table.origin === 'preinstalled'
+    ? '之后可按「恢复预装字表」找回预装的内容，本社改过的内容不能找回。' : '删除后不能找回。'}`;
+
 /** ADR 0106 §4–§5: a table's source, rows and versions share one knowledge-base item. */
 export function mountStandardTables(options: {
   root: HTMLElement; api: StandardTableRendererApi;
@@ -15,7 +23,7 @@ export function mountStandardTables(options: {
   const toolbar = tableNode('div', undefined, 'button-row'), creation = tableNode('div'), list = tableNode('div', undefined, 'standard-table-list');
   root.append(toolbar, creation, list);
   let projection: StandardTablesProjection = { tables: [], missingPreinstalledKeys: [] }, busy = false;
-  let form: HTMLElement | null = null;
+  let form: HTMLElement | null = null, confirming: string | null = null;
   const cards = new Map<string, { card: HTMLElement; header: HTMLElement; detail: HTMLElement; preview: HTMLElement }>();
   const run: TableWork = work => { void (async () => {
     if (busy || !root.isConnected) return;
@@ -47,6 +55,7 @@ export function mountStandardTables(options: {
     mountStandardTableImport(form, preview, api, run, inspection => { cancel(); saved(inspection); }, cancel);
     form.querySelector<HTMLInputElement>('[data-standard-table-field="name"]')?.focus();
   };
+  const focusAction = (tableId: string, action: string): void => cards.get(tableId)?.header.querySelector<HTMLButtonElement>(`[data-standard-table-action="${action}"]`)?.focus();
   const paint = (): void => {
     toolbar.replaceChildren(tableButton('导入字表或词表', 'import', () => run(() => begin())),
       tableButton('新建字表或词表', 'create', () => run(() => begin(undefined, true))));
@@ -65,7 +74,7 @@ export function mountStandardTables(options: {
       }
       const detail = nodes.detail;
       nodes.header.replaceChildren(tableNode('h3', table.name),
-        tableNode('p', `${table.sourceFileName ?? '本社自建'} · ${TABLE_KINDS[table.kind]} · ${table.versionLabel} · ${localInstantLabel(table.recordedAt)}`, 'field-note'),
+        tableNode('p', `${tableSourceLabel(table)} · ${TABLE_KINDS[table.kind]} · ${table.versionLabel} · ${localInstantLabel(table.recordedAt)}`, 'field-note'),
         tableNode('p', countsLabel(table.counts)),
         tableNode('p', `${table.enabled ? '启用' : '停用'} · ${table.recentChecksCount === 0 ? '近期核查未用过' : `最近 ${table.recentChecksCount} 次核查用过`}`),
         tableActions(tableButton('查看条目', 'inspect', () => run(async () => {
@@ -77,11 +86,19 @@ export function mountStandardTables(options: {
           const next = await api.setStandardTableEnabled({ tableId: table.tableId, enabled: !table.enabled });
           if (!root.isConnected) return;
           projection = next; paint(); setStatus(table.enabled ? '已停用字表。' : '已启用字表。', 'success');
-        })), tableButton('删除', 'delete', () => run(async () => {
+        })), tableButton('删除', 'delete', () => { confirming = table.tableId; paint(); focusAction(table.tableId, 'cancel-delete'); })));
+      // 删除 asks first, in the card: the table, its versions and its originals go together.
+      if (confirming === table.tableId) {
+        const strip = tableNode('div', undefined, 'review-preference-confirm'), confirm = tableButton('确认删除', 'confirm-delete', () => run(async () => {
           const next = await api.deleteStandardTable({ tableId: table.tableId });
           if (!root.isConnected) return;
-          projection = next; paint(); setStatus('已删除字表及其原件。', 'success');
-        }))));
+          confirming = null; projection = next; paint(); setStatus('已删除字表及其原件。', 'success');
+        }));
+        strip.setAttribute('role', 'group'); strip.setAttribute('aria-label', '删除字表或词表'); strip.dataset['standardTableConfirm'] = table.tableId; confirm.classList.add('danger');
+        strip.append(tableNode('p', tableDeleteQuestion(table)),
+          tableActions(confirm, tableButton('取消', 'cancel-delete', () => { confirming = null; paint(); focusAction(table.tableId, 'delete'); })));
+        nodes.header.append(strip);
+      }
       items.push(nodes.card);
     }
     list.replaceChildren(...items);
