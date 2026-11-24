@@ -500,6 +500,31 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
+  it('stays in the window when the column measure put the reading block back at its edge', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const load = vi.fn(() => new Promise<never>(() => undefined));
+    const rendererApi = new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? load : Reflect.get(target, key) });
+    const app = shell(rendererApi);
+    app.open({ ...windowOf('book-one'), previousCursor: 'previous-window' });
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await vi.advanceTimersByTimeAsync(40);
+    // A right-hand column changed and the correction rests at the top of the loaded text: not a request for the previous page.
+    columnScroll.owned = true;
+    Object.assign(pane, { scrollTop: 0 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).not.toHaveBeenCalled();
+    columnScroll.owned = false;
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'cursor', cursor: 'previous-window' } }));
+    app.showing?.destroy();
+  });
+
   it('keeps global destinations in the sidebar and editing actions in the toolbar', () => {
     const app = shell();
     app.open(windowOf('book-one'));
@@ -899,8 +924,10 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
 
 vi.mock('../../src/renderer/right-column.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/right-column.js')>(),
-  mountColumnMeasure: () => ({ destroy: vi.fn() }),
+  mountColumnMeasure: () => ({ destroy: vi.fn(), ownsScroll: () => columnScroll.owned }),
 }));
+/** Whether the column measure says the pane's offset is the one it just put the reading block back at. */
+const columnScroll = vi.hoisted(() => ({ owned: false }));
 
 /** The shell around the screen with the real drawer, wired as `index.ts` wires them, and in `replaceScreen`'s order. */
 function columnShell() {
