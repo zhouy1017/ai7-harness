@@ -13,15 +13,40 @@ const run = promisify(execFile);
 const release = '790acbcbde8ca268217b152194f83241d1f13d10';
 
 /** Build the released service outside the checkout, using only its committed source and installed dependencies. */
-async function historicalModule(root: string, codeRoot: string, revision: string, name: string) {
+async function historicalModule(root: string, codeRoot: string, revision: string, source: string | { contents: string }) {
   const checkout = await mkdtemp(join(dirname(root), 'released-service-'));
   const archive = join(checkout, 'release.tar');
   await run('git', ['-C', codeRoot, 'archive', '--format=tar', '-o', archive, revision, 'src', 'config', 'package.json']);
   await run('tar', ['-xf', archive, '-C', checkout]);
   await symlink(join(codeRoot, 'node_modules'), join(checkout, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const entry = join(checkout, 'service.mjs');
-  await build({ entryPoints: [join(checkout, 'src', 'service', name)], outfile: entry, bundle: true, format: 'esm', platform: 'node', packages: 'external', logLevel: 'silent' });
+  const input = typeof source === 'string'
+    ? { entryPoints: [join(checkout, 'src', 'service', source)] }
+    : { stdin: { ...source, resolveDir: join(checkout, 'src', 'service') } };
+  await build({ ...input, outfile: entry, bundle: true, format: 'esm', platform: 'node', packages: 'external', logLevel: 'silent' });
   return {entry,checkout};
+}
+
+/** Keep the execution owner, ledgers, fixture adapter and store from the same release. */
+export async function legacyFixtureService(root: string, codeRoot: string, revision: string) {
+  const { entry, checkout } = await historicalModule(root, codeRoot, revision, { contents: `
+    export { EditorialStore } from './store.ts';
+    export { ModelRequestGovernor, BaselineAnalysisExecutionOwner } from './analysis/execution.ts';
+    export { ReviewRunDriver } from './review/review-run-driver.ts';
+    export { fixtureEntryKey } from './provider/model-fixture.ts';
+    export { resolveSourceCheckoutLaunchPolicy } from './launch-policy.ts';
+    export { initialEvaluationObservationSetDigest, initialEvaluationSynthesisRequestDigest } from './evaluation/initial-evaluation-contract.ts';
+    export { taskSynopsisRequestDigest } from './analysis/baseline-synopsis.ts';
+  ` });
+  const service = createRequire(import.meta.url)(entry) as
+    Pick<typeof import('../../src/service/store.js'), 'EditorialStore'> &
+    Pick<typeof import('../../src/service/analysis/execution.js'), 'ModelRequestGovernor' | 'BaselineAnalysisExecutionOwner'> &
+    Pick<typeof import('../../src/service/review/review-run-driver.js'), 'ReviewRunDriver'> &
+    Pick<typeof import('../../src/service/provider/model-fixture.js'), 'fixtureEntryKey'> &
+    Pick<typeof import('../../src/service/evaluation/initial-evaluation-contract.js'), 'initialEvaluationObservationSetDigest' | 'initialEvaluationSynthesisRequestDigest'> &
+    Pick<typeof import('../../src/service/analysis/baseline-synopsis.js'), 'taskSynopsisRequestDigest'> &
+    Pick<typeof import('../../src/service/launch-policy.js'), 'resolveSourceCheckoutLaunchPolicy'>;
+  return { ...service, checkout };
 }
 
 export async function legacySampleService(root: string, codeRoot: string, revision = release) {
