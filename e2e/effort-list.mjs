@@ -57,7 +57,7 @@ export function effortListFacts(select) {
     const shown = sentence instanceof HTMLElement && getComputedStyle(note).display !== 'none';
     return { open, rows, values: Array.from(select.options).map((option) => option.value), selected: select.value, state: select.dataset.effortState ?? null, disabled: select.disabled,
       shown: trigger?.matches('.ui-select-trigger') ? trigger.firstElementChild.textContent : null, focused: document.activeElement === trigger,
-      note: shown ? sentence.textContent : '', noteKind: shown ? sentence.dataset.effortNote : null, noteInside: shown ? inside(sentence, owner) : null,
+      note: shown ? sentence.textContent : '', noteKind: shown ? sentence.dataset.effortNote : null, noteInside: shown ? inside(sentence, owner) : null, noteDisplay: note instanceof HTMLElement ? getComputedStyle(note).display : null,
       typed: owner?.querySelector('input:not(.ui-select-filter)') != null || select.querySelector('option[value="__other"]') !== null, window: [innerWidth, innerHeight] }; })()`;
 }
 

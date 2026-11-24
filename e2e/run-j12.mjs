@@ -542,7 +542,7 @@ async function assertModelEffortDefaults(renderer) {
 
       // The main model has levels on record: exactly those are listed, in the editor's words, and 高 is saved by 使用这个模型.
       const main = await openEffortList(renderer, waitFor, requireJourney, MAIN_EFFORT, 'model-effort-main');
-      requireJourney(rowsOf(main) === ownLevels && main.rows.every(row => row.inside) && !main.typed && main.selected === original['foreground-pro'].effort && main.note === '', 'model-effort-main-own-levels', main);
+      requireJourney(rowsOf(main) === ownLevels && main.rows.every(row => row.inside) && !main.typed && main.selected === original['foreground-pro'].effort && main.note === '' && main.noteDisplay === 'none', 'model-effort-main-own-levels', main);
       await pressEffortRow(renderer, waitFor, requireJourney, MAIN_EFFORT, 'high', 'model-effort-main-high');
       requireJourney((await closed(MAIN_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.high)}`, 'model-effort-main-shown')).selected === 'high', 'model-effort-main-shown');
       await reachPress(renderer, waitFor, requireJourney, '[data-action="use-model-for-both-roles"]', 'model-effort-main-save');
@@ -551,7 +551,7 @@ async function assertModelEffortDefaults(renderer) {
 
       // Nothing is on record for the hand-typed lighter model: 模型默认 alone, the sentence in view, the refresh action usable.
       const unknown = await openEffortList(renderer, waitFor, requireJourney, FAST_EFFORT, 'model-effort-unknown');
-      requireJourney(rowsOf(unknown) === JSON.stringify([['off', EFFORT_WORDS.off]]) && unknown.rows[0].inside && unknown.state === 'unknown' && unknown.note === EFFORT_UNKNOWN_SENTENCE && !unknown.typed, 'model-effort-unknown-default-only', unknown);
+      requireJourney(rowsOf(unknown) === JSON.stringify([['off', EFFORT_WORDS.off]]) && unknown.rows[0].inside && unknown.state === 'unknown' && unknown.note === EFFORT_UNKNOWN_SENTENCE && unknown.noteDisplay !== 'none' && !unknown.typed, 'model-effort-unknown-default-only', unknown);
       await effortKey(renderer, 'Escape');
       await closed(FAST_EFFORT, 'true', 'model-effort-unknown-closed');
       await wheelClear(renderer, waitFor, '.model-service-optional [data-effort-note="reason"]', 'model-effort-unknown-sentence');
@@ -3294,7 +3294,7 @@ async function main() {
           unknownSeen.shown === EFFORT_WORDS.off && unknownSeen.note === EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside === true, 'dispatch-unknown-model-default-only', unknownSeen);
         const picked = width === 1008 ? unknownLabel : await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer', { model: flashLabel, effort: 'high', seen: (facts) => { levelSeen = facts; } });
         if (width === 1280) requireJourney(picked.includes(`${flashLabel}@high`) && JSON.stringify(levelSeen.values) === '["off","low","high","max"]' && JSON.stringify(levelSeen.labels) === JSON.stringify(['off', 'low', 'high', 'max'].map(level => EFFORT_WORDS[level])) &&
-          levelSeen.selected === 'high' && levelSeen.shown === EFFORT_WORDS.high && levelSeen.note === '', 'dispatch-chosen-model-and-level', levelSeen);
+          levelSeen.selected === 'high' && levelSeen.shown === EFFORT_WORDS.high && levelSeen.note === '' && levelSeen.noteDisplay === 'none', 'dispatch-chosen-model-and-level', levelSeen);
         const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
         if (width === 1280) rememberedLabel = chosen.label;
         await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });

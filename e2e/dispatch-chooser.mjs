@@ -111,7 +111,7 @@ export async function dispatchEffortFacts(renderer, selector) {
     const shown=sentence instanceof HTMLElement&&getComputedStyle(note).display!=='none';
     return {values:Array.from(select.options).map(option=>option.value),labels:Array.from(select.options).map(option=>option.textContent),selected:select.value,state:select.dataset.effortState??null,
       shown:trigger?.matches('.ui-select-trigger')?trigger.firstElementChild.textContent:null,triggerInside:trigger instanceof HTMLElement&&inside(trigger),
-      note:shown?sentence.textContent:'',noteKind:shown?sentence.dataset.effortNote:null,noteInside:shown?inside(sentence):null,typed:panel.querySelector('input:not(.ui-select-filter)')!==null,window:[innerWidth,innerHeight]};})()`);
+      note:shown?sentence.textContent:'',noteKind:shown?sentence.dataset.effortNote:null,noteInside:shown?inside(sentence):null,noteDisplay:note instanceof HTMLElement?getComputedStyle(note).display:null,typed:panel.querySelector('input:not(.ui-select-filter)')!==null,window:[innerWidth,innerHeight]};})()`);
 }
 
 /**
