@@ -184,9 +184,8 @@ describe('the drawer', () => {
     setTechnicalLayerVisible(true);
     const css = readFileSync('src/renderer/styles.css', 'utf8');
     expect(css).toContain(':root[data-technical-layer-visible="false"] .task-drawer-footer[data-developer-line] { display: none; }');
-    // The toast takes no press meant for the control under it; only its own action is pressed.
-    expect(css).toContain('.toast { pointer-events: none; }');
-    expect(css).toContain('.toast .btn { color: inherit; pointer-events: auto; }');
+    // On the manuscript a notice sits in the header band, clear of the toolbar's controls (改稿方式).
+    expect(css).toContain('body:has(#screen[data-screen="editor"]) .toast { top: .4rem; }');
     expect(TASK_PLAN_OPEN).toBe('查看计划');
   });
 
