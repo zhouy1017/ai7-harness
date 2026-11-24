@@ -100,6 +100,16 @@ export const EFFORT_UNKNOWN_SENTENCE = '还没有查到这个模型的可选强�
 export const EFFORT_STALE_SENTENCE = '之前选的强度现在不可用，请重新选择。';
 
 /**
+ * A frozen `名称@档位` label as the page shows it now: ordinary mode says the level in the list's word (`名称@高`), developer mode
+ * keeps the record's own level name (`名称@high`). The record itself always holds the level name.
+ */
+export async function frozenModelWords(renderer, label) {
+  const ordinary = (await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='false'`)) === true;
+  const at = label.lastIndexOf('@'), level = at < 0 ? '' : label.slice(at + 1);
+  return ordinary && level !== 'off' && Object.hasOwn(EFFORT_WORDS, level) ? `${label.slice(0, at)}@${EFFORT_WORDS[level]}` : label;
+}
+
+/**
  * What the engine shows of an open chooser's 思考强度: the list, the value chosen, the words on its trigger, and the sentence under
  * it with whether it lies inside the window and on top. Geometry comes from `innerWidth` / `innerHeight`; nothing is scrolled.
  */

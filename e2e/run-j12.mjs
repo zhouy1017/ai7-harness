@@ -1301,7 +1301,23 @@ async function main() {
     await pressIntoSettingsPage(onboardingPage, '[data-help-step-go="model"]', '[data-screen="model-service"]', '[data-screen="model-service"] h2', 'first-review-help-model');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-model-library');
-    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    // 0.7.9, the library since #1733: a Book's card is one control for as long as the page lists the Book. The list is refreshed
+    // around it — by the pending counts that arrive after the page, by a filter and by the filter's answer — and each refresh used
+    // to put new cards in place of the old, so a press that was down on a card just then opened nothing (this stage's
+    // intermittent failure). The card is remembered, the list is filtered and cleared by real typing and pointer, and the same
+    // card must still be the one in the page before it is wheeled into view, asserted reachable and pressed, and the Book opens.
+    const libraryNotice = `(document.querySelector('[data-toast]')?.textContent ?? '')`;
+    const bookCard = `[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]`;
+    const titleStart = await onboardingPage.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(bookCard)}); window.__j12BookCard=card; return card.querySelector('.book-card-title').textContent.slice(0,2); })()`);
+    await reachPress(onboardingPage, waitFor, requireJourney, '#book-filter-text', 'first-review-help-library-filter');
+    await onboardingPage.send('Input.insertText', { text: titleStart });
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter==='all'`, 'first-review-help-library-typed');
+    await reachPress(onboardingPage, waitFor, requireJourney, '[data-book-filter-action="find"]', 'first-review-help-library-find');
+    await waitFor(onboardingPage, `${libraryNotice}==='已列出找到的图书' && document.activeElement===document.querySelector('#book-filter-text')`, 'first-review-help-library-found');
+    await reachPress(onboardingPage, waitFor, requireJourney, '[data-book-filter-action="clear"]', 'first-review-help-library-clear');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter==='none' && ${libraryNotice}==='已显示全部图书' && !Array.from(document.querySelectorAll('.book-card-facts')).some(node=>node.textContent.includes('正在读取待处理数'))`, 'first-review-help-library-cleared');
+    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector(${JSON.stringify(bookCard)}); return card!==null && card===window.__j12BookCard && card.isConnected && document.querySelectorAll(${JSON.stringify(bookCard)}).length===1; })()`, 'first-review-help-library-card-kept');
+    await reachPress(onboardingPage, waitFor, requireJourney, bookCard, 'first-review-help-library-card');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-returned-manuscript');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-overview"]')`, 'first-book-review-returned-overview');
@@ -3295,7 +3311,7 @@ async function main() {
         requireJourney(unknownLabel.includes('j12-ordinary-fast') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values) === '["off"]' && unknownSeen.selected === 'off' &&
           unknownSeen.shown === EFFORT_WORDS.off && unknownSeen.note === EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside === true, 'dispatch-unknown-model-default-only', unknownSeen);
         const picked = width === 1008 ? unknownLabel : await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer', { model: flashLabel, effort: 'high', seen: (facts) => { levelSeen = facts; } });
-        if (width === 1280) requireJourney(picked.includes(`${flashLabel}@high`) && JSON.stringify(levelSeen.values) === '["off","low","high","max"]' && JSON.stringify(levelSeen.labels) === JSON.stringify(['off', 'low', 'high', 'max'].map(level => EFFORT_WORDS[level])) &&
+        if (width === 1280) requireJourney(picked.includes(`${flashLabel}@${EFFORT_WORDS.high}`) && !picked.includes('@high') && JSON.stringify(levelSeen.values) === '["off","low","high","max"]' && JSON.stringify(levelSeen.labels) === JSON.stringify(['off', 'low', 'high', 'max'].map(level => EFFORT_WORDS[level])) &&
           levelSeen.selected === 'high' && levelSeen.shown === EFFORT_WORDS.high && levelSeen.note === '' && levelSeen.noteDisplay === 'none', 'dispatch-chosen-model-and-level', levelSeen);
         const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
         if (width === 1280) rememberedLabel = chosen.label;
