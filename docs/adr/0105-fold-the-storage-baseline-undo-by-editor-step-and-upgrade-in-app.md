@@ -13,7 +13,7 @@ decides: the R5 details left open by the Owner's D3 and D7 of #1458
 
 ## Context
 
-The Owner's decision D3 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6818574586), 2026-11-12) allows the store to be folded when a database upgrade tool is provided: 「延续约定不是强制，可以在提供数据库升级工具的前提下升级」. D7 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458), 2026-11-14) decides that per-step undo of edits made before the upgrade is not carried: 「不保留」. Round [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) (R5 → 0.8.0 Alpha) asks for:
+The Owner's decision D3 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6818574586), 2026-11-12) allows the store to be folded when a database upgrade tool is provided: 「延续约定不是强制，可以在提供数据库升级工具的前提下升级」. D7 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458), 2026-11-14) decides that per-step undo of edits made before the upgrade is not carried: 「不保留」. Round [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) (originally planned as R5 → 0.8.0 Alpha) asks for:
 
 - trustworthy undo;
 - a real version list with restore;
@@ -156,22 +156,22 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
    On any mismatch nothing is switched, the old data stays usable, and the editor is told which items did not match (Owner item 12).
 6. **Switch.**
    1. Write the Data Version 2 marker into `store.upgrading/`.
-   2. Rename `store/` → `store-before-0.8.0-<time>/`.
+   2. Rename `store/` → `store-before-<software-version>-<id>/`.
    3. Rename `store.upgrading/` → `store/`.
    4. Open, and append the Data Version 2 version record.
    5. Show the before / after comparison in plain words.
 
-   Every set-aside directory carries a timestamp, so a second upgrade-then-rollback never collides.
+   Both retained names use the software version recorded when the upgrade starts and an ID containing a timestamp. Rollback parks the newer store under `shell/store-after-<software-version>-<id>/`.
 7. **Keep the old store** until the editor deletes it (Owner item 3).
 
-**「回到升级前的数据」 (Owner item 4)** is a dedicated cross-version restore. It does not use the replacement path, which would reopen the data under 0.8.0.
+**「回到升级前的数据」 (Owner item 4)** is a dedicated cross-version restore. It does not use the replacement path, which would reopen the data under 0.7.9.
 - It first verifies every file the old store needs.
 - If any is missing, it extracts, verifies and marks the backup package in staging, then publishes it through the same resumable renames.
 - It ends with **Data Version 1 installed, with its marker, for the previous AI7**. It neither opens nor converts it.
 - The editor is told that changes made after the upgrade are not in the old data.
 
 **Old packages (Owner item 5).**
-- A `.ai7db` exported by 0.7.2 or later imports directly into 0.8.0 through the same conversion, after every payload class is installed and verified.
+- A `.ai7db` exported by 0.7.2 or later imports directly into 0.7.9 through the same conversion, after every payload class is installed and verified.
 - Older packages, and older data (Owner item 1), go through 0.7.4 first.
 
 ### 6 · Positions without write amplification
@@ -198,6 +198,8 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
 
 ### 7 · Delivery
 
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
+
 R5 builds on `codex/integration-0.8.0` after 0.7.3 is delivered (#1540).
 
 | Slice | Scope | Order and dependencies |
@@ -207,7 +209,7 @@ R5 builds on `codex/integration-0.8.0` after 0.7.3 is delivered (#1540).
 | R5-3 + R5-4 | Positions (§6) and editor steps (§1), one train because they rewrite the same functions | After R5-2 and R5-1 |
 | R5-5 | Version list, view, export, restore (§3) | After R5-3 + R5-4 |
 | R5-6 | The upgrade tool (§5); its merge lands the train on `codex/integration-0.8.0` | After R5-5 and #1556 |
-| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, every phase interrupted and resumed, rollback drills, DOCX round trip, 15 Journeys, full guest ladder and hosted Full Gate; 0.8.0 | After the train and 0.7.4 |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, every phase interrupted and resumed, rollback drills, DOCX round trip, 15 Journeys, full guest ladder and hosted Full Gate; 0.7.9 | After the train and integration of the 0.7.4 interface round |
 
 R5 needs four things from #1536's storage-facing interface:
 1. One module owning the working-block, outline and offset reads and writes.
@@ -233,6 +235,6 @@ R5 needs four things from #1536's storage-facing interface:
 - Accepted suggestions survive split and join with their undo.
 - Versions can be viewed, exported and restored.
 - Structural edits on large manuscripts stop writing tens of megabytes.
-- Upgrading to 0.8.0 is one click, with a plain before/after comparison and the old data kept.
+- Upgrading to 0.7.9 is one click, with a plain before/after comparison and the old data kept.
 - About 73 test files that hand-build old schemas are replaced by a few conversion tests on real 0.7.x stores built from `SampleBooks/`, under the replaced-tests rule of [#1075](https://github.com/zhouy1017/ai7-harness/issues/1075).
 - Ordinary CI stays provider-free. This ADR authorizes no live call, no release and no promotion to `main`.

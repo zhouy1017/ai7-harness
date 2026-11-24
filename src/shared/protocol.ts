@@ -392,7 +392,7 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
- * Protocol 206 (#1539/#1540 0.8.0 Alpha closure): standard-tables library IPC, 4-role model matrix, version history & upgrade;
+ * Protocol 206 (#1539/#1540 0.7.9 Alpha closure): standard-tables library IPC, 4-role model matrix, version history & upgrade;
  * Review Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection. It is the round's one
  * protocol change. Schema 116 and Data Version 1 are unchanged; closure adds no migration.
  *

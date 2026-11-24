@@ -56,7 +56,7 @@ export async function buildMaintenance(roots: ServiceTestRoots) {
     define: { __AI7_BUILD_IDENTITY__: JSON.stringify(identity) },
     outfile: entry, bundle: true, format: 'esm', platform: 'node', packages: 'external', logLevel: 'silent',
   });
-  return async (action: 'preflight' | 'upgrade' | 'resume' | 'rollback', root: string, boundary?: string) => {
+  const invoke = async (action: 'preflight' | 'upgrade' | 'resume' | 'rollback', root: string, boundary?: string) => {
     const running = run(process.execPath, [entry, action, root, ...(boundary ? [boundary] : [])], {
       cwd: dist, windowsHide: true, timeout: 45_000,
     });
@@ -74,4 +74,5 @@ export async function buildMaintenance(roots: ServiceTestRoots) {
       throw error;
     }
   };
+  return { invoke, softwareVersion };
 }

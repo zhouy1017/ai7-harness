@@ -111,7 +111,9 @@ All low-level, non-user-facing structured calls converge on the **Underlying Fla
 
 ### 5 · Delivery in R5 (#1608, slices R5-F1 and R5-F2)
 
-Two slices join R5 on `codex/integration-0.8.0` ([development plan](../development/development-plan.md)):
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
+
+Two slices join R5 for 0.7.9 Alpha on `codex/integration-0.8.0` ([development plan](../development/development-plan.md)):
 
 | Slice | What it delivers | Order |
 | --- | --- | --- |

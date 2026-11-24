@@ -165,7 +165,7 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('pins protocol 206 for 0.8.0 Alpha closure (Issues #1539, #1540)', () => {
+  it('pins protocol 206 for 0.7.9 Alpha closure (Issues #1539, #1540)', () => {
     expect(SERVICE_PROTOCOL_VERSION).toBe(206);
   });
 

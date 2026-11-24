@@ -124,7 +124,7 @@ function synthesisOutcome(session: Session, book: Book): string {
 it('reads the archived SampleBook report and continues its paused review after an in-app upgrade', async () => {
   await createUpgradeSample1(roots.dataRoot, roots.codeRoot);
   await beginUpgrade(roots.dataRoot);
-  await resumeUpgrade(roots.dataRoot,'0.8.0');
+  await resumeUpgrade(roots.dataRoot,'0.7.9');
   const session = await openCapturedSession();
   try {
     const runs = session.store.listBooks(null).items.map(b => session.store.inspectReviewWorkspace(b.bookId,null).run!);
