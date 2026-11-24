@@ -94,15 +94,41 @@ export async function pointerClick(renderer, waitFor, selector, name, { rest = f
   }
 }
 
-export async function chooseDispatch(renderer, waitFor, selector, name, { model = 'next', effort = 'first', reset = false, press = pointerClick, excludeModel = null } = {}) {
+/** 思考强度's ordinary words, by the value a request carries (`off`: the request carries none). */
+export const EFFORT_WORDS = Object.freeze({ off: '模型默认', none: '不启用思考', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '更高', max: '最高' });
+export const EFFORT_UNKNOWN_SENTENCE = '还没有查到这个模型的可选强度。';
+export const EFFORT_STALE_SENTENCE = '之前选的强度现在不可用，请重新选择。';
+
+/**
+ * What the engine shows of an open chooser's 思考强度: the list, the value chosen, the words on its trigger, and the sentence under
+ * it with whether it lies inside the window and on top. Geometry comes from `innerWidth` / `innerHeight`; nothing is scrolled.
+ */
+export async function dispatchEffortFacts(renderer, selector) {
+  return renderer.evaluate(`(() => {const root=document.querySelector(${JSON.stringify(selector)}),panel=root?.querySelector('.dispatch-chooser-panel'),select=root?.querySelector('select[aria-label="本次任务的思考强度"]');
+    if(!panel||!select)return null;
+    const inside=(node)=>{const r=node.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&panel.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));};
+    const trigger=select.nextElementSibling,note=panel.querySelector('.dispatch-chooser-effort-note'),sentence=note?.querySelector('[data-effort-note="reason"],[data-effort-note="stale"]');
+    const shown=sentence instanceof HTMLElement&&getComputedStyle(note).display!=='none';
+    return {values:Array.from(select.options).map(option=>option.value),labels:Array.from(select.options).map(option=>option.textContent),selected:select.value,state:select.dataset.effortState??null,
+      shown:trigger?.matches('.ui-select-trigger')?trigger.firstElementChild.textContent:null,triggerInside:trigger instanceof HTMLElement&&inside(trigger),
+      note:shown?sentence.textContent:'',noteKind:shown?sentence.dataset.effortNote:null,noteInside:shown?inside(sentence):null,typed:panel.querySelector('input:not(.ui-select-filter)')!==null,window:[innerWidth,innerHeight]};})()`);
+}
+
+/**
+ * Chooses a Task's model and 思考强度 with the real pointer. `effort: 'first'` takes the model's first own level, and leaves 模型默认
+ * where the model offers no level (0.8.0 stage one); a named value or word must be offered. Before the chooser closes, its 思考强度
+ * is read at engine level and checked: 模型默认 first, no typed value, its trigger in the window, and a list of 模型默认 alone always
+ * with its sentence in view. `seen` receives those facts for the Journey's own assertions.
+ */
+export async function chooseDispatch(renderer, waitFor, selector, name, { model = 'next', effort = 'first', reset = false, press = pointerClick, excludeModel = null, seen = null } = {}) {
   const root = JSON.stringify(selector);
   if (!(await renderer.evaluate(`document.querySelector(${root})?.open===true`))) await press(renderer, waitFor, `${selector} > summary`, `${name}-open`);
   await waitFor(renderer, `(() => {const panel=document.querySelector(${root})?.querySelector('.dispatch-chooser-panel');if(!panel)return false;
     const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&panel.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));})()`, `${name}-panel-visible`);
   const pick = async (label, choice) => {
     const select = `${selector} select[aria-label=${JSON.stringify(label)}]`;
-    const index = await renderer.evaluate(`(() => {const select=document.querySelector(${JSON.stringify(select)}),options=Array.from(select.options);
-      return ${JSON.stringify(choice)}==='next'?options.findIndex((option,index)=>!option.disabled&&index!==select.selectedIndex&&(${JSON.stringify(label)}!=='本次任务的模型'||option.textContent.replace(/^★ /u,'')!==${JSON.stringify(excludeModel)})):${JSON.stringify(choice)}==='first'?options.findIndex(option=>!option.disabled&&option.value!=='off'):options.findIndex(option=>option.textContent===${JSON.stringify(choice)}||option.value===${JSON.stringify(choice)});})()`);
+    const index = await renderer.evaluate(`(() => {const select=document.querySelector(${JSON.stringify(select)}),options=Array.from(select.options),plain=(option)=>option.textContent.replace(/^★ /u,'');
+      return ${JSON.stringify(choice)}==='next'?options.findIndex((option,index)=>!option.disabled&&index!==select.selectedIndex&&(${JSON.stringify(label)}!=='本次任务的模型'||plain(option)!==${JSON.stringify(excludeModel)})):${JSON.stringify(choice)}==='first'?options.findIndex(option=>!option.disabled&&option.value!=='off'):options.findIndex(option=>plain(option)===${JSON.stringify(choice)}||option.value===${JSON.stringify(choice)});})()`);
     if (index < 0) throw new Error(`${name}-choice-unavailable/${label}`);
     await press(renderer, waitFor, `${select} + .ui-select-trigger`, `${name}-${label}-select`);
     await press(renderer, waitFor, `${select} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-${label}-option`);
@@ -111,8 +137,16 @@ export async function chooseDispatch(renderer, waitFor, selector, name, { model 
   if (reset) await press(renderer, waitFor, `${selector} .dispatch-chooser-panel > button`, `${name}-reset`);
   else {
     await pick('本次任务的模型', model);
-    if (await renderer.evaluate(`!document.querySelector(${root}).querySelector('select[aria-label="本次任务的思考强度"]').closest('label').hidden`)) await pick('本次任务的思考强度', effort);
+    const levels = await renderer.evaluate(`Array.from(document.querySelector(${root}).querySelector('select[aria-label="本次任务的思考强度"]').options).filter(option=>option.value!=='off').length`);
+    if (effort !== 'first' || levels > 0) await pick('本次任务的思考强度', effort);
   }
+  await waitFor(renderer, `(() => {const panel=document.querySelector(${root})?.querySelector('.dispatch-chooser-panel');if(!panel)return false;
+    const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, `${name}-panel-settled`);
+  const facts = await dispatchEffortFacts(renderer, selector);
+  console.log(`DISPATCH_EFFORT/${name}/${JSON.stringify(facts === null ? null : { values: facts.values, selected: facts.selected, state: facts.state, noteKind: facts.noteKind, noteInside: facts.noteInside, triggerInside: facts.triggerInside, window: facts.window })}`);
+  if (facts === null || facts.values[0] !== 'off' || !facts.labels[0].startsWith(EFFORT_WORDS.off) || facts.values.includes('__other') || facts.typed || facts.triggerInside !== true ||
+      !facts.values.includes(facts.selected) || (facts.values.length === 1 && (facts.note === '' || facts.noteInside !== true))) throw new Error(`${name}-effort-list`);
+  if (seen !== null) await seen(facts);
   const label = await renderer.evaluate(`document.querySelector(${root}).querySelector('summary').textContent`);
   await press(renderer, waitFor, `${selector} > summary`, `${name}-close`);
   return label;
