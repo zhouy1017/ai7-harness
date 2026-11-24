@@ -11,7 +11,10 @@ import { randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
+import { isRecord } from './analysis/canonical.js';
 import {
+  DISCOVERED_EFFORT_LEVELS,
+  DISCOVERED_THINKING_MODES,
   MODEL_SERVICE_CONNECTION_IDS,
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTES,
@@ -26,6 +29,9 @@ import {
   modelServiceRuntimeBinding,
   modelTierOf,
   validModelServiceModelId,
+  type DiscoveredEffortLevel,
+  type DiscoveredModel,
+  type DiscoveredModelReasoningEvidence,
   type ModelConnectionTestStatus,
   type LegacyModelRoleId,
   type ModelCredentialOperationState,
@@ -404,9 +410,31 @@ export function modelServiceBinding(host: ModelSearchSettingsHost, route: ModelS
   return { ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel: label, approvedFallbackChain: [] };
 }
 
-export function getModelServiceModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId): import('../shared/protocol.js').DiscoveredModel[] {
-  const row = host.authority.prepare('SELECT cached_models, model_id, fast_model_id FROM model_service_connections WHERE connection_id = ?').get(MODEL_SERVICE_CONNECTION_IDS[route]) as SqlRow | undefined;
-  const cached = row === undefined ? [] : JSON.parse(asString(row.cached_models)) as import('../shared/protocol.js').DiscoveredModel[];
+function isCachedReasoningEvidence(value: unknown): value is DiscoveredModelReasoningEvidence {
+  if (!isRecord(value) || value.source !== 'provider-model-list' || typeof value.observedAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.observedAt)) || (value.completeness !== 'complete' && value.completeness !== 'partial')) return false;
+  const isLevelList = (levels: unknown) => levels === undefined ||
+    Array.isArray(levels) && levels.every((level) => DISCOVERED_EFFORT_LEVELS.includes(level as DiscoveredEffortLevel));
+  const isFlag = (flag: unknown) => flag === undefined || typeof flag === 'boolean';
+  const { effort, thinking } = value;
+  return (effort === undefined || isRecord(effort) && isFlag(effort.supported) &&
+    isLevelList(effort.levels) && isLevelList(effort.unsupportedLevels)) &&
+    (thinking === undefined || isRecord(thinking) && isFlag(thinking.supported) &&
+      (thinking.modes === undefined || isRecord(thinking.modes) && Object.entries(thinking.modes).every(([mode, flag]) =>
+        DISCOVERED_THINKING_MODES.some((known) => known === mode) && typeof flag === 'boolean')));
+}
+
+export function getModelServiceModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId): DiscoveredModel[] {
+  const row = host.authority.prepare('SELECT cached_models, model_id, fast_model_id, credential_operation_state, credential_updated_at FROM model_service_connections WHERE connection_id = ?')
+    .get(MODEL_SERVICE_CONNECTION_IDS[route]) as SqlRow | undefined;
+  const raw: unknown = row === undefined ? [] : JSON.parse(asString(row.cached_models));
+  const cached = Array.isArray(raw) ? raw.flatMap((entry: unknown): DiscoveredModel[] => {
+    if (!isRecord(entry) || typeof entry.modelId !== 'string' || !validModelServiceModelId(entry.modelId) || typeof entry.modelLabel !== 'string') return [];
+    const { modelId, modelLabel, reasoningEvidence } = entry;
+    if (row?.credential_operation_state === 'ready' && entry.credentialUpdatedAt === row.credential_updated_at &&
+      isCachedReasoningEvidence(reasoningEvidence)) return [{ modelId, modelLabel, reasoningEvidence }];
+    return [{ modelId, modelLabel }];
+  }) : [];
   const models = cached.length > 0 ? cached : modelServiceModels(route).map(({ modelId, modelLabel }) => ({ modelId, modelLabel }));
   if (row !== undefined) for (const modelId of [asString(row.model_id), asString(row.fast_model_id)]) {
     if (modelId && !models.some((model) => model.modelId === modelId)) models.push({ modelId, modelLabel: modelId });
@@ -414,10 +442,14 @@ export function getModelServiceModels(host: ModelSearchSettingsHost, route: Mode
   return models;
 }
 
-export function cacheModelServiceModels(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, models: readonly import('../shared/protocol.js').DiscoveredModel[]): void {
+export function cacheModelServiceModels(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, models: readonly DiscoveredModel[]): void {
   requireStore(models.every((model) => validModelServiceModelId(model.modelId) && typeof model.modelLabel === 'string' && model.modelLabel.length <= 200), 'MODEL_CATALOGUE_INVALID', '模型列表无效。');
+  const entries = models.map(({ modelId, modelLabel, reasoningEvidence }) => ({
+    modelId, modelLabel,
+    ...(isCachedReasoningEvidence(reasoningEvidence) ? { reasoningEvidence, credentialUpdatedAt: connection.credentialUpdatedAt } : {}),
+  }));
   host.authority.prepare('UPDATE model_service_connections SET cached_models = ? WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = ?')
-    .run(JSON.stringify(models.map(({ modelId, modelLabel }) => ({ modelId, modelLabel }))), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt, 'ready');
+    .run(JSON.stringify(entries), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt, 'ready');
 }
 
 export function recordModelConnectionTest(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, result: ModelConnectionTestStatus): void {
