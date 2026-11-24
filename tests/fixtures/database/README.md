@@ -14,6 +14,8 @@ Since the storage baseline (#1634), a 0.7.1 store is below the oldest version th
 - `tests/service/baseline-open.test.ts` unpacks it into an Agent Data Root and expects the open to refuse it with its files unchanged.
 - `tests/service/store-inventory.test.ts` counts it without opening it.
 
-Its earlier compatibility cases — the settled report verified against its stored shape, and the paused Run resumed without synthesis — move to the upgrade tool (R5-6) and the 0.8.0 acceptance (R5-7), on real 0.7.2-or-later stores built from `SampleBooks/`. The package has no pinned file fingerprint.
+Its earlier compatibility cases — the settled report verified against its stored shape, and the paused Run resumed without synthesis — move to the upgrade tool (R5-6) and the 0.7.9 acceptance (R5-7), on real 0.7.2-or-later stores built from `SampleBooks/`. The package has no pinned file fingerprint.
+
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
 
 To deliberately regenerate it with the historical sources, set `AI7_REGENERATE_REVIEW_071_FIXTURE=1` and run `node tools/generate-review-071-compatibility.mjs` from the checkout root. The generator bundles that commit's source through Git and uses the captured ordinary transport with authored SampleBook answers; it never calls a provider.

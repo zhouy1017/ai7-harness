@@ -136,8 +136,8 @@ function testRestore(store: EditorialStore, { book, milestone }: Library, before
   expect(manuscript(store, book.manuscriptId, book.branchId)).toBe(before.main);
 }
 
-async function assertOldUnchanged(root: string, original: string) {
-  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'));
+async function assertOldUnchanged(root: string, original: string, softwareVersion: string) {
+  const kept = (await readdir(root)).find(name => name.startsWith(`store-before-${softwareVersion}-`));
   const path = kept === undefined ? database(root) : join(root, kept, 'ai7.sqlite');
   expect(await bytesDigest(path)).toBe(original);
 }
@@ -145,27 +145,27 @@ async function assertOldUnchanged(root: string, original: string) {
 const forward = ['backup', 'convert', 'verify', 'save-old', 'save-old-renamed', 'publish', 'publish-renamed', 'record'] as const;
 const back = ['restore', 'save-new', 'save-new-renamed', 'publish-old', 'publish-old-renamed'] as const;
 
-async function crashAndResume(run: Awaited<ReturnType<typeof buildMaintenance>>, root: string, original: string, stages: readonly string[],
+async function crashAndResume({ invoke: run, softwareVersion }: Awaited<ReturnType<typeof buildMaintenance>>, root: string, original: string, stages: readonly string[],
   action: 'upgrade' | 'rollback') {
   for (const [index, stage] of stages.entries()) {
     expect(await run(index === 0 ? action : 'resume', root, stage)).toEqual({ stopped: stage });
-    await assertOldUnchanged(root, original);
+    await assertOldUnchanged(root, original, softwareVersion);
   }
   expect(await run('resume', root)).toMatchObject({ ok: true, restored: action === 'rollback' });
 }
 
-async function rehearseRecovery(run: Awaited<ReturnType<typeof buildMaintenance>>, root: string, original: string,
+async function rehearseRecovery({ invoke: run, softwareVersion }: Awaited<ReturnType<typeof buildMaintenance>>, root: string, original: string,
   before: ReturnType<typeof inventory>, after: ReturnType<typeof inventory>) {
   const failed = root + '-refused';
   await cp(root, failed, { recursive: true });
   expect(await run('upgrade', failed, 'return-old')).toEqual({ stopped: 'return-old' });
-  await assertOldUnchanged(failed, original);
+  await assertOldUnchanged(failed, original, softwareVersion);
   expect(await run('resume', failed)).toMatchObject({ ok: true, restored: true });
   expect(inventory(failed)).toEqual(before);
   expect(await run('upgrade', failed)).toMatchObject({ ok: true, restored: false });
   expect(inventory(failed)).toEqual(after);
   expect(await run('rollback', failed, 'return-new')).toEqual({ stopped: 'return-new' });
-  await assertOldUnchanged(failed, original);
+  await assertOldUnchanged(failed, original, softwareVersion);
   expect(await run('resume', failed, 'return-new-renamed')).toEqual({ stopped: 'return-new-renamed' });
   expect(await run('resume', failed)).toMatchObject({ ok: true, restored: false });
   expect(inventory(failed)).toEqual(after);
@@ -214,8 +214,8 @@ it.each(releases)('preserves D7 business records written by released AI7 %s', as
     expect(storeRevisionOnDisk(database(roots.dataRoot))).toBe(116);
     const retry = join(roots.inputRoot, 'interrupted');
     if (version === '0.7.3') await cp(roots.dataRoot, retry, { recursive: true });
-    expect(await maintenance('preflight', roots.dataRoot)).toMatchObject({ ok: true });
-    expect(await maintenance('upgrade', roots.dataRoot)).toMatchObject({ ok: true, restored: false });
+    expect(await maintenance.invoke('preflight', roots.dataRoot)).toMatchObject({ ok: true });
+    expect(await maintenance.invoke('upgrade', roots.dataRoot)).toMatchObject({ ok: true, restored: false });
     expect(storeRevisionOnDisk(database(roots.dataRoot))).toBe(117);
     const after = inventory(roots.dataRoot);
     assertInventory(before, after);

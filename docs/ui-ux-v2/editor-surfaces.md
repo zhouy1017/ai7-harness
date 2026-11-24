@@ -81,7 +81,9 @@ Ctrl+K 搜索命令、按图书与工序发起任务、切换图书与最近完�
 
 「评估校准与预测在智能体学习能力没有验证的阶段还是应该默认提供一个入口方便用户检查。除此以外都按照推荐来。」「同意建议。但是把计划进行一个更改，即中间暂时不再加人工测试，只在所有工作完成后统一进行。另外把未安排但是已经设计的工作也排入」「按照你的建议修改issue和计划，并提供明确的code指南来准确指导agent编码」（主计划 [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) 第 1 节第 2–4 条）。
 
-据此：§10 定下三个名字（AI 改稿、AI 助手、待办汇总）、普通模式词表与普通模式的入口；设置 › 评估校准与预测 在普通模式可见，知识库有「本社词表」入口（R4，[#1543](https://github.com/zhouy1017/ai7-harness/issues/1543)）；质量与学习 › 学习回溯 整理后在普通模式开放，其中「待定」的材料可就地决定用途（0.7.4，[#1539](https://github.com/zhouy1017/ai7-harness/issues/1539)）；「历史与恢复」并入工作概览，稿件页右侧只留一栏（[#1521](https://github.com/zhouy1017/ai7-harness/issues/1521)、[#1542](https://github.com/zhouy1017/ai7-harness/issues/1542)）；导出菜单写明文件内容、提供只管这一次的「干净稿」（[#1530](https://github.com/zhouy1017/ai7-harness/issues/1530)）；事实核查的来源可「在浏览器中打开」，只限 http / https（0.7.4）。本节取代 2026-11-04 决定 12 对评估校准与预测、学习回溯的收纳，并为本社词表增加普通模式入口；其余收纳不变。[ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) 的 2026-11-17 修订记录同一决定。轮次之间不再安排人工测试，统一人工测试放在 0.8.0 之后（主计划 第 2 节）。
+据此：§10 定下三个名字（AI 改稿、AI 助手、待办汇总）、普通模式词表与普通模式的入口；设置 › 评估校准与预测 在普通模式可见，知识库有「本社词表」入口（R4，[#1543](https://github.com/zhouy1017/ai7-harness/issues/1543)）；质量与学习 › 学习回溯 整理后在普通模式开放，其中「待定」的材料可就地决定用途（0.7.4，[#1539](https://github.com/zhouy1017/ai7-harness/issues/1539)）；「历史与恢复」并入工作概览，稿件页右侧只留一栏（[#1521](https://github.com/zhouy1017/ai7-harness/issues/1521)、[#1542](https://github.com/zhouy1017/ai7-harness/issues/1542)）；导出菜单写明文件内容、提供只管这一次的「干净稿」（[#1530](https://github.com/zhouy1017/ai7-harness/issues/1530)）；事实核查的来源可「在浏览器中打开」，只限 http / https（0.7.4）。本节取代 2026-11-04 决定 12 对评估校准与预测、学习回溯的收纳，并为本社词表增加普通模式入口；其余收纳不变。[ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) 的 2026-11-17 修订记录同一决定。轮次之间不再安排人工测试。
+
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定。统一人工测试放在 0.7.9 交付之后（主计划第 2 节）。
 
 ## 配置选择记忆 — Owner #1279 / #1374
 

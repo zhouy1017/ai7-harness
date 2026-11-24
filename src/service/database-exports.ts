@@ -16,6 +16,7 @@ import {
   type DatabasePackageOrigin,
 } from '../shared/protocol.js';
 import { fixedArchiveTime } from '../shared/archive-time.js';
+import { isSoftwareVersion } from '../shared/build-identity.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { isManuscriptObjectKey } from './manuscript-format.js';
 import { isRecoveryObjectKey } from './recovery-objects.js';
@@ -67,7 +68,8 @@ export const DATABASE_PACKAGE_MANIFEST_MEMBER = 'manifest.json' as const;
 export const DATABASE_PACKAGE_EXCLUDED_ROOTS: ReadonlySet<string> = new Set(['store', EXPORT_STAGING_DIRECTORY, 'shell']);
 /** A retained store belongs to its upgrade, outside every later backup or replacement. */
 export function isUpgradeDirectory(name: string): boolean {
-  return name === 'store.upgrading' || /^store-(?:before|after)-0\.8\.0-\d{13}-[a-f0-9-]{36}$/.test(name);
+  const saved = /^store-(?:before|after)-(.+)-\d{13}-[a-f0-9-]{36}$/u.exec(name);
+  return name === 'store.upgrading' || isSoftwareVersion(saved?.[1]);
 }
 
 /** Device environment settings never migrate with editorial databases or backups. */

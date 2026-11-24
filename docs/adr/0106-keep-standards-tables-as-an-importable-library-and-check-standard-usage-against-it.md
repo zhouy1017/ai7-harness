@@ -185,7 +185,7 @@ The card shows the strength label first (国家规范（应改）, 辞书推荐�
 
 The library's relations are part of **revision 117**, R5's one new revision (ADR 0105 §4). They are not a later additive revision. Two reasons:
 - the R5 upgrade installs the pre-installed tables in the same verified switch;
-- 0.8.0 ships Data Version 2 once.
+- 0.7.9 ships Data Version 2 once.
 
 The relations, roughly:
 - the table (kind, name, origin pre-installed / imported, enabled, current version);
@@ -203,6 +203,8 @@ Versions are immutable while the table exists. Deletion is allowed (direction 3(
 - **Database export and replace-all import** carry them.
 
 ### 10 · Delivery
+
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
 
 Five slices join R5. The order is in the [development plan](../development/development-plan.md) R5 section:
 
