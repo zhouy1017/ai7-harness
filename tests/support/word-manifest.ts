@@ -14,9 +14,8 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // Service-integration suite (L2): a complete Word manifest of N tracked insertions, imported into one cloned empty Book through
 // the public review/commit path, retains every edit as a signal, a learning material, and (in 'suggestions' mode only) a mark.
 // The recipe — composed DOCX, compiled graph, independent expected manifest — does not depend on the mode, so it is built once
-// per size in each file; each case still imports it through its own mode. The cases are registered by the three
-// `word-manifest-import*.test.ts` files (#1621): the two 2001-edit cases are the longest in the service layer and run in a file
-// each, so neither sits on the critical path of the other or of the 201-edit cases.
+// per size in each file; each case still imports it through its own mode. Keep both 2001-edit cases in one worker so they
+// share the seed and recipe and their large Word graph proofs do not compete for CPU and memory during the full ladder.
 
 // What each case follows its import with. Both modes run the whole lifecycle at 201 edits (several pages of every list),
 // so 'accepted-baseline' proves zero marks and the complete manifest after reopen and after the selected-Book merge. At 2001

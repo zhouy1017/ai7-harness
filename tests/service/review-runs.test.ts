@@ -3334,12 +3334,17 @@ it('continues an ordinary launched review after its running ledger view is evict
     const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
       executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
     const driving = driver.drive(run.reviewRunId); await gated.reached;
+    // The bounded cache is keyed by Review Run. One other Book can supply all the entries needed to evict the held Run.
+    const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
+    await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
+    const evictingRuns = new Set<string>();
     for (let index = 0; index < 33; index += 1) {
-      const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
-      await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
       const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
-      session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
+      const reviewRunId = launched.projection.run!.reviewRunId;
+      session.store.inspectReviewWorkspace(other.bookId, reviewRunId);
+      evictingRuns.add(reviewRunId);
     }
+    expect(evictingRuns.size).toBe(33);
     const restored = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(restored.state).toBe('running'); expect(restored.modelLabel).toBe('account-future-model@high');
     const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
