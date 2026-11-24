@@ -46,13 +46,15 @@ export function createRightColumn(commentsOpenInitially: boolean): RightColumn {
 export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement): { destroy(): void } {
   const root = document.documentElement;
   const pixels = (value: string, rem: number): number => parseFloat(value) * (value.trim().endsWith('rem') ? rem : 1);
-  // The block the editor is on: the selection's paragraph while it is in view, else the one across the middle of the text.
+  // The block the editor is on: the selection's paragraph while it is in view, else the one across the middle of the text — or,
+  // when the middle falls in the space between two paragraphs, the one just below it (the last one at the end of the text).
   const readingBlock = (): HTMLElement | null => {
     const view = editor.getBoundingClientRect(), middle = (view.top + view.bottom) / 2;
     const focus = document.getSelection?.()?.focusNode ?? null;
     const selected = (focus?.nodeType === 1 ? focus as Element : focus?.parentElement)?.closest<HTMLElement>('[data-block-id]');
     if (selected && editor.contains(selected)) { const r = selected.getBoundingClientRect(); if (r.bottom > view.top && r.top < view.bottom) return selected; }
-    return [...editor.querySelectorAll<HTMLElement>('[data-block-id]')].find((block) => { const r = block.getBoundingClientRect(); return r.top <= middle && r.bottom >= middle; }) ?? null;
+    const blocks = [...editor.querySelectorAll<HTMLElement>('[data-block-id]')];
+    return blocks.find((block) => block.getBoundingClientRect().bottom >= middle) ?? blocks.at(-1) ?? null;
   };
   // A new state changes the sidebar's form and the text's gutters, so the text reflows; the browser keeps no scroll anchor across a
   // width or padding change of the text's own ancestors. Put the reading block back where it was once the shell has applied the form

@@ -67,3 +67,11 @@ it('keeps the reading block where it was when a new state reflows the text', asy
   expect(view.editor.scrollTop).toBe(1120);
   view.destroy();
 });
+
+it('keeps the reading place when the middle of the text falls between two paragraphs', async () => {
+  // No paragraph crosses the middle (300): the one just below it holds the place, or the text would jump by the whole reflow.
+  const view = measuredColumn(false, { top: (state) => state === 'none' ? 430 : 310 });
+  await Promise.resolve();
+  expect(view.editor.scrollTop).toBe(1120);
+  view.destroy();
+});
