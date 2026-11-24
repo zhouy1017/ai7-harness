@@ -20,6 +20,7 @@ import { writingRequestDigest, writingSynthesisRequestDigest } from '../../src/s
 import { reviewCategoryRequestDigest } from '../../src/service/review/review-category-contract.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, dialogueRequestDigest } from '../../src/service/dialogue/contract.js';
 import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
+import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { LocalFixturePolicyCatalog, loadModelFixture, parseModelFixture } from '../../src/service/provider/model-fixture.js';
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { AGENT_WORKSPACE_COMPOSITION_OPTIONS } from '../../src/service/agent-workspace/capabilities.js';
@@ -62,6 +63,9 @@ it('loads the retained SampleBook fixture after byte changes without a frozen ma
 });
 
 // The protected cache is never consulted. These files contain synthetic request/response stand-ins only.
+import { GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/global-agent-session.js';
+import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { RECORDING_GLOBAL_QUESTION } from '../../src/service/dialogue/recording-scope.js';
 // @ts-expect-error Plain Node ESM tool has no TypeScript declarations.
 const tool = await import('../../tools/generate-model-fixture.mjs') as {
   generateModelFixture(request: { selector: string; cacheRoot: string; identity: string; description: string; out: string }): Promise<Record<string, unknown>>;
@@ -86,7 +90,7 @@ describe('converted capture proof and replay', () => {
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
   async function synthetic(message: string | ReadonlyArray<{ role: string; content: string }>, contract = BASELINE_PROMPT_CONTRACT_DIGEST,
-    content = '{"note":"独立合成响应。"}', wire?: { namespace: typeof NAMESPACE; request: unknown; response: unknown }) {
+    content = '{"note":"独立合成响应。"}', wire?: { namespace: typeof NAMESPACE; request: unknown; response: unknown; scopedStep?: number }) {
     const namespace = wire?.namespace ?? NAMESPACE;
     const requestBody = wire ? canonicalJson(wire.request) : typeof message === 'string' ? body(message) : canonicalJson({ model: MODEL, messages: message });
     const lastUser = typeof message === 'string' ? message : message.filter((turn) => turn.role === 'user').at(-1)!.content;
@@ -94,12 +98,16 @@ describe('converted capture proof and replay', () => {
     const cacheKey = tool.namespacedCacheKey(namespace, requestDigest);
     const response = wire?.response ?? { choices: [{ message: { content } }], usage: { prompt_tokens: 20, completion_tokens: 5 } };
     const usage = { inputTokens: 20, outputTokens: 5 };
-    const validation = { family: 'capture-proof', case: 'synthetic', step: 'contract' };
-    const taskPromptContractDigest = lastUser.startsWith('AI7 编辑对话') ? contract : BASELINE_PROMPT_CONTRACT_DIGEST;
+    const scoped = wire?.scopedStep;
+    const purpose = scoped === undefined ? undefined : 'global-agent-scoped-dialogue';
+    const itemId = purpose === undefined ? ITEM : `S17c/${purpose}/1`;
+    const validation = purpose === undefined ? { family: 'capture-proof', case: 'synthetic', step: 'contract' }
+      : { family: `four-provider-recording-${namespace.route}`, case: purpose, step: `${purpose}/ask${scoped === 0 ? '' : `/tool-turn-${scoped}`}` };
+    const taskPromptContractDigest = purpose !== undefined || lastUser.startsWith('AI7 编辑对话') ? contract : BASELINE_PROMPT_CONTRACT_DIGEST;
     const generation = tool.evidenceGeneration(namespace, contract, taskPromptContractDigest);
-    const entry = { ...namespace, itemId: ITEM, requestBody, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract,
+    const entry = { ...namespace, itemId, requestBody, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract,
       taskPromptContractDigest, validation, transmittedAt: AT, status: 200, response, usage, responseDigest: sha256Hex(JSON.stringify(response)) };
-    const line = { ...namespace, itemId: ITEM, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract, taskPromptContractDigest,
+    const line = { ...namespace, itemId, ...(purpose === undefined ? {} : { purpose }), requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract, taskPromptContractDigest,
       validation: { ...validation, decision: 'first-capture', evidence: [], delta: null }, outcome: 'transmitted', status: 200, usage, recordedAt: AT };
     await mkdir(join(root, 'entries'), { recursive: true });
     const path = join(root, 'entries', `${cacheKey}.json`);
@@ -108,7 +116,74 @@ describe('converted capture proof and replay', () => {
     return { entry, line, path };
   }
 
-  const generate = () => tool.generateModelFixture({ selector: ITEM, cacheRoot: root, identity: 'converted', description: '合成证据', out: join(root, 'out.json') });
+  const generate = (selector = ITEM) => tool.generateModelFixture({ selector, cacheRoot: root, identity: 'converted', description: '合成证据', out: join(root, 'out.json') });
+
+  it.each(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content'] as const)('converts and replays a scoped continuation from %s', async shape => {
+    const contract = GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST;
+    const system = GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt;
+    const id = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
+    const message = (seed: number, title = 'sample1') => buildDialogueMessage({ kind: 'ask', selection: '', question: RECORDING_GLOBAL_QUESTION,
+      kept: null, globalSources: [], globalScope: { books: [{ bookId: id(seed), manuscriptId: id(seed + 1), revisionId: id(seed + 2), title }], procedures: [] } });
+    const candidate = (symbol: string) => symbol.repeat(64);
+    const query = '{"query":"章节"}';
+    const result = (symbol: string) => canonicalJson({ candidateId: candidate(symbol), preview: TEXT });
+    const route = ({ 'openai-chat-completions': 'opencode-go', 'openai-responses': 'openai-platform', 'anthropic-messages': 'anthropic-claude', 'google-generate-content': 'google-gemini' } as const)[shape];
+    const endpoint = shape === 'google-generate-content' ? `https://synthetic.invalid/v1beta/models/${MODEL}:generateContent` : 'https://synthetic.invalid/v1/turn';
+    const selector = 'S17c/global-agent-scoped-dialogue/1';
+    async function capture(text: string, scope = message(1), step = 1) {
+      const user = { role: 'user', content: scope };
+      const usage = { input_tokens: 20, output_tokens: 5 };
+      const wire = shape === 'openai-chat-completions' ? { request: { model: MODEL, messages: [{ role: 'system', content: system }, user,
+        { role: 'assistant', content: null, tool_calls: [{ id: 'send-1', type: 'function', function: { name: 'retrieve', arguments: query } }] },
+        { role: 'tool', tool_call_id: 'send-1', content: result('b') }] }, response: { choices: [{ message: { content: text } }], usage: { prompt_tokens: 20, completion_tokens: 5 } } }
+        : shape === 'openai-responses' ? { request: { model: MODEL, instructions: system, input: [user, { type: 'function_call', call_id: 'send-1', name: 'retrieve', arguments: query },
+          { type: 'function_call_output', call_id: 'send-1', output: result('b') }] }, response: { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }], usage } }
+        : shape === 'anthropic-messages' ? { request: { model: MODEL, system, messages: [user, { role: 'assistant', content: [{ type: 'tool_use', id: 'send-1', name: 'retrieve', input: JSON.parse(query) }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'send-1', content: result('b') }] }] }, response: { content: [{ type: 'text', text }], usage } }
+        : { request: { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: scope }] },
+          { role: 'model', parts: [{ functionCall: { id: 'send-1', name: 'retrieve', args: JSON.parse(query) } }] },
+          { role: 'user', parts: [{ functionResponse: { id: 'send-1', name: 'retrieve', response: { output: result('b') } } }] }] },
+          response: { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } } };
+      return synthetic(scope, contract, '', { ...wire, namespace: { route, endpoint, requestShape: shape, model: MODEL }, scopedStep: step });
+    }
+    await capture(`章节已核对。[retrieval:${candidate('b')}]`);
+    const converted = await generate(selector);
+    expect(parseModelFixture(converted).entries[0]).toMatchObject({ unitOrdinal: 0,
+      capture: { subject: 'scoped-global-dialogue', requestShape: shape, validation: { step: 'global-agent-scoped-dialogue/ask/tool-turn-1' } },
+      response: { kind: 'unit-result', text: '章节已核对。[retrieval:{{tool-id:4}}]' } });
+    await writeFile(join(root, 'converted.json'), JSON.stringify(converted));
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'converted'), contract, {
+      QUOTA_EXCEEDED_CODE: 'QUOTA', INVALID_CREDENTIAL_CODE: 'AUTH', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT',
+    });
+    const options = { provider: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, messages: [
+      { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: message(5) }] },
+      { role: 'assistant', source: { kind: 'model' }, content: [{ type: 'tool-call', id: 'replay-1', name: 'retrieve', arguments: query }] },
+      { role: 'user', source: { kind: 'tool', callId: 'replay-1' }, content: [{ type: 'tool-result', toolCallId: 'replay-1', content: [{ type: 'text', text: result('c') }], isError: false }] },
+    ] } as Parameters<typeof adapter.stream>[0];
+    const events: StreamChunk[] = [];
+    for await (const event of adapter.stream(options)) events.push(event);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'text-delta', text: `章节已核对。[retrieval:${candidate('c')}]` }));
+    if (shape === 'openai-chat-completions') {
+      const retry = await capture('合成答案。');
+      const toolAnswer = { choices: [{ message: { content: null, tool_calls: [{ type: 'function', id: 'second-call',
+        function: { name: 'exact_fetch', arguments: canonicalJson({ candidateId: candidate('b') }) } }] } }], usage: { prompt_tokens: 20, completion_tokens: 5 } };
+      await writeFile(retry.path, JSON.stringify({ ...retry.entry, response: toolAnswer, responseDigest: sha256Hex(JSON.stringify(toolAnswer)) }));
+      await writeFile(join(root, 'converted.json'), JSON.stringify(await generate(selector)));
+      const toolAdapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'converted'), contract, {
+        QUOTA_EXCEEDED_CODE: 'QUOTA', INVALID_CREDENTIAL_CODE: 'AUTH', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT',
+      });
+      const toolEvents: StreamChunk[] = [];
+      for await (const event of toolAdapter.stream(options)) toolEvents.push(event);
+      expect(toolEvents).toContainEqual(expect.objectContaining({ type: 'tool-call-delta', name: 'exact_fetch',
+        argumentsDelta: canonicalJson({ candidateId: candidate('c') }) }));
+    }
+    await capture(TEXT);
+    await expect(generate(selector)).rejects.toThrow(/FIXTURE_GEN\/manuscript-echo/u);
+    await capture('独立答案。', message(1, '其他稿件'));
+    await expect(generate(selector)).rejects.toThrow(/FIXTURE_GEN\/contract-mismatch/u);
+    await capture('独立答案。', message(1), 0);
+    await expect(generate(selector)).rejects.toThrow(/FIXTURE_GEN\/capture-unproven/u);
+  });
 
   it.each(['openai-responses', 'anthropic-messages', 'google-generate-content'])('converts a synthetic %s capture and rejects echoed source', async requestShape => {
     const message = `分析单元 1/1 · 单元摘要 ${D}${blocks}`;

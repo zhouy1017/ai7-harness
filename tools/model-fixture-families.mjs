@@ -82,7 +82,7 @@ export function captureMessages(body, shape) {
     const parts = list(item.parts);
     if (item.role === 'model') {
       const answer = geminiAnswer(parts, () => 'fixture-gemini-' + ++ordinal);
-      pending = answer.tool_calls ?? [];
+      pending = [...(answer.tool_calls ?? [])];
       messages.push(answer);
     } else if (item.role === 'user' && parts.length > 0 && parts.every(part => record(part.functionResponse))) {
       messages.push(...parts.map(({ functionResponse: part }) => {

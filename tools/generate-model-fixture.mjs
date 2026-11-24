@@ -296,9 +296,10 @@ function tiesInContentOrder(text) {
 }
 
 /** The exchange with every per-import identity renamed by first appearance: the unit's own blocks `{{block:N}}`, the rest `{{tool-id:K}}`. */
-export function normalizeToolExchange(rounds, ownBlockIds) {
+export function normalizeToolExchange(rounds, ownBlockIds, seed = []) {
   const names = new Map(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
-  const foreign = [];
+  const foreign = [...seed];
+  foreign.forEach((id, index) => names.set(id, `{{tool-id:${index + 1}}}`));
   const rename = (text) => text.replace(IDENTITY_TOKEN, (identity) => {
     let name = names.get(identity);
     if (name === undefined) { foreign.push(identity); name = `{{tool-id:${foreign.length}}}`; names.set(identity, name); }
@@ -419,6 +420,8 @@ async function loadSample1Owners() {
         "export { isSyntheticRecordingInput } from './src/service/fast-role/recording-inputs.ts';",
         "export { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST } from './src/service/learning/curation.ts';",
         "export { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST } from './src/service/dialogue/global-agent-session.ts';",
+        "export { scopedDialogueRecordingKey } from './src/service/dialogue/recording-scope.ts';",
+        "export { GLOBAL_AGENT_SCOPED_TOOL_NAMES } from './src/service/provider/local-tools.ts';",
         "export { SCOPED_EDIT_PROMPT_CONTRACT, SCOPED_EDIT_PROMPT_CONTRACT_DIGEST, parseScopedEditMessageHeader, scopedEditRequestDigest } from './src/service/fast-role/scoped-edit-contract.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
       bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
@@ -461,6 +464,41 @@ async function verifySample1FastRoleExcerpt(parsed) {
   }
 }
 
+async function verifyScopedSample1(request, selection, parsed) {
+  const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', 'scoped-dialogue'); };
+  let database;
+  try {
+    if (typeof request.sample1Store !== 'string' || typeof request.sample1Task !== 'string') fail();
+    const relation = relative(TOOL_ROOT, resolve(request.sample1Store));
+    if (!relation.startsWith('..') && !isAbsolute(relation)) fail();
+    const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
+    if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) fail();
+    const { DatabaseSync } = await import('node:sqlite');
+    database = new DatabaseSync(request.sample1Store, { readOnly: true });
+    const { book, question } = parsed.scoped;
+    const original = database.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m USING(manuscript_id)
+      JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
+      WHERE m.book_id = ? AND m.role = 'primary' AND mr.manuscript_id = ? AND mr.revision_id = ? AND mr.parent_revision_id IS NULL
+      AND mr.ordinal = 1 AND sv.source_digest = ?`).get(book.bookId, book.manuscriptId, book.revisionId, SAMPLE1_SOURCE_SHA256);
+    const dialogue = database.prepare(`SELECT d.canonical_json, d.sha256 FROM dialogue_tasks d
+      JOIN dialogue_attempts a USING(dialogue_id) JOIN dialogue_execution_bindings b USING(attempt_id)
+      WHERE d.dialogue_id = ? AND d.book_id IS NULL AND d.question_sha256 = ? AND a.kind = 'ask'
+      AND b.operational_scope = 'developer-live' AND b.prompt_contract_sha256 = ? AND b.route = ? AND b.model = ?`)
+      .get(request.sample1Task, sha256Hex(question), selection.promptContractDigest, selection.captured.route, selection.model);
+    if (!original || !dialogue || sha256Hex(dialogue.canonical_json) !== dialogue.sha256) fail();
+    const task = JSON.parse(dialogue.canonical_json);
+    if (task.operationalScope !== 'developer-live' || task.questionSha256 !== sha256Hex(question) || task.sources?.length !== 0) fail();
+    const owners = await loadSample1Owners();
+    const blocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push(block.text), { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    return toolResultsAreSample1(parsed.toolResultTexts ?? [], blocks);
+  } catch {
+    fail();
+  } finally {
+    database?.close();
+  }
+}
+
 /**
  * ADR 0079 §5: only the exact admitted carrier is exempt. Its frozen product manifest is checked
  * against the existing DOCX extractor; the entire selected stage message is rebuilt from that
@@ -470,6 +508,7 @@ async function verifySample1FastRoleExcerpt(parsed) {
 export async function verifySample1Capture(request, selection, parsed) {
   if (FAST_ROLE_SUBJECTS.includes(parsed.subject)) return verifySample1FastRoleExcerpt(parsed);
   if (request.sample1Store === undefined && request.sample1Task === undefined) return false;
+  if (parsed.subject === 'scoped-global-dialogue') return verifyScopedSample1(request, selection, parsed);
   let step = 'source';
   const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', step); };
   let database;
@@ -1036,25 +1075,29 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   const lastUser = body.messages.findLastIndex((message) => message !== null && typeof message === 'object' && message.role === 'user');
   const rounds = lastUser === -1 ? [] : parseToolExchange(body.messages.slice(lastUser + 1));
   const base = parseUnitRequest(rounds.length === 0 ? body : { ...body, messages: body.messages.slice(0, lastUser + 1) }, promptContractDigest, structuredStageContractDigest);
-  if (rounds.length === 0) return base;
-  refuse(base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
+  const scoped = base.subject === 'scoped-global-dialogue';
+  if (rounds.length === 0) return { ...base, toolCount: 0 };
+  refuse(scoped ? rounds.every(round => round.calls.every(call => base.allowedTools.includes(call.name))) :
+    base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
     'FIXTURE_GEN/request-shape-unsupported', '工具回合只支持分析单元。');
   // A placeholder-shaped text in the exchange would hash like an identity renamed in its place, and replay could not tell them apart.
   refuse(rounds.every((round) => round.calls.every((call) => call.name.match(PLACEHOLDER_SHAPE) === null && call.arguments.match(PLACEHOLDER_SHAPE) === null) &&
     round.results.every((result) => result.text.match(PLACEHOLDER_SHAPE) === null)),
   'FIXTURE_GEN/identity-unmapped', '工具交换已含有占位符形式的文字，回放无法与捕获区分。');
-  const normalized = normalizeToolExchange(rounds, base.identities.map(({ identity }) => identity));
+  const normalized = normalizeToolExchange(rounds, scoped ? [] : base.identities.map(({ identity }) => identity), base.scoped?.identities);
   const resultTexts = rounds.flatMap((round) => round.results.map((result) => result.text));
   const assistantTexts = body.messages.slice(lastUser + 1).filter(message => message.role === 'assistant')
     .flatMap(message => chatMessageText(message.content) ?? []);
   return {
     ...base,
+    toolCount: resultTexts.length,
     toolResultTexts: resultTexts,
     requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
     contentDigest: null,
     // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
-    carriedBlockTexts: [...base.carriedBlockTexts, ...assistantTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves)],
-    identities: [...base.identities, ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
+    carriedBlockTexts: [...base.carriedBlockTexts, ...assistantTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves),
+      ...(scoped ? rounds.flatMap(round => round.calls.flatMap(call => jsonStringLeaves(call.arguments))) : [])],
+    identities: [...(scoped ? [] : base.identities), ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
   };
 }
 
@@ -1176,10 +1219,13 @@ function parseUnitRequest(body, promptContractDigest, structuredStageContractDig
     refuse(digest === promptContractDigest && systemMessages.length === 1 && systemMessages[0] === systemPrompt &&
       carriedMessages.length === 1 && requireMessage(unitMessage),
     'FIXTURE_GEN/contract-mismatch', '录制任务与固定契约不一致。');
+    const scoped = structuredStageContractDigest.scopedOf?.(unitMessage);
     return { subject, stageContractDigest: digest, unitMessage, header: null, ownBlockTexts: [],
       carriedBlockTexts: [...carriedBlockTexts, ...(carriedTextOf?.(unitMessage) ?? [])],
-      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null, identities: [],
-      requestDigest: requestDigestOf?.(unitMessage) ?? sha256Hex(canonicalJson({ contract: digest, message: unitMessage })) };
+      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
+      identities: scoped?.identities.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity })) ?? [],
+      ...(scoped === undefined ? {} : { scoped, allowedTools: structuredStageContractDigest.allowedTools }),
+      requestDigest: scoped?.digest ?? requestDigestOf?.(unitMessage) ?? sha256Hex(canonicalJson({ contract: digest, message: unitMessage })) };
   }
   if (structuredStageContractDigest !== undefined && promptContractDigest === structuredStageContractDigest) {
     return { subject: 'task-synthesis', stageContractDigest: structuredStageContractDigest, unitMessage, header: null,
@@ -1458,6 +1504,7 @@ function mapToolCalls(message, usage, request) {
   const calls = message.tool_calls.map((call) => {
     refuse(call !== null && typeof call === 'object' && call.type === 'function' && call.function !== null && typeof call.function === 'object' &&
       /^[a-z][a-z_]{0,63}$/u.test(call.function.name) && typeof call.function.arguments === 'string', 'FIXTURE_GEN/response-shape-unsupported', '工具调用的形态无效。');
+    refuse(request.allowedTools === undefined || request.allowedTools.includes(call.function.name), 'FIXTURE_GEN/request-shape-unsupported', '工具超出录制范围。');
     let parsed;
     try { parsed = JSON.parse(call.function.arguments); } catch { parsed = null; }
     refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed), 'FIXTURE_GEN/response-shape-unsupported', '工具调用的参数不是 JSON 对象。');
@@ -1642,12 +1689,14 @@ function recordingTaskContract(owners, selection) {
       kind === 'learning-sample-tidying' ? message.startsWith('[{') : owners.isSyntheticRecordingInput(kind, message) };
   if (kind === 'learning-curation') return { digest: owners.CURATION_CONTRACT_DIGEST, systemPrompt: owners.CURATION_CONTRACT.systemPrompt,
     subject: 'recording-task', requireMessage: message => message.includes('"schema":"' + owners.CURATION_CONTRACT.schema + '"') };
-  const scoped = kind === 'global-agent-scoped-dialogue';
-  if (scoped || kind === 'global-agent-dialogue') {
-    const contract = scoped ? owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT : owners.GLOBAL_AGENT_PROMPT_CONTRACT;
-    const digest = scoped ? owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : owners.GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST;
-    return { digest, systemPrompt: contract.systemPrompt, subject: 'recording-task', requireMessage: message => message.startsWith('AI7 全域对话\n') };
+  if (kind === 'global-agent-scoped-dialogue' && selection.captured.validation.case === kind) {
+    const digest = owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST;
+    const scopedOf = message => owners.scopedDialogueRecordingKey(message, digest);
+    return { digest, systemPrompt: owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt, subject: 'scoped-global-dialogue',
+      scopedOf, requireMessage: message => scopedOf(message) !== null, allowedTools: owners.GLOBAL_AGENT_SCOPED_TOOL_NAMES };
   }
+  if (kind === 'global-agent-dialogue') return { digest: owners.GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST,
+    systemPrompt: owners.GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt, subject: 'recording-task', requireMessage: message => message.startsWith('AI7 全域对话\n') };
   return null;
 }
 
@@ -1675,6 +1724,11 @@ export async function generateModelFixture(request, now = new Date()) {
     parsed.exactParticipantsOnly = true;
   }
   requireStageContract(selection, parsed);
+  if (parsed.subject === 'scoped-global-dialogue') {
+    const step = 'global-agent-scoped-dialogue/ask' + (parsed.toolCount === 0 ? '' : `/tool-turn-${parsed.toolCount}`);
+    refuse(selection.cacheKey !== null && selection.captured.validation.step === step,
+      'FIXTURE_GEN/capture-unproven', '范围对话的工具结果数与录制步骤不一致。');
+  }
   // Keyed as the deterministic adapter of the wrapped Task asks it: under the Task's contract (Issue #812).
   if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest, undefined, shape);
   if (parsed.subject === 'task-synthesis') {

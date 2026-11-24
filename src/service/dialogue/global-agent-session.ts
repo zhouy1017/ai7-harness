@@ -9,6 +9,7 @@ import { RetrievalError, RetrievalIndex, type RetrievalSource } from '../retriev
 import { validSupervisionInput } from '../learning/supervision-directives.js';
 import { admittedFastRoleRoute, type AdmittedDialogueRoute } from './dialogue-route.js';
 import { buildDialogueMessage, parseDialogueMessage, type DialogueMessageInput } from './contract.js';
+import { RECORDING_GLOBAL_QUESTION } from './recording-scope.js';
 import { resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue-history.js';
 import type { DialogueLedger, QualifiedGlobalAttemptMetadata, StoredDialogueAttempt, StoredGlobalDialogueTask } from './dialogue-ledger.js';
 import { DialogueError, type DialogueTurnStart } from './dialogue-ledger.js';
@@ -301,7 +302,7 @@ export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner:
 function requireRecordingDialogue(store: GlobalAgentTurnStore, route: AdmittedDialogueRoute, message: DialogueMessageInput): void {
   if (route.operationalScope !== 'developer-live') return;
   const scope = message.globalScope;
-  if (message.question !== '请检查公开样书的章节结构。' || message.kept !== null || message.globalSources?.length !== 0 ||
+  if (message.question !== RECORDING_GLOBAL_QUESTION || message.kept !== null || message.globalSources?.length !== 0 ||
       (scope !== undefined && !store.globalAgentScopeCurrent(scope))) {
     throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '录制对话只接受固定问题和公开样书。');
   }
