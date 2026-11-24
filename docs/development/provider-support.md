@@ -220,6 +220,7 @@ Inert: 0 of 2 (no declared answer channel). Established:
 - `deepseek-v4-pro` · `toolCalling: function` — `vendor-documentation`, DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls, read 2026-09-11
 - every model · `webSearchTool: none` — `vendor-documentation`, DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com), read 2026-09-10
 - every model · context 1,000,000 — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
+- every model · reasoning control deepseek-thinking; suggestions low, high, max — https://api-docs.deepseek.com/guides/thinking_mode/, read 2026-11-14
 - `deepseek-v4-pro` · pre-114 selected-role effective effort high; retained during upgrade only
 - `deepseek-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
 - `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15

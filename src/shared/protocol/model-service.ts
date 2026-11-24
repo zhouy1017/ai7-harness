@@ -12,7 +12,21 @@ export type ModelServiceChannelId = (typeof MODEL_SERVICE_CHANNELS)[number];
 /** A production channel the editor saves a credential for and chooses a model on (Issues #811, #1044, #1225). */
 export type ModelServiceRouteId = ModelServiceChannelId;
 /** Account metadata only, never a response or credential. */
-export interface DiscoveredModel { modelId: string; modelLabel: string }
+export interface DiscoveredModel {
+  modelId: string;
+  modelLabel: string;
+  reasoningEvidence?: DiscoveredModelReasoningEvidence;
+}
+export const DISCOVERED_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const DISCOVERED_THINKING_MODES = ['adaptive', 'between_tools', 'enabled', 'disabled'] as const;
+export type DiscoveredEffortLevel = (typeof DISCOVERED_EFFORT_LEVELS)[number];
+export interface DiscoveredModelReasoningEvidence {
+  source: 'provider-model-list';
+  observedAt: string;
+  completeness: 'complete' | 'partial';
+  effort?: { supported?: boolean; levels?: readonly DiscoveredEffortLevel[]; unsupportedLevels?: readonly DiscoveredEffortLevel[] };
+  thinking?: { supported?: boolean; modes?: Partial<Record<(typeof DISCOVERED_THINKING_MODES)[number], boolean>> };
+}
 export type ModelDiscoveryFailureCode = 'MODEL_SERVICE_UNREACHABLE' | 'AI7_PROXY_UNREACHABLE' | 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' | 'MODEL_DISCOVERY_UNAVAILABLE' | 'MODEL_DISCOVERY_EMPTY' | 'MODEL_DISCOVERY_INVALID';
 export type ModelDiscoveryResult =
   | { status: 'success'; modelCount: number }

@@ -725,6 +725,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'function',
       webSearchTool: 'none',
     },
+    reasoning: {
+      control: 'deepseek-thinking',
+      efforts: ['low', 'high', 'max'],
+      source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+      readOn: '2026-11-14',
+    },
     pre114ReasoningEffort: 'high',
     evidence: {
       requestShape: EVIDENCE_4,
@@ -752,6 +758,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       usageAttribution: 'unknown',
       toolCalling: 'none',
       webSearchTool: 'none',
+    },
+    reasoning: {
+      control: 'deepseek-thinking',
+      efforts: ['low', 'high', 'max'],
+      source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+      readOn: '2026-11-14',
     },
     evidence: {
       requestShape: EVIDENCE_21,
