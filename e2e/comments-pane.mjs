@@ -160,8 +160,13 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
   try {
     for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
       at('comments-inline-'+action+'-'+form);
+      // The hosted Gate's desktop asks for reduced motion, so a column that opens or closes there lays the text out again in one
+      // step, with no browser scroll anchoring across an animation. The overlay form is that Gate's window: it takes that motion
+      // on every runner, and the column form keeps the runner's own.
+      await renderer.send('Emulation.setEmulatedMedia', { features: form==='overlay' ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [] });
       await seedCommentsPane(renderer,check,waitFor,size);
       await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===(${commentsCanDock}?'static':'absolute')`, 'comments-'+form+'-viewport');
+      if(form==='overlay')check(await renderer.evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches && getComputedStyle(document.body).transitionDuration.split(',').every(item=>parseFloat(item)===0)`)===true,'comments-overlay-reduced-motion');
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
       else await commentsReplyAndResolve(renderer,check,waitFor,at,'comments-inline-reply-'+form);
@@ -188,6 +193,7 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
       check(true,'comments-'+form+'-complete');
     }
   } finally {
+    await renderer.send('Emulation.setEmulatedMedia', { features: [] });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await waitFor(renderer,`innerWidth===${native.width} && innerHeight===${native.height}`,'comments-native-viewport-restored');
   }

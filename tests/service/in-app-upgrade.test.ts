@@ -60,6 +60,26 @@ function withMembers(record: TestInventory,members: DatabasePackageMember[]): st
   return JSON.stringify({...record,sha256:createHash('sha256').update(JSON.stringify(members)).digest('hex'),members});
 }
 
+it('keeps the original version in retained store names after resuming with a newer build', async () => {
+  const root = join(roots.inputRoot, 'version-label');
+  await cp(roots.dataRoot, root, { recursive: true });
+  await beginUpgrade(root);
+  await expect(resumeUpgrade(root, '0.7.10', (stage, renamed) => {
+    if (stage === 'save-old' && renamed) throw Error('interrupted');
+  })).rejects.toThrow('interrupted');
+  expect((await readdir(root)).filter(name => name.startsWith('store-before-')))
+    .toEqual([expect.stringMatching(/^store-before-0\.7\.10-/u)]);
+  expect(await resumeUpgrade(root, '0.7.11')).toMatchObject({ restored: false });
+  expect((await databasePackageSources(root)).some(file => file.member.startsWith('store-before-'))).toBe(false);
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root, '0.7.11', (stage, renamed) => {
+    if (stage === 'save-new' && renamed) throw Error('interrupted');
+  })).rejects.toThrow('interrupted');
+  expect(await resumeUpgrade(root, '0.7.11')).toMatchObject({ restored: true });
+  expect((await readdir(join(root, 'shell'))).filter(name => name.startsWith('store-after-')))
+    .toEqual([expect.stringMatching(/^store-after-0\.7\.10-/u)]);
+}, 90_000);
+
 it('resumes each phase, imports the older package and recovers missing old files from its backup', async () => {
   const root = join(roots.inputRoot, 'library');
   await cp(roots.dataRoot, root, { recursive: true });
@@ -67,7 +87,7 @@ it('resumes each phase, imports the older package and recovers missing old files
   expect(existsSync(join(root, 'store.upgrading'))).toBe(false);
   await beginUpgrade(root);
   const stopped = new Set<string>();
-  const run = () => resumeUpgrade(root, '0.8.0', (stage, renamed) => {
+  const run = () => resumeUpgrade(root, '0.7.9', (stage, renamed) => {
     const point = renamed ? stage + '-renamed' : stage;
     if (!stopped.has(point)) { stopped.add(point); throw Error('interrupted ' + point); }
   });
@@ -141,11 +161,11 @@ it('resumes each phase, imports the older package and recovers missing old files
   await cp(root,incomplete,{recursive:true});
   await rm(join(incomplete,newKey));
   await beginUpgradeRollback(incomplete);
-  await expect(resumeUpgrade(incomplete,'0.8.0')).rejects.toMatchObject({code:'DATABASE_PACKAGE_INCOMPLETE'});
+  await expect(resumeUpgrade(incomplete,'0.7.9')).rejects.toMatchObject({code:'DATABASE_PACKAGE_INCOMPLETE'});
   expect(storeRevisionOnDisk(join(incomplete,'store','ai7.sqlite'))).toBe(117);
   expect(existsSync(join(incomplete,'shell','storage-upgrade.json'))).toBe(true);
   await cp(join(roots.inputRoot,'sample1-edited.docx'),join(incomplete,newKey));
-  expect(await resumeUpgrade(incomplete,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(incomplete,'0.7.9')).toMatchObject({restored:true});
   await rm(join(root,original.find(member => member.path.startsWith('objects/'))!.path));
   await beginUpgradeRollback(root);
   const interruptedCopy = join(root,'store','payloads');
@@ -166,7 +186,7 @@ it('resumes each phase, imports the older package and recovers missing old files
   } finally { oldAgain.markCleanShutdown(); oldAgain.close(); }
   expect(await members(oldExport)).toEqual(original);
   expect(existsSync(join(root,newKey))).toBe(false);
-  const firstSaved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.8.0-'))!;
+  const firstSaved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.7.9-'))!;
   expect((await fileDigest(join(root,'shell',firstSaved,'payloads',newKey)))?.sha256).toBe(newObject);
   const mergeRoot = join(roots.inputRoot, 'merge');
   const merger = await EditorialStore.open(mergeRoot, roots.codeRoot);
@@ -179,17 +199,17 @@ it('resumes each phase, imports the older package and recovers missing old files
   try { expect(merged.listBooks(null).items).toHaveLength(2); }
   finally { merged.markCleanShutdown(); merged.close(); }
   await beginUpgrade(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish') throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'publish') throw Error('power loss'); })).rejects.toThrow('power loss');
   const phase = join(root,'shell','storage-upgrade.json');
   const journal = JSON.parse(await readFile(phase,'utf8'));
   await writeFile(phase,JSON.stringify({...journal,stage:'record'}));
-  await resumeUpgrade(root, '0.8.0');
+  await resumeUpgrade(root, '0.7.9');
   const upgraded = await EditorialStore.open(root,roots.codeRoot);
   try { await upgraded.stageSelectedManuscript(randomUUID(),join(roots.inputRoot,'sample1-edited.docx')); }
   finally { upgraded.markCleanShutdown(); upgraded.close(); }
   const lost = join(roots.inputRoot,'lost-sources');
   await cp(root,lost,{recursive:true});
-  for (const entry of await readdir(lost)) if (entry.startsWith('store-before-0.8.0-')) {
+  for (const entry of await readdir(lost)) if (entry.startsWith('store-before-0.7.9-')) {
     await rm(join(lost,entry),{recursive:true});
   }
   await expect(beginUpgradeRollback(lost)).rejects.toMatchObject({code:'UPGRADE_BACKUP_FAILED'});
@@ -198,12 +218,12 @@ it('resumes each phase, imports the older package and recovers missing old files
   try { expect(healthy.listBooks(null).items).toHaveLength(2); }
   finally { healthy.markCleanShutdown(); healthy.close(); }
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
-  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
+  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.7.9-'))!;
   const away = join(roots.inputRoot,'old-library-away');
   // The post-upgrade snapshot already exists, but the current database has not moved.
   await rm(join(root,newKey));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
   expect(existsSync(phase)).toBe(false);
   // This retry must use the previous snapshot to recover an object created only in revision 117.
@@ -213,7 +233,7 @@ it('resumes each phase, imports the older package and recovers missing old files
   const offline = join(roots.inputRoot,'offline-backups');
   await rename(backupFolder,offline);
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
   expect(JSON.parse(await readFile(phase,'utf8')).fallback).toBe(false);
   expect((await fileDigest(join(root,shared.path)))?.sha256).toBe(shared.sha256);
   await rename(offline,backupFolder);
@@ -221,13 +241,13 @@ it('resumes each phase, imports the older package and recovers missing old files
   await verifyLibraryFiles(root,117);
   // A damaged snapshot must not prevent opening the intact, independently verifiable live library.
   await writeFile(join(root,'store','payloads',newKey),Buffer.alloc(0));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect(existsSync(phase)).toBe(false);
   await verifyLibraryFiles(root,117);
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
   await rename(join(root,kept),away);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
   expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
@@ -236,19 +256,19 @@ it('resumes each phase, imports the older package and recovers missing old files
   finally { recoveredCurrent.markCleanShutdown(); recoveredCurrent.close(); }
   await rename(away,join(root,kept));
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
   expect(existsSync(join(root,'store'))).toBe(false);
   await rename(join(root,kept),away);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
   expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
   await rename(away,join(root,kept));
   await beginUpgradeRollback(root);
   const staleRestore = await readFile(phase);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
   const {id} = JSON.parse(staleRestore.toString('utf8'));
-  const moved = join(root,'shell','store-after-0.8.0-'+id);
+  const moved = join(root,'shell','store-after-0.7.9-'+id);
   const note = join(root,'shell','upgrade-'+id);
   await rm(join(moved,'rollback-ready.json'));
   await rm(join(note,'rollback-ready.json'));
@@ -258,14 +278,14 @@ it('resumes each phase, imports the older package and recovers missing old files
   await rm(join(moved,'ai7.sqlite'));
   await writeFile(join(moved,'payloads',newKey),Buffer.alloc(0));
   await writeFile(phase,staleRestore);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
   const reopenedCurrent = await EditorialStore.open(root,roots.codeRoot);
   try { expect(reopenedCurrent.listBooks(null).items).toHaveLength(2); }
   finally { reopenedCurrent.markCleanShutdown(); reopenedCurrent.close(); }
   await beginUpgradeRollback(root);
-  expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: true });
-  const saved = (await readdir(join(root,'shell'))).filter(name => name.startsWith('store-after-0.8.0-'));
+  expect(await resumeUpgrade(root, '0.7.9')).toMatchObject({ restored: true });
+  const saved = (await readdir(join(root,'shell'))).filter(name => name.startsWith('store-after-0.7.9-'));
   expect(saved).toHaveLength(2);
   expect((await fileDigest(join(root,'shell',saved.find(name => name !== firstSaved)!,'payloads',newKey)))?.sha256).toBe(newObject);
   const direct = await legacy.openLegacy(root);
@@ -309,7 +329,7 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
     const partial = join(roots.inputRoot,'partly-abandoned');
     await cp(root,partial,{recursive:true});
     await beginUpgrade(partial);
-    expect(await resumeUpgrade(partial,'0.8.0')).toMatchObject({restored:false});
+    expect(await resumeUpgrade(partial,'0.7.9')).toMatchObject({restored:false});
     const recovered = await EditorialStore.open(partial,roots.codeRoot);
     try { expect(recovered.listBooks(null).items).toHaveLength(2); }
     finally { recovered.markCleanShutdown(); recovered.close(); }
@@ -322,7 +342,7 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
     await verify();
   } finally { db.close(); }
   await beginUpgrade(root);
-  expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: false });
+  expect(await resumeUpgrade(root, '0.7.9')).toMatchObject({ restored: false });
   const opened = await EditorialStore.open(root, roots.codeRoot);
   try {
     expect(opened.listBooks(null).items).toHaveLength(2);
@@ -332,8 +352,8 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
   expect((await fileDigest(join(root,'objects',source.key)))?.sha256).toBe(source.digest);
   await rm(backupLocationFor(root),{recursive:true});
   await beginUpgradeRollback(root);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
-  const saved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.8.0-'))!;
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
+  const saved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.7.9-'))!;
   expect((await fileDigest(join(root,'shell',saved,'payloads','objects',source.key)))?.sha256).toBe(source.digest);
   expect(existsSync(join(root,'objects',source.key))).toBe(false);
 }, 180_000);
@@ -342,7 +362,7 @@ it.each(['convert','verify','save-old','publish','record'] as const)('catches mi
   const root = join(roots.inputRoot,'lost-payload-'+stage);
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
-  await expect(resumeUpgrade(root,'0.8.0',phase => { if(phase === stage) throw Error('power loss'); })).rejects.toThrow('power loss');
+  await expect(resumeUpgrade(root,'0.7.9',phase => { if(phase === stage) throw Error('power loss'); })).rejects.toThrow('power loss');
   const journal = JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8'));
   const note = join(root,'shell','upgrade-'+journal.id);
   if (stage === 'convert' || stage === 'publish') await rm(join(note,'payloads.json'));
@@ -353,7 +373,7 @@ it.each(['convert','verify','save-old','publish','record'] as const)('catches mi
   if (stage === 'verify' || stage === 'record') await writeFile(missing.path,Buffer.alloc(0));
   else await rm(missing.path);
   const firstError = stage === 'convert' || stage === 'verify' ? 'DATABASE_PACKAGE_INCOMPLETE' : 'UPGRADE_FILES_INVALID';
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:firstError});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:firstError});
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
   expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
   const location = backupLocationFor(root);
@@ -370,7 +390,7 @@ it.each(['database','marker'] as const)('refuses an altered revision 117 %s befo
   const root = join(roots.inputRoot,'altered-conversion-'+defect);
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
-  await expect(resumeUpgrade(root,'0.8.0',phase => { if (phase === 'record') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await expect(resumeUpgrade(root,'0.7.9',phase => { if (phase === 'record') throw Error('interrupted'); })).rejects.toThrow('interrupted');
   if (defect === 'database') {
     const db = new DatabaseSync(join(root,'store','ai7.sqlite'));
     try { db.exec('CREATE TABLE unexpected_change(id INTEGER)'); } finally { db.close(); }
@@ -378,7 +398,7 @@ it.each(['database','marker'] as const)('refuses an altered revision 117 %s befo
     const marker = join(root,'store','ai7-data-version.json');
     await writeFile(marker,JSON.stringify({...JSON.parse(await readFile(marker,'utf8')),dataVersion:1}));
   }
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
 });
 
@@ -387,7 +407,7 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
   const phase = join(root,'shell','storage-upgrade.json');
-  const stop = (at: string) => resumeUpgrade(root,'0.8.0',stage => { if (stage === at) throw Error('interrupted'); });
+  const stop = (at: string) => resumeUpgrade(root,'0.7.9',stage => { if (stage === at) throw Error('interrupted'); });
   const beforeBackup = await readFile(phase);
   const operationId = JSON.parse(beforeBackup.toString('utf8')).id;
   const location = backupLocationFor(root);
@@ -409,7 +429,7 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   const abandonedConversion = join(root,'shell','upgrade-'+operationId,'converted');
   await mkdir(abandonedConversion,{recursive:true});
   await writeFile(join(abandonedConversion,'unfinished-copy'),Buffer.alloc(4096));
-  await expect(resumeUpgrade(root,'0.8.0',undefined,0)).rejects.toMatchObject({code:'UPGRADE_SPACE'});
+  await expect(resumeUpgrade(root,'0.7.9',undefined,0)).rejects.toMatchObject({code:'UPGRADE_SPACE'});
   expect(existsSync(abandonedConversion)).toBe(false);
   expect(JSON.parse(await readFile(phase,'utf8')).stage).toBe('backup');
   expect(await fileDigest(archive)).toEqual(archiveDigest);
@@ -433,7 +453,7 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   expect(existsSync(join(root,'store'))).toBe(false);
   await rm(manifest);
   await writeFile(phase,JSON.stringify(stale));
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   expect(await fileDigest(manifest)).toEqual(original);
   const verified = await EditorialStore.open(root,roots.codeRoot);
   try { expect(verified.listBooks(null).items).toHaveLength(2); } finally { verified.markCleanShutdown(); verified.close(); }
@@ -443,12 +463,12 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   const root = join(roots.inputRoot,'locked-fallback');
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
-  await resumeUpgrade(root,'0.8.0');
+  await resumeUpgrade(root,'0.7.9');
   const phase = join(root,'shell','storage-upgrade.json');
   const location = backupLocationFor(root);
   const originalPackage = join(location,(await readdir(location)).find(name => name.endsWith('.ai7db'))!);
   const originalMembers = (await verifyDatabasePackage(originalPackage,{dataRoot:root})).manifest.members;
-  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
+  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.7.9-'))!;
   const away = join(roots.inputRoot,'locked-fallback-original');
   await rename(join(root,kept),away);
   const missing = (await databasePackageSources(root)).find(member => member.member.startsWith('objects/'))!;
@@ -461,7 +481,7 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   await mkdir(priorExtraction,{recursive:true});
   await writeFile(join(priorExtraction,'interrupted.partial'),Buffer.alloc(4096));
   await rm(join(root,'shell','upgrade-'+start.id,'payloads.json'));
-  const stop = (point: string, after = false) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+  const stop = (point: string, after = false) => resumeUpgrade(root,'0.7.9',(stage,renamed) => {
     if (stage === point && Boolean(renamed) === after) throw Error('interrupted');
   });
   await expect(stop('publish-old')).rejects.toThrow('interrupted');
@@ -475,7 +495,7 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   const lock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:incoming,windowsHide:true,stdio:['pipe','pipe','ignore']});
   try {
     await once(lock.stdout,'data');
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
     expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
     expect(await fileDigest(missing.path)).toEqual(digest);
     expect(existsSync(phase)).toBe(false);
@@ -489,23 +509,23 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   await beginUpgradeRollback(root);
   await expect(stop('publish-old',true)).rejects.toThrow('interrupted');
   await rm(join(root,'store','ai7.sqlite'));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   const healthy = await EditorialStore.open(root,roots.codeRoot);
   try { expect(healthy.listBooks(null).items).toHaveLength(2); } finally { healthy.markCleanShutdown(); healthy.close(); }
   await beginUpgradeRollback(root);
   await expect(stop('publish-old',true)).rejects.toThrow('interrupted');
   const savedJournal = await readFile(phase);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   // Simulate a stale journal deletion after temporary extraction files disappeared.
   await writeFile(phase,savedJournal);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   await writeFile(phase,savedJournal);
   await writeFile(missing.path,Buffer.alloc(0));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
   expect(await fileDigest(missing.path)).toEqual(digest);
   await beginUpgradeRollback(root);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   const openPrevious = await legacySampleService(root,roots.codeRoot,'da44971a048719e18cbaa7f59436f3ea477d8309');
   const previous = await openPrevious(root);
   const archive = join(roots.inputRoot,'rollback-integration-074.ai7db');
@@ -523,7 +543,7 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   const forwardLock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:candidate,windowsHide:true,stdio:['pipe','pipe','ignore']});
   try {
     await once(forwardLock.stdout,'data');
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
     expect(existsSync(phase)).toBe(false);
     expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
     const old = await openPrevious(root);
@@ -541,7 +561,7 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
     await ended;
   }
   await beginUpgrade(root);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
 },180_000);
 
 it('reserves the peak on the writing volume during backup fallback',() => {
@@ -557,11 +577,11 @@ it.each(['removed','changed'] as const)('retains an openable revision 117 librar
   const root = join(roots.inputRoot,'retained-sqlite-'+defect);
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
-  await resumeUpgrade(root,'0.8.0');
+  await resumeUpgrade(root,'0.7.9');
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'publish-old') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if (stage === 'publish-old') throw Error('interrupted'); })).rejects.toThrow('interrupted');
   const {id} = JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8'));
-  const saved = join(root,'shell','store-after-0.8.0-'+id);
+  const saved = join(root,'shell','store-after-0.7.9-'+id);
   const path = join(saved,'ai7.sqlite');
   const expected = await fileDigest(path);
   const note = join(root,'shell','upgrade-'+id);
@@ -574,7 +594,7 @@ it.each(['removed','changed'] as const)('retains an openable revision 117 librar
     const altered = new DatabaseSync(path);
     try { altered.exec('CREATE TABLE unexpected_change(id INTEGER)'); } finally { altered.close(); }
   }
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   expect(await fileDigest(path)).toEqual(expected);
   await verifyLibraryFiles(root,116);
   const old = await legacy.openLegacy(root);
@@ -600,7 +620,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   await writeFile(join(seed,changed),oldBytes);
   await writeFile(join(seed,unchanged),oldBytes);
   await beginUpgrade(seed);
-  await resumeUpgrade(seed,'0.8.0');
+  await resumeUpgrade(seed,'0.7.9');
   await rm(join(seed,deleted));
   await writeFile(join(seed,changed),newBytes);
   const unreferenced = 'wal-library-extra.bin';
@@ -639,8 +659,8 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const phase = join(root,'shell','storage-upgrade.json');
   const stale = await readFile(phase);
   const {id} = JSON.parse(stale.toString('utf8'));
-  const saved = join(root,'shell','store-after-0.8.0-'+id);
-  const pause = (after: boolean) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+  const saved = join(root,'shell','store-after-0.7.9-'+id);
+  const pause = (after: boolean) => resumeUpgrade(root,'0.7.9',(stage,renamed) => {
     if (stage === 'publish-old' && Boolean(renamed) === after) throw Error('interrupted');
   });
   await expect(pause(false)).rejects.toThrow('interrupted');
@@ -657,7 +677,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const copyWal = join(independent,'ai7.sqlite-wal');
   await rename(parkedWal,parkedWal+'.held');
   await rename(copyWal,copyWal+'.held');
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(await readFile(phase)).toEqual(stale);
   expect(storeRevisionOnDisk(sql)).toBe(116);
   await rename(parkedWal+'.held',parkedWal);
@@ -675,7 +695,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const held = join(roots.inputRoot,'held-wal-object.docx');
   await rename(join(savedPayload,key),held);
   await writeFile(join(savedPayload,changed),oldBytes);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
   expect(storeRevisionOnDisk(sql)).toBe(116);
   await rename(held,join(savedPayload,key));
@@ -692,21 +712,21 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
     if (path === sealed) throw Object.assign(Error('busy'),{code:'EBUSY'});
     return read(path,maxBytes);
   });
-  try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { unavailable.mockRestore(); }
+  try { await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'EBUSY'}); } finally { unavailable.mockRestore(); }
   expect(await readFile(phase)).toEqual(stale);
   expect(await readFile(remembered,'utf8')).toBe(shortJson);
   expect(await readFile(join(root,unchanged))).toEqual(oldBytes);
   expect(existsSync(join(savedPayload,unchanged))).toBe(false);
   expect(storeRevisionOnDisk(sql)).toBe(116);
   await rm(sealed);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(await readFile(phase)).toEqual(stale);
   expect(await readFile(remembered,'utf8')).toBe(shortJson);
   await writeFile(sealed,JSON.stringify(inventory));
   // This complete list and committed WAL jointly prove that 117 deliberately removed an old member.
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
   expect(JSON.parse(await readFile(phase,'utf8')).currentManifestDigest).toBe(JSON.parse(commitment.toString('utf8')).currentManifestDigest);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
   expect(hasDraft(sql)).toBe(true);
   expect(await fileDigest(join(root,unreferenced))).toEqual(extraDigest);
@@ -725,7 +745,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect(pkg.manifest.members.find(file => file.path === unchanged)?.sha256).toBe(createHash('sha256').update(oldBytes).digest('hex'));
   expect(pkg.manifest.members.find(file => file.path === changed)?.sha256).toBe(createHash('sha256').update(newBytes).digest('hex'));
   await beginUpgradeRollback(root);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   await verifyLibraryFiles(root,116);
   expect(hasDraft(sql)).toBe(false);
   const old = await legacy.openLegacy(root);
@@ -738,16 +758,16 @@ it('keeps the independent database when another valid 117 store or a conflicting
   for (const dir of [root,other]) {
     await cp(roots.dataRoot,dir,{recursive:true});
     await beginUpgrade(dir);
-    await resumeUpgrade(dir,'0.8.0');
+    await resumeUpgrade(dir,'0.7.9');
   }
   await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if(stage === 'save-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
   const phase = join(root,'shell','storage-upgrade.json');
   const state = JSON.parse(await readFile(phase,'utf8'));
-  const retained = join(root,'store-before-0.8.0-'+state.id);
+  const retained = join(root,'store-before-0.7.9-'+state.id);
   const away = join(roots.inputRoot,'identity-original');
   await rename(retained,away);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   await rename(away,retained);
   const db = join(root,'store','ai7.sqlite');
   const spare = join(root,'shell','upgrade-'+state.id,'current-database','ai7.sqlite');
@@ -777,12 +797,12 @@ it('keeps the independent database when another valid 117 store or a conflicting
   await beginUpgradeRollback(root);
   expect(JSON.parse(await readFile(phase,'utf8')).upgradeRecordId).toBeTruthy();
   await cp(join(other,'store','ai7.sqlite'),db);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(existsSync(phase)).toBe(false);
   expect(await fileDigest(spare)).toEqual(expected);
   await cp(current,db);
   await beginUpgradeRollback(root);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   await verifyLibraryFiles(root,116);
 },180_000);
 
@@ -802,7 +822,7 @@ it('reclaims the interrupted backup attempt on a changed source while preserving
   await composeManuscriptDocx(sample,{source:ADMITTED_BASELINE_DOCX,startBlock:2,blocks:8,title:'sample1'});
   const old = await legacy.openLegacy(root);
   try { await old.stageSelectedManuscript(randomUUID(),sample); } finally { old.markCleanShutdown(); old.close(); }
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_SOURCE_CHANGED'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_SOURCE_CHANGED'});
   expect(existsSync(area)).toBe(false);
   expect(existsSync(phase)).toBe(false);
   expect((await fileDigest(other))?.bytes).toBe(64);
@@ -812,7 +832,7 @@ it('reclaims the interrupted backup attempt on a changed source while preserving
 it.each(['416adb15a9dcf76b2f49e202775597645286c18e','19d26391cab7393251fea4b8dfeb9c3492569459'])('restores from the archive recorded by historical converter %s',async revision => {
   const root = join(roots.inputRoot,'earlier-upgrade-'+revision.slice(0,8));
   await cp(roots.dataRoot,root,{recursive:true});
-  await upgradeWithEarlierOrigin(root,roots.codeRoot,revision);
+  await upgradeWithEarlierOrigin(root,roots.codeRoot,revision,'0.7.9');
   const origin = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
   expect(origin.backupStoreDigest).toBeUndefined();
   if (revision.startsWith('416adb15')) {
@@ -827,7 +847,7 @@ it.each(['416adb15a9dcf76b2f49e202775597645286c18e','19d26391cab7393251fea4b8dfe
   const archive = await verifyDatabasePackage(archivePath,{dataRoot:root});
   const snapshot = archive.manifest.members.find(file => file.path === 'store/ai7.sqlite')!;
   expect(createHash('sha256').update(snapshot.sha256).digest('hex')).not.toBe(origin.sourceDigest);
-  await rm(join(root,'store-before-0.8.0-'+origin.id),{recursive:true});
+  await rm(join(root,'store-before-0.7.9-'+origin.id),{recursive:true});
   await beginUpgradeRollback(root);
   if (revision.startsWith('19d26391')) {
     const marker = join(replacementStagingFor(join(root,'shell','upgrade-'+origin.id,'restore')),'incoming','store','ai7-data-version.json');
@@ -836,13 +856,13 @@ it.each(['416adb15a9dcf76b2f49e202775597645286c18e','19d26391cab7393251fea4b8dfe
       if (path === marker) throw Object.assign(Error('busy'),{code:'EBUSY'});
       await write(path,text);
     });
-    try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { lock.mockRestore(); }
+    try { await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'EBUSY'}); } finally { lock.mockRestore(); }
     expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
     await verifyLibraryFiles(root,117);
     await rm(archivePath);
     await beginUpgradeRollback(root);
   }
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(1);
   await verifyLibraryFiles(root,116);
   const old = await legacy.openLegacy(root);
@@ -867,11 +887,11 @@ it.each(['write','read'] as const)('keeps the backup phase retryable after a nat
       if (/\.[0-9a-f-]{36}\.ai7db\.store$/u.test(path)) { readFault = true; throw full; }
       return openStore(path);
     });
-  try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_SPACE'}); }
+  try { await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_SPACE'}); }
   finally { fault.mockRestore(); }
   if (side === 'read') expect(readFault).toBe(true);
   expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('backup');
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
 },180_000);
 
@@ -882,15 +902,15 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   const contents = Buffer.from([23,117,2]);
   await writeFile(join(root,member),contents);
   await beginUpgrade(root);
-  await resumeUpgrade(root,'0.8.0');
+  await resumeUpgrade(root,'0.7.9');
   await writeFile(join(root,'new-entry.bin'),Buffer.from([8,0]));
   await beginUpgradeRollback(root);
   const phase = join(root,'shell','storage-upgrade.json');
   const stale = await readFile(phase);
   const {id,backup} = JSON.parse(stale.toString('utf8'));
   const note = join(root,'shell','upgrade-'+id);
-  const parked = join(root,'shell','store-after-0.8.0-'+id);
-  await expect(resumeUpgrade(root,'0.8.0',(stage,moved) => { if (stage === 'publish-old' && Boolean(moved) === (source === 'shared-read')) throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  const parked = join(root,'shell','store-after-0.7.9-'+id);
+  await expect(resumeUpgrade(root,'0.7.9',(stage,moved) => { if (stage === 'publish-old' && Boolean(moved) === (source === 'shared-read')) throw Error('interrupted'); })).rejects.toThrow('interrupted');
   await rm(join(parked,'rollback-ready.json'));
   await rm(join(note,'rollback-ready.json'));
   const manifest = join(note,'current-files.json');
@@ -916,7 +936,7 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
       if (path === sealed) throw Object.assign(Error('busy'),{code:'EBUSY'});
       return read(path,maxBytes);
     });
-    try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { busy.mockRestore(); }
+    try { await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'EBUSY'}); } finally { busy.mockRestore(); }
     expect(await readFile(phase)).toEqual(stale);
     expect(await readFile(manifest,'utf8')).toBe(shortened);
     expect(await readFile(join(root,member))).toEqual(contents);
@@ -927,20 +947,20 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
     const foreign = join(roots.inputRoot,'foreign117');
     await cp(roots.dataRoot,foreign,{recursive:true});
     await beginUpgrade(foreign);
-    await resumeUpgrade(foreign,'0.8.0');
+    await resumeUpgrade(foreign,'0.7.9');
     const copies = [join(parked,'ai7.sqlite'),join(note,'current-database','ai7.sqlite')];
     for (const path of copies) {
       await rename(path,path+'.held');
       await cp(join(foreign,'store','ai7.sqlite'),path);
     }
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
     expect(await readFile(phase)).toEqual(stale);
     for (const path of copies) await rename(path+'.held',path);
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
     expect(await readFile(phase)).toEqual(stale);
     await writeFile(join(root,member),contents);
   }
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   expect(await readFile(join(root,member))).toEqual(contents);
   expect(await readFile(join(root,'new-entry.bin'))).toEqual(Buffer.from([8,0]));
   await verifyLibraryFiles(root,117);
@@ -982,17 +1002,17 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   const contents = Buffer.from([1,7]);
   if (change === 'removed') await writeFile(join(root,member),contents);
   await beginUpgrade(root);
-  await resumeUpgrade(root,'0.8.0');
+  await resumeUpgrade(root,'0.7.9');
   const {id} = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
   const phase = join(root,'shell','storage-upgrade.json');
   const note = join(root,'shell','upgrade-'+id);
-  const old = join(root,'store-before-0.8.0-'+id);
-  const parked = join(root,'shell','store-after-0.8.0-'+id);
+  const old = join(root,'store-before-0.7.9-'+id);
+  const parked = join(root,'shell','store-after-0.7.9-'+id);
   const independent = join(note,'current-database');
   const prepared = join(note,'prepared-database');
   const receipt = 'rollback-ready.json';
-  const writer = format === 'historical' ? await historicalUpgradeService(root,roots.codeRoot,'2a49562074529baf25f5073a22d561d6eaecf132') : {beginUpgradeRollback,resumeUpgrade};
-  const pause = (point: string,moved = false) => writer.resumeUpgrade(root,'0.8.0',(stage,afterRename) => {
+  const writer = format === 'historical' ? await historicalUpgradeService(root,roots.codeRoot,'2a49562074529baf25f5073a22d561d6eaecf132','0.7.9') : {beginUpgradeRollback,resumeUpgrade};
+  const pause = (point: string,moved = false) => writer.resumeUpgrade(root,'0.7.9',(stage,afterRename) => {
     if (point === stage && Boolean(afterRename) === moved) throw Error('interrupted');
   });
 
@@ -1004,7 +1024,7 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   await cp(independent,copyA,{recursive:true});
   const away = join(area,'first-old-away');
   await rename(old,away);
-  await expect(writer.resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await expect(writer.resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   await rename(away,old);
   if (change === 'removed') await rm(join(root,member));
@@ -1037,13 +1057,13 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   const parkedMember = join(parked,'payloads',member);
   if (format === 'current' && change === 'removed') await writeFile(parkedMember,contents);
   await writeFile(phase,stale);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(await readFile(phase)).toEqual(stale);
   expect(await readFile(join(note,'current-files.json'))).toEqual(firstManifest);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
   await rm(join(independent,receipt));
   await rm(join(note,receipt));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:format === 'current' ? 'UPGRADE_MISMATCH' : 'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:format === 'current' ? 'UPGRADE_MISMATCH' : 'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
   expect(existsSync(join(root,member))).toBe(change === 'removed');
   if (change === 'added') expect(await readFile(join(preparedFiles,member))).toEqual(contents);
@@ -1053,7 +1073,7 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
     // Only the parked directory now carries the matching complete pair. All inventory records still belong to A.
     if (change === 'added') await rename(join(preparedFiles,member),parkedMember);
     else await rm(parkedMember);
-    await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+    await expect(resumeUpgrade(root,'0.7.9',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
     expect(JSON.parse(await readFile(phase,'utf8')).currentManifestDigest).toBe(second.currentManifestDigest);
     await writeFile(phase,stale);
     await writeFile(join(note,'current-files.json'),firstManifest);
@@ -1069,7 +1089,7 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
     await rm(join(prepared,receipt));
     await writeFile(join(prepared,'files.json'),shuffled);
   }
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await expect(resumeUpgrade(root,'0.7.9',stage => { if (stage === 'return-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
   const boundJournal = await readFile(phase);
   const bound = JSON.parse(boundJournal.toString('utf8'));
   expect(bound.currentDigest).toBe(second.currentDigest);
@@ -1080,17 +1100,17 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
     const only = join(note,'current-files.json');
     await rm(join(prepared,'files.json'));
     await writeFile(only,firstManifest);
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
     expect(await readFile(phase)).toEqual(boundJournal);
     await rm(only);
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
     await writeFile(only,secondManifest);
     const unbound = {...bound};
     delete unbound.currentManifestDigest;
     for (const incomplete of [...(format === 'historical' ? [unbound] : []),{...bound,currentManifestDigest:'0'.repeat(64)}]) {
       const unchanged = JSON.stringify(incomplete);
       await writeFile(phase,unchanged);
-      await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+      await expect(resumeUpgrade(root,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
       expect(await readFile(phase,'utf8')).toBe(unchanged);
       expect(await readFile(only)).toEqual(secondManifest);
       expect(await readFile(join(preparedFiles,member))).toEqual(contents);
@@ -1100,7 +1120,7 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
     expect(await readFile(join(note,receipt))).toEqual(first);
   }
   await rm(join(parked,'ai7.sqlite'));
-  await expect(resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+  await expect(resumeUpgrade(root,'0.7.9',(stage,renamed) => {
     if (stage === 'return-new' && renamed) throw Error('interrupted');
   })).rejects.toThrow('interrupted');
   expect(existsSync(parked)).toBe(false);
@@ -1121,7 +1141,7 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   }
   for (const replay of [Buffer.from(missingCommitment),stale]) {
     await writeFile(phase,replay);
-    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    await expect(resumeUpgrade(root,'0.7.9')).rejects.toBeDefined();
     expect(await readFile(phase)).toEqual(replay);
     expect(existsSync(join(root,member))).toBe(change === 'removed');
     expect(existsSync(savedMember)).toBe(format === 'current' ? change === 'removed' : change === 'added');
@@ -1140,29 +1160,29 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
     await writeFile(priorInventory,shuffled);
     if (change === 'added') await cp(isolatedMember,priorSaved);
     else await rm(priorSaved);
-    const priorWriter = await historicalUpgradeService(priorRoot,roots.codeRoot,'75b616b3d9979cacebc419c573fa264d73782457');
-    await expect(priorWriter.resumeUpgrade(priorRoot,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+    const priorWriter = await historicalUpgradeService(priorRoot,roots.codeRoot,'75b616b3d9979cacebc419c573fa264d73782457','0.7.9');
+    await expect(priorWriter.resumeUpgrade(priorRoot,'0.7.9',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
     const earlierJournal = await readFile(priorPhase);
     const previousState = JSON.parse(earlierJournal.toString('utf8'));
     expect(previousState.currentManifestDigest).toBe(JSON.parse(shuffled.toString('utf8')).sha256);
     expect(previousState.currentManifestDigest).not.toBe(second.currentManifestDigest);
     let priorSnapshot = priorStore;
     if (source === 'saved') {
-      priorSnapshot = join(priorRoot,'shell','store-after-0.8.0-'+id);
+      priorSnapshot = join(priorRoot,'shell','store-after-0.7.9-'+id);
       await rename(priorStore,priorSnapshot);
-      await rename(join(priorRoot,'store-before-0.8.0-'+id),priorStore);
+      await rename(join(priorRoot,'store-before-0.7.9-'+id),priorStore);
     }
     const priorMember = join(priorSnapshot,'payloads',member);
     await writeFile(join(priorNote,'current-files.json'),firstManifest);
     await writeFile(priorInventory,firstManifest);
     if (change === 'added') await rm(priorMember);
     else await writeFile(priorMember,contents);
-    await expect(resumeUpgrade(priorRoot,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+    await expect(resumeUpgrade(priorRoot,'0.7.9')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
     expect(await readFile(priorPhase)).toEqual(earlierJournal);
     if (change === 'added') await cp(isolatedMember,priorMember);
     else await rm(priorMember);
     await writeFile(priorInventory,secondManifest);
-    expect(await resumeUpgrade(priorRoot,'0.8.0')).toMatchObject({restored:false});
+    expect(await resumeUpgrade(priorRoot,'0.7.9')).toMatchObject({restored:false});
     await verifyRollbackExport(priorRoot,join(area,'p.ai7db'),expected);
     if (source === 'live') {
       // The online export root alone matches consent, but the 117 startup marker did not survive.
@@ -1182,11 +1202,11 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   const marker = join(root,'store','ai7-data-version.json');
   await rm(marker);
   expect(existsSync(join(independent,'ai7-data-version.json'))).toBe(true);
-  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
   if (source === 'live') {
     // Earlier recoveries could finish installing B and leave a journal bound to its permuted on-disk spelling.
     await writeFile(phase,JSON.stringify({...bound,currentManifestDigest:JSON.parse(shuffled.toString('utf8')).sha256}));
-    expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+    expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:false});
     expect(existsSync(phase)).toBe(false);
   }
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(2);
@@ -1204,7 +1224,7 @@ it.each(['original','extracted'] as const)('reuses extracted offline payloads wi
   await writeFile(oldOnly,Buffer.alloc(64*1024*1024,117));
   const originalFile = (await fileDigest(oldOnly))!;
   await beginUpgrade(root);
-  await resumeUpgrade(root,'0.8.0');
+  await resumeUpgrade(root,'0.7.9');
   await rm(oldOnly);
   const {id,backup} = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
   const note = join(root,'shell','upgrade-'+id);
@@ -1213,7 +1233,7 @@ it.each(['original','extracted'] as const)('reuses extracted offline payloads wi
   await mkdir(area,{recursive:true});
   await extractReplacement(area,archive,backup.backup.sha256);
   await rm(archive);
-  if (source === 'extracted') await rm(join(root,'store-before-0.8.0-'+id),{recursive:true});
+  if (source === 'extracted') await rm(join(root,'store-before-0.7.9-'+id),{recursive:true});
   const manifest = join(note,'payloads.json');
   await rm(manifest);
   const prepared = join(note,'prepared-payloads');
@@ -1237,14 +1257,14 @@ it.each(['original','extracted'] as const)('reuses extracted offline payloads wi
     const base = rollbackDataPeak(currentBytes);
     const free = source === 'original' ? base + Math.floor(originalFile.bytes*1.5) : base;
     if (source === 'extracted') expect(originalFile.bytes).toBeGreaterThan(free);
-    await expect(resumeUpgrade(root,'0.8.0',undefined,free)).rejects.toMatchObject({code:'UPGRADE_SPACE',message:expect.stringContaining('回退的临时文件空间不足')});
+    await expect(resumeUpgrade(root,'0.7.9',undefined,free)).rejects.toMatchObject({code:'UPGRADE_SPACE',message:expect.stringContaining('回退的临时文件空间不足')});
     expect(reclaimed).toBe(true);
     expect(existsSync(partial)).toBe(false);
     expect(storeRevisionOnDisk(sql)).toBe(117);
     expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('restore');
     expect(existsSync(oldOnly)).toBe(false);
     expect(existsSync(join(note,'old-payloads','old-only.bin'))).toBe(false);
-    expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+    expect(await resumeUpgrade(root,'0.7.9')).toMatchObject({restored:true});
   } finally { disk.mockRestore(); }
   expect(reclaimed).toBe(true);
   expect(await fileDigest(oldOnly)).toEqual(originalFile);

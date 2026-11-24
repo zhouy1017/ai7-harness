@@ -1097,7 +1097,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const current = run.categories.find((category) => category.state === 'running') ?? run.categories.find((category) => category.state === 'waiting') ?? null;
       text = reviewLiveLine(run.label, current);
     } else if (run !== null && previous?.run?.reviewRunId === run.reviewRunId && previous.run.state === 'running') {
-      text = `${reviewRunHeading(run.label)} · ${run.stateLabel}`;
+      text = `${reviewRunHeading(run.label)} · ${serviceWords(run.stateLabel)}`;
     } else {
       return;
     }
@@ -1164,7 +1164,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       // Before findings lead, 审阅 keeps its in-page title and the 新建审阅 actions sit beside it (Issue #1524 6.1).
       const heading = el('div', 'review-workspace-heading');
       heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
-      if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+      if (run !== null) heading.append(pillElement(serviceWords(run.stateLabel), REVIEW_RUN_STATE_PILLS[run.state]));
       if (run === null) heading.append(renderHeaderExport(null, hasFindings));
       heading.append(renderNewReview(next, newReviewReasonId));
       node.append(heading);
@@ -1245,7 +1245,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (row.state === 'needs-review') {
         const changed = category?.scopes.changed;
         if (changed !== undefined && !changed.available) {
-          act.append(document.createTextNode(changed.unavailableReason ?? ''));
+          act.append(document.createTextNode(serviceWords(changed.unavailableReason ?? '')));
         } else {
           const rereview = actionButton('rereview-changed', 'secondary', () => void openSheet({ categories: [row.categoryId], scope: 'changed', from: null, to: null }, rereview));
           rereview.dataset['reviewCategory'] = row.categoryId;
@@ -1257,10 +1257,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           act.append(rereview);
         }
       } else if (row.state === 'unavailable' && row.unavailableReason !== null) {
-        act.append(document.createTextNode(row.unavailableReason));
+        act.append(document.createTextNode(serviceWords(row.unavailableReason)));
       }
       // A reviewed category whose earlier records could not all be checked says so (Issue #709).
-      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(document.createTextNode(row.unavailableReason));
+      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(document.createTextNode(serviceWords(row.unavailableReason)));
       item.append(title, el('p', 'review-coverage-counts', counts));
       if (act.hasChildNodes()) item.append(act);
       grid.append(item);
@@ -1320,7 +1320,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     row.append(start, more);
     if (!next.newReview.available) {
       start.disabled = true;
-      const why = el('span', 'review-unavailable-reason', next.newReview.unavailableReason ?? '');
+      const why = el('span', 'review-unavailable-reason', serviceWords(next.newReview.unavailableReason ?? ''));
       why.id = reasonId;
       start.setAttribute('aria-label', start.textContent ?? '');
       start.setAttribute('aria-describedby', reasonId);
@@ -1356,7 +1356,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('div', 'review-run-heading');
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
-    heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]), title);
+    heading.append(pillElement(serviceWords(run.stateLabel), REVIEW_RUN_STATE_PILLS[run.state]), title);
     appendProposalOffer(heading, run);
     const meta = el('span', 'review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(reviewMinuteLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
@@ -3275,10 +3275,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (!availability.available) {
         label.dataset['unavailableReason'] = availability.unavailableReason ?? '';
         input.dataset['unavailableReason'] = availability.unavailableReason ?? '';
-        const why = el('span', undefined, ` · ${availability.unavailableReason ?? ''}`);
+        const why = el('span', undefined, ` · ${serviceWords(availability.unavailableReason ?? '')}`);
         why.id = uid('scope-reason');
         input.setAttribute('aria-describedby', why.id);
-        why.className = 'visually-hidden'; label.title = availability.unavailableReason ?? '';
+        why.className = 'visually-hidden'; label.title = serviceWords(availability.unavailableReason ?? '');
         name.append(why);
       }
       if (kind === 'changed') {

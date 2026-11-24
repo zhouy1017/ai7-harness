@@ -54,9 +54,17 @@ describe('task overview', () => {
       const card = taskOverviewCard(item, vi.fn(), inBook);
       expect(card.querySelector('.task-overview-usage')?.textContent).toBe('用时 45 秒 · 12 次模型调用');
       expect(card.querySelector('.task-overview-model')?.textContent).toBe('recorded-model@high');
+      // One line of facts: the time, the working time and the model apart, 模型 before its name (stage-4/5 R3).
+      const time = card.querySelector('.task-overview-card-time')!.textContent!;
+      expect(time).not.toBe('');
+      expect(card.querySelector('.task-overview-card-facts')?.textContent).toBe(`${time} · 用时 45 秒 · 12 次模型调用 · 模型 recorded-model@high`);
       expect(card.textContent).not.toMatch(/tokens|约 .*次调用|999/u);
       const { work: _work, ...withoutWork } = item;
-      for (const bare of [withoutWork, { ...withoutWork, work: null }]) expect(taskOverviewCard(bare, vi.fn(), inBook).querySelector('.task-overview-usage')).toBeNull();
+      for (const bare of [withoutWork, { ...withoutWork, work: null }]) {
+        const bareCard = taskOverviewCard(bare, vi.fn(), inBook);
+        expect(bareCard.querySelector('.task-overview-usage')).toBeNull();
+        expect(bareCard.querySelector('.task-overview-card-facts')?.textContent).toBe(bare.attention.modelLabel ? `${time} · 模型 ${bare.attention.modelLabel}` : time);
+      }
       const unknown = taskOverviewCard({ ...item, work: { ...item.work, finished: { requests: null, modelLabel: null } } }, vi.fn(), inBook);
       expect(unknown.querySelector('.task-overview-usage')?.textContent).toBe('用时 45 秒');
       expect(unknown.querySelector('.task-overview-model')).toBeNull();

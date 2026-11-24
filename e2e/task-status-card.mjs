@@ -52,6 +52,31 @@ export function statusCardExpression({ ended, model = null, processed = false })
 }
 
 /**
+ * A task card's line of facts as the editor reads it (stage-4/5 R3) — when it was recorded, how long it worked, its model — read from the
+ * rendered page: the line's visible words carry a separator between the pieces and 模型 before the model's name, and each piece's first
+ * box starts clear of the last box of the piece before it (or on a line below it), so pieces printed against each other fail.
+ * `cardExpression` evaluates to the card; `model` is the name the Journey knows the task ran on, or `null` when the card may carry none.
+ */
+export function taskCardFactsExpression(cardExpression, model = null) {
+  return `(() => {
+    const card = ${cardExpression};
+    const line = card instanceof HTMLElement ? card.querySelector('.task-overview-card-facts') : null;
+    if (!(line instanceof HTMLElement)) return null;
+    const pieces = ['.task-overview-card-time', '.task-overview-usage', '.task-overview-model'].map((selector) => line.querySelector(selector)).filter((node) => node instanceof HTMLElement && node.getClientRects().length > 0);
+    const boxes = pieces.map((node) => Array.from(node.getClientRects()));
+    const duration = '\\\\d+ 秒|\\\\d+ 分 \\\\d+ 秒|\\\\d+ 小时 \\\\d+ 分';
+    const words = line.innerText, cardBox = card.getBoundingClientRect(), named = line.querySelector('.task-overview-model')?.textContent ?? null;
+    return {
+      window: [innerWidth, innerHeight], words, named,
+      apart: boxes.every((own, index) => index === 0 || own[0].left - boxes[index - 1].at(-1).right >= 4 || own[0].top >= boxes[index - 1].at(-1).bottom - 1),
+      sentence: new RegExp('^[^·]*\\\\S · 用时 (' + duration + ')( · [0-9,]+ 次模型调用)?( · 模型 \\\\S.*)?$', 'u').test(words) && (named === null || words.endsWith(' · 模型 ' + named)),
+      model: ${JSON.stringify(model)} === null || named === ${JSON.stringify(model)},
+      inCard: boxes.flat().every((box) => box.width > 0 && box.left >= cardBox.left - 1 && box.right <= cardBox.right + 1 && box.right <= innerWidth + 1),
+    };
+  })()`;
+}
+
+/**
  * The same task's 计划 view in ordinary mode: the goal and the plan, and — for a Run under way — the activity card without its stage
  * chain, whose rows keep the stage, the progress and the last update (and the step's own time while a step runs).
  */

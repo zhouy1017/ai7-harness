@@ -8,6 +8,8 @@ import { applyOnce } from './manuscript-apply.js';
 import { mountPositionRail } from './position-rail.js';
 import { DECISION_REASON_CHIPS } from './editorial-mark-labels.js';
 import { proposalIdentityRows } from './technical-layer-labels.js';
+import { serviceWords } from './service-wording.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { 'guessed-anchor': '位置待确认，请逐条采纳', conflict: '未解决冲突', get 'unclassified-stale'() { return technicalWords('旧基准尚未分类', '原文已变化，尚未核对'); }, unloaded: '未加载', 'other-version': '其他版本',
@@ -175,9 +177,9 @@ export function mountProposalWorkspace(options: {
   function receiptCard(receipt: ApplyReceiptProjection): HTMLElement {
     const node = el('section', undefined, 'proposal-receipt'); node.dataset['applyReceiptState'] = receipt.state;
     const labels = { applied: '已接受', 'not-applied': '未写入稿件', confirming: '正在确认修改是否生效', unresolved: '修改是否生效待确认' } as const;
-    node.append(el('h4', labels[receipt.state]), el('p', receipt.reason), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
+    node.append(el('h4', labels[receipt.state]), el('p', serviceWords(receipt.reason), 'proposal-receipt-reason'), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
       button('返回修改建议', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
-    node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`), technical(proposalIdentityRows({ 分支: receipt.branchId })));
+    node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt === null ? '尚无批准记录' : localInstantLabel(receipt.approvedAt)} · ${receipt.application?.changeCount ?? 0} 处写入`, 'proposal-receipt-record'), technical(proposalIdentityRows({ 分支: receipt.branchId })));
     if (receipt.safeRetry && receipt.state === 'not-applied') node.append(button('重新应用', 'safe-reprepare', () => void act(applyAccepted)));
     // EREC-005: no retry while 结果待确认; the editor's re-check reads the authoritative records and dispatches nothing.
     if (receipt.state === 'unresolved') node.append(button('重新核对应用结果', 'receipt-recheck', () => void act(async () => {

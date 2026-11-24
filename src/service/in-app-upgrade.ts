@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { requireBaselineSchema } from './baseline-schema.js';
 import { canonicalJson } from './analysis/canonical.js';
+import { isSoftwareVersion } from '../shared/build-identity.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile, isStorageFullError } from '../shared/data-root.js';
 import {
   DATA_VERSION_MARKER_FILE, DataVersionLedger, readDataVersionMarker, readDataVersionMarkerText, readUpgrade, SCHEMA_REVISION_CLASSES,
@@ -24,6 +25,7 @@ type Stage = typeof stages[number];
 interface UpgradeState {
   id: string;
   stage: Stage;
+  softwareVersion?: string;
   backup: DataVersionUpgrade | null;
   comparison: string;
   fallback: boolean;
@@ -56,6 +58,7 @@ function parseState(raw: string): UpgradeState {
   const state = JSON.parse(raw);
   requireStore(state && /^\d{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(state.id) &&
     stages.includes(state.stage) && (state.inventoryFormat === undefined || (state.inventoryFormat === 1 && typeof state.rollbackAttempt === 'string')) &&
+    (isSoftwareVersion(state.softwareVersion) || (state.stage === 'backup' && state.softwareVersion === undefined)) &&
     /^[a-f0-9]{64}$/u.test(state.sourceDigest) && typeof state.fallback === 'boolean' && typeof state.comparison === 'string' &&
     (state.comparison === '' || /^升级前后均为 \d+ 本书、\d+ 份稿件、\d+ 条批注和 \d+ 份审阅报告。$/u.test(state.comparison)),
     'UPGRADE_STATE_INVALID', '上次升级的记录无法读取。');
@@ -69,7 +72,8 @@ async function recoveryReceipt(path: string): Promise<UpgradeState | null> {
 }
 
 function sameRollbackAttempt(receipt: UpgradeState,state: UpgradeState): boolean {
-  return receipt.id === state.id && receipt.rollbackAttempt === state.rollbackAttempt && receipt.stage === 'save-new';
+  return receipt.id === state.id && receipt.softwareVersion === state.softwareVersion &&
+    receipt.rollbackAttempt === state.rollbackAttempt && receipt.stage === 'save-new';
 }
 
 function inventoryText(state: UpgradeState,files: DatabasePackageMember[],digest: string): string {
@@ -500,7 +504,7 @@ export async function beginUpgrade(root: string): Promise<void> {
 }
 
 async function verifyOld(root: string, state: UpgradeState, rebuild = true): Promise<string> {
-  const old = join(root, 'store-before-0.8.0-' + state.id);
+  const old = keptOldStore(root, state);
   const digest = await sourceFingerprint(root,old);
   requireStore(digest === state.sourceDigest || digest === state.backupStoreDigest, 'UPGRADE_SOURCE_CHANGED', '原书库已变化。');
   const path = database(old);
@@ -690,6 +694,10 @@ async function writePhase(root: string, state: UpgradeState): Promise<void> {
   await syncDirectory(dirname(journal(root)));
 }
 
+const keptOldStore = (root: string, state: UpgradeState) => join(root, `store-before-${state.softwareVersion}-${state.id}`);
+// Older AI7 excludes shell from exports, including the newer store parked by rollback.
+const parkedNewStore = (root: string, state: UpgradeState) => join(root, 'shell', `store-after-${state.softwareVersion}-${state.id}`);
+
 async function moveStore(root: string, from: string, to: string, verify: (directory: string) => Promise<void>): Promise<void> {
   const pending = existsSync(from);
   requireStore(pending !== existsSync(to), 'UPGRADE_STATE_INVALID', '不能确认切换中的两个书库目录。');
@@ -745,7 +753,7 @@ export async function resumeUpgrade(root: string, softwareVersion: string, befor
       }
     }
     if (!before && state && ['restore','save-new','publish-old'].includes(state.stage)) {
-      const newer = join(root,'shell','store-after-0.8.0-'+state.id);
+      const newer = parkedNewStore(root, state);
       const live = !existsSync(newer) && existsSync(active) && await liveCurrentIsComplete(root,state);
       if (live) {
         await rm(journal(root),{force:true});
@@ -766,10 +774,14 @@ export async function resumeUpgrade(root: string, softwareVersion: string, befor
 async function runUpgrade(root: string, softwareVersion: string, before?: UpgradeHook, freeDataBytes?: number): Promise<{ restored: boolean; message: string } | null> {
   const state = await readState(journal(root));
   if (!state) return null;
+  if (state.softwareVersion === undefined) {
+    requireStore(isSoftwareVersion(softwareVersion), 'UPGRADE_STATE_INVALID', '无法确认本次升级的软件版本。');
+    state.softwareVersion = softwareVersion;
+    await writePhase(root, state);
+  }
   const store = join(root, 'store');
-  const old = join(root, 'store-before-0.8.0-' + state.id);
-  // 0.7.x excludes shell from exports. Its own packager cannot know a new set-aside directory name.
-  const newer = join(root, 'shell', 'store-after-0.8.0-' + state.id);
+  const old = keptOldStore(root, state);
+  const newer = parkedNewStore(root, state);
   const note = join(root, 'shell', 'upgrade-' + state.id);
   // Both versions exclude shell from exports. Even a locked staging directory stays private to this attempt.
   const staging = join(note, 'converted');
@@ -858,7 +870,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
     // A stale pre-switch journal can survive either forward rename. The conversion carries its own verified record.
     const candidate = existsSync(staging) ? staging : store;
     const ready = await readState(join(candidate,originFile));
-    requireStore(ready?.id === state.id && ready.sourceDigest === state.sourceDigest && ready.backup !== null,
+    requireStore(ready?.id === state.id && ready.softwareVersion === state.softwareVersion && ready.sourceDigest === state.sourceDigest && ready.backup !== null,
       'UPGRADE_MISMATCH','无法核对切换时保留的书库记录。');
     Object.assign(state,ready);
     await advance('publish');

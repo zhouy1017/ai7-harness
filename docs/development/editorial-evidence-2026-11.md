@@ -114,9 +114,11 @@ What changed between the passes: review contract v2 and the location fix (#879 /
 - 初评, 审稿意见 and writing (structural; final-only recording blocked by #1585); whole-book runs of the four; factual review.
 - Variance; money per call; real editors (protocol below).
 
-## Real-editor protocol (to be run by the Owner after 0.8.0)
+## Real-editor protocol (to be run by the Owner after 0.7.9)
 
-Arranged by the Owner with the unified human test after 0.8.0 ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)); not run here.
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
+
+Arranged by the Owner with the unified human test after 0.7.9 ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)); not run here.
 
 - **Editors.** Three to five working editors, recruited by the Owner; none is told which findings the harness scored.
 - **Material.** Two chapters each, from the Public SampleBooks and the same chapter ranges measured above, in the packaged human-test build. No private manuscript.

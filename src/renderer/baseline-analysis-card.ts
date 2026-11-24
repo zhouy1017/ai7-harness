@@ -309,7 +309,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
     if (report.modelLabel !== undefined) disclosure.append(element('p', 'task-model', `模型 ${report.modelLabel}`));
-    disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+    disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? serviceWords(completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused)) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
     const stages = element('ul', 'analysis-list analysis-run-report-stages');
@@ -1265,7 +1265,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const reason = report.classification === 'failed'
         ? serviceWords(report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason)
         : serviceWords(analysisRunSummary(report).reason);
-      card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
+      card.append(element('p', 'attention-note', `${serviceWords(projection.taskOutcome.label)}${reason === null ? '' : ` · ${reason}`}`));
     }
 
     // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the

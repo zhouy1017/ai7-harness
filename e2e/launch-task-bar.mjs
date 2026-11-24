@@ -93,11 +93,19 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       const estimate = `${root} .task-launch-estimate`;
       if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(estimate)})?.open===true`))) await pointerClick(renderer, waitFor, `${estimate} > summary`, `${name}-preview-${width}`);
       else await pointerClick(renderer, waitFor, `${root} [data-task-drawer-control="preview-launch"]`, `${name}-refresh-preview-${width}`);
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate + ' ol')})?.children.length>0 && document.querySelector(${JSON.stringify(estimate)})?.textContent.includes('阅读范围')`, `${name}-preview-current-${width}`);
+      // The plan's range and the adaptation lines in the words of the mode on show (#1616, stage-4/5 rework R6): an ordinary editor
+      // reads 「N 个部分」 and never 阅读范围; development mode reads the service's own sentence.
+      const ordinary = await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='false'`);
+      await waitFor(renderer, `(() => { const plan=document.querySelector(${JSON.stringify(estimate)}); if(!(plan?.querySelector('ol')?.children.length>0))return false;
+        const text=plan.textContent, scope=plan.querySelector('.task-launch-scope')?.textContent??'';
+        return ${ordinary} ? /^处理范围：.+ 个部分/u.test(scope) && !text.includes('阅读范围') : text.includes('阅读范围'); })()`, `${name}-preview-current-${width}`);
       for (const text of previewContains) {
         await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate)})?.textContent.includes(${JSON.stringify(text)})===true`, `${name}-preview-missing-disclosure-${width}`, 5_000);
       }
       await waitFor(renderer, popoverShownInside(`document.querySelector(${JSON.stringify(estimate + ' .task-launch-popover')})`), `${name}-plan-reachable-${width}`);
+      // What the editor reads in the shown panel (rendered text, the panel inside the window): the same words.
+      if (ordinary) await waitFor(renderer, `(() => { const text=document.querySelector(${JSON.stringify(estimate + ' .task-launch-popover')})?.innerText??'';
+        return /处理范围：.+ 个部分/u.test(text) && !/阅读范围/u.test(text); })()`, `${name}-plan-ordinary-words-${width}`);
       await pointerClick(renderer, waitFor, `${estimate} > summary`, `${name}-preview-close-${width}`);
     }
   } finally {

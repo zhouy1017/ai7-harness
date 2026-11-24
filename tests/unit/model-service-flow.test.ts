@@ -51,12 +51,25 @@ function flow(projection: ModelServiceSettingsProjection, calls = api(), options
 }
 
 const button = (root: MiniElement, action: string) => root.querySelector(`button[data-action="${action}"]`)!;
+const CLAUDE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const DOCUMENTED = { kind: 'documented', source: 'https://vendor.example/effort', readOn: '2026-11-24' } as const;
+/**
+ * The same settings with synthetic evidence for one channel's models (every model, or the named ones): the levels the model
+ * service says a model supports, or that it takes none. A model without evidence stays unknown.
+ */
+function withEfforts(projection: ModelServiceSettingsProjection, channelId: string, levels: readonly string[] | 'unsupported', modelIds?: readonly string[]): ModelServiceSettingsProjection {
+  const supportedEfforts = levels === 'unsupported' ? { status: 'unsupported', levels: [], completeness: 'complete', provenance: DOCUMENTED }
+    : { status: 'supported', levels, completeness: 'partial', provenance: DOCUMENTED };
+  return { ...projection, channels: projection.channels.map(channel => channel.channelId !== channelId ? channel : { ...channel,
+    models: channel.models.map(model => modelIds === undefined || modelIds.includes(model.modelId) ? { ...model, supportedEfforts } : model) }) } as ModelServiceSettingsProjection;
+}
+const claude = (...arguments_: Parameters<typeof settings>): ModelServiceSettingsProjection => withEfforts(settings(...arguments_), 'anthropic-claude', CLAUDE_LEVELS);
+const effortSelect = (root: MiniElement, tier: 'main' | 'fast') => root.querySelector(`select[data-reasoning-effort="${tier}"]`)!;
+const effortValues = (root: MiniElement, tier: 'main' | 'fast') => effortSelect(root, tier).querySelectorAll('option').map(option => option.value);
 const setEffort = (root: MiniElement, tier: 'main' | 'fast', value: string) => {
-  const label = tier === 'main' ? '思考强度' : '较轻模型的思考强度';
-  const select = root.querySelector(`select[aria-label="${label}"]`)!;
-  const known = select.querySelectorAll('option').some(option => option.value === value);
-  select.value = known ? value : '__other'; select.dispatchEvent({ type: 'change', bubbles: true });
-  if (!known) { const input = root.querySelector(`input[data-reasoning-effort="${tier}"]`)!; input.value = value; input.dispatchEvent({ type: 'input', bubbles: true }); }
+  const select = effortSelect(root, tier);
+  expect(effortValues(root, tier)).toContain(value);
+  select.value = value; select.dispatchEvent({ type: 'change', bubbles: true });
 };
 const pickChannel = (root: MiniElement, channelId: string) => {
   const radio = root.querySelector(`[data-model-channel="${channelId}"] input`)!;
@@ -89,7 +102,7 @@ function mountSettings(calls: ReturnType<typeof api>) {
 
 describe('the one model-service flow', () => {
   it('saves the selected channel and effort to the underlying role and can restore its inherited choice', async () => {
-    const { node, calls } = flow(settings(['anthropic-claude']));
+    const { node, calls } = flow(claude(['anthropic-claude']));
     setEffort(node, 'main', 'high');
     button(node, 'select-underlying-pro').click();
     await vi.waitFor(() => expect(calls.selectUnderlyingModel).toHaveBeenCalledWith(expect.objectContaining({
@@ -113,31 +126,34 @@ describe('the one model-service flow', () => {
   });
   it('keeps an unsaved effort when a catalogue poll finishes after focus moves to Save (#1453)', async () => {
     setTechnicalLayerVisible(false);
-    const projection = completeSettings(), calls = api(projection);
+    const projection = withEfforts(completeSettings(), 'opencode-go', ['low', 'high', 'max']), calls = api(projection);
     const { screen, node, poll } = mountSettings(calls);
     try {
       await screen.renderModelServiceSettings();
-      const effort = node.querySelector('input[aria-label="思考强度其他"]')!;
-      setEffort(node, 'main', 'vendor-future-level');
+      const effort = effortSelect(node, 'main');
+      setEffort(node, 'main', 'high');
       button(node, 'use-model-for-both-roles').focus();
       const changed = structuredClone(projection);
       Object.assign(changed.channels[0]!, { channelLabel: 'Updated public catalogue' });
       vi.mocked(calls.getModelServiceSettings).mockResolvedValue(changed);
       poll();
       await vi.waitFor(() => expect(calls.getModelServiceSettings).toHaveBeenCalledTimes(2));
-      expect(node.querySelector('input[aria-label="思考强度其他"]') === effort).toBe(true);
-      expect(effort.value).toBe('vendor-future-level');
+      expect(effortSelect(node, 'main') === effort).toBe(true);
+      expect(effort.value).toBe('high');
       button(node, 'use-model-for-both-roles').click();
-      await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'vendor-future-level' })));
+      await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it.each([true, false])('chooses and reopens a role effort default, including a custom identifier (technical=%s, #1453)', async (technical) => {
+  it.each([true, false])('chooses and reopens a role effort default from the model\'s own levels (technical=%s, #1453)', async (technical) => {
     setTechnicalLayerVisible(technical);
-    const projection = settings(['anthropic-claude']);
+    const projection = claude(['anthropic-claude']);
     const { node, calls } = flow(projection);
-    const effort = node.querySelector('input[aria-label="思考强度其他"]')!;
-    expect(effort.value).toBe('');
+    expect(effortSelect(node, 'main').value).toBe('off');
+    expect(effortValues(node, 'main')).toEqual(['off', ...CLAUDE_LEVELS]);
+    // 0.8.0 stage one: no typed value, so neither the 「其他…」 entry nor its text field exists.
+    expect(node.querySelector('input[data-reasoning-effort]')).toBeNull();
+    expect(node.textContent).not.toContain('其他…');
     setEffort(node, 'main', 'high');
     expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
@@ -145,48 +161,46 @@ describe('the one model-service flow', () => {
     const saved = { ...projection, modelRoles: projection.modelRoles.map((role) => ({ ...role,
       binding: role.binding === null ? null : { ...role.binding, reasoningEffort: role.roleId === 'foreground-pro' ? 'high' : 'low' } })) };
     const reopened = flow(saved).node;
-    expect(reopened.querySelector('input[aria-label="思考强度其他"]')!.value).toBe('high');
-    const fastEffort = node.querySelector('input[aria-label="较轻模型的思考强度其他"]')!;
-    setEffort(node, 'fast', 'vendor-future-level');
+    expect(effortSelect(reopened, 'main').value).toBe('high');
+    expect(effortSelect(reopened, 'fast').value).toBe('low');
+    setEffort(node, 'fast', 'max');
     button(node, 'select-fast-role-model').click();
-    await vi.waitFor(() => expect(calls.selectFlashModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'vendor-future-level' }));
+    await vi.waitFor(() => expect(calls.selectFlashModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'max' }));
   });
 
   it('reopens and re-saves independent main high / fast low without changing the other role (#1453 review)', async () => {
-    const projection = settings(['anthropic-claude']);
+    const projection = claude(['anthropic-claude']);
     const saved = { ...projection, modelRoles: projection.modelRoles.map((role) => ({ ...role,
       binding: role.binding === null ? null : { ...role.binding, reasoningEffort: role.roleId === 'foreground-pro' ? 'high' : 'low' } })) };
     const { node, calls } = flow(saved);
-    expect(node.querySelector('input[aria-label="思考强度其他"]')!.value).toBe('high');
-    expect(node.querySelector('input[aria-label="较轻模型的思考强度其他"]')!.value).toBe('low');
+    expect(effortSelect(node, 'main').value).toBe('high');
+    expect(effortSelect(node, 'fast').value).toBe('low');
     button(node, 'select-fast-role-model').click();
     await vi.waitFor(() => expect(calls.selectFlashModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'low' })));
     expect(calls.selectProModel).not.toHaveBeenCalled();
-    const main = node.querySelector('input[aria-label="思考强度其他"]')!;
     setEffort(node, 'main', 'medium');
     button(node, 'use-model-for-both-roles').click();
     await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'medium' })));
   });
 
   it('keeps both unsaved efforts through connection-test and refresh action renders (#1453 review)', async () => {
-    const calls = api(completeSettings());
+    const calls = api(withEfforts(completeSettings(), 'opencode-go', ['low', 'high', 'max']));
     const { screen, node } = mountSettings(calls);
     try {
       await screen.renderModelServiceSettings();
-      for (const [role, value] of [['主编辑', 'high'], ['快速交互', 'low']]) {
-        setEffort(node, role === '主编辑' ? 'main' : 'fast', value!);
-      }
+      setEffort(node, 'main', 'high');
+      setEffort(node, 'fast', 'low');
       button(node, 'test-flow-connection').click();
       await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
-      await vi.waitFor(() => expect(node.querySelector('input[aria-label="较轻模型的思考强度其他"]')!.value).toBe('low'));
-      expect(node.querySelector('input[aria-label="思考强度其他"]')!.value).toBe('high');
+      await vi.waitFor(() => expect(effortSelect(node, 'fast').value).toBe('low'));
+      expect(effortSelect(node, 'main').value).toBe('high');
       button(node, 'test-fast-flow-connection').click();
       await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: 'low' })));
-      expect(node.querySelector('input[aria-label="思考强度其他"]')!.value).toBe('high');
+      expect(effortSelect(node, 'main').value).toBe('high');
       button(node, 'retry-model-list').click();
       await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalled());
-      await vi.waitFor(() => expect(node.querySelector('input[aria-label="思考强度其他"]')!.value).toBe('high'));
-      expect(node.querySelector('input[aria-label="较轻模型的思考强度其他"]')!.value).toBe('low');
+      await vi.waitFor(() => expect(effortSelect(node, 'main').value).toBe('high'));
+      expect(effortSelect(node, 'fast').value).toBe('low');
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -720,7 +734,7 @@ it('scans connection-test feedback and the repainted model page when discovery u
 
 it('offers ready channels, favourites first, and resets the task choice without saving role defaults (#1455)', () => {
   const changed = vi.fn();
-  const projection = settings(['opencode-go', 'openai-platform']);
+  const projection = withEfforts(settings(['opencode-go', 'openai-platform']), 'opencode-go', ['low', 'high', 'max']);
   const chooser = createDispatchChooser({ role: 'main-editorial', changed });
   const goModels = projection.channels.find(channel => channel.channelId === 'opencode-go')!.models;
   // A Go model declared on its /responses route is never offered (#1582): no runtime record serves that route.
@@ -729,27 +743,57 @@ it('offers ready channels, favourites first, and resets the task choice without 
   const defaults = JSON.stringify(projection.roles);
   chooser.render(projection, { 'opencode-go': [favourite.modelId, unserved.modelId] });
   const root = chooser.element as unknown as MiniElement;
-  expect(root.querySelectorAll('option').some(option => option.textContent.includes(unserved.modelLabel))).toBe(false);
+  const model = root.querySelector('select[aria-label="本次任务的模型"]')!;
+  expect(model.querySelectorAll('option').some(option => option.textContent.includes(unserved.modelLabel))).toBe(false);
   expect(root.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label)).toEqual(['OpenCode Go', 'OpenAI 官方']);
   expect(root.querySelectorAll('optgroup')[0]!.children[0]!.textContent).toBe(`★ ${favourite.modelLabel}`);
   const inheritedLabel = root.querySelector('summary')!.textContent;
-  const model = root.querySelector('select[aria-label="本次任务的模型"]')!;
-  const options = root.querySelectorAll('option');
-  expect(options.some(option => option.textContent.includes('★'))).toBe(true);
-  Object.assign(model, { selectedIndex: root.querySelectorAll('optgroup')[0]!.children.length });
+  expect(model.querySelectorAll('option').some(option => option.textContent.includes('★'))).toBe(true);
+  Object.assign(model, { selectedIndex: 0 });
   model.dispatchEvent({ type: 'change' });
   const effort = root.querySelector('select[aria-label="本次任务的思考强度"]')!;
-  const level = effort.children[1]!.value;
-  effort.value = level; effort.dispatchEvent({ type: 'change' });
-  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: level }));
-  expect(root.querySelector('summary')!.textContent).toContain(`@${level}`);
+  expect(effort.querySelectorAll('option').map(option => option.value)).toEqual(['off', 'low', 'high', 'max']);
+  effort.value = 'high'; effort.dispatchEvent({ type: 'change' });
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ modelId: favourite.modelId, reasoningEffort: 'high' }));
+  expect(root.querySelector('summary')!.textContent).toContain('@high');
   const selectedLabel = root.querySelector('summary')!.textContent;
   chooser.render(projection, {}, changed.mock.lastCall![0]);
   expect(root.querySelector('summary')!.textContent).toBe(selectedLabel);
+  // Another model starts at 模型默认, and a model nothing is known about offers only that: the level is not carried over.
+  Object.assign(model, { selectedIndex: root.querySelectorAll('optgroup')[0]!.children.length });
+  model.dispatchEvent({ type: 'change' });
+  expect(effort.querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认']);
+  expect(root.querySelector('.dispatch-chooser-effort-note')!.textContent).toContain('还没有查到这个模型的可选强度。');
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: 'off' }));
+  expect(root.querySelector('summary')!.textContent).not.toContain('@');
   root.querySelector('button')!.click();
   expect(changed).toHaveBeenLastCalledWith({});
   expect(root.querySelector('summary')!.textContent).toBe(inheritedLabel);
   expect(JSON.stringify(projection.roles)).toBe(defaults);
+});
+
+it('keeps a task choice the model no longer offers until the editor chooses again (0.8.0 stage one)', () => {
+  setTechnicalLayerVisible(false);
+  const changed = vi.fn();
+  const projection = withEfforts(settings(['opencode-go']), 'opencode-go', ['low', 'high', 'max']);
+  const connection = projection.routeChoice.routes.find(route => route.route === 'opencode-go')!.connection!;
+  const frozen = { modelConnectionId: connection.connectionId, modelId: MODEL_SERVICE_ROUTE_BINDINGS['opencode-go'].modelId, reasoningEffort: 'medium' };
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed });
+  chooser.render(projection, {}, frozen);
+  const root = chooser.element as unknown as MiniElement;
+  const effort = root.querySelector('select[aria-label="本次任务的思考强度"]')!;
+  expect(effort.value).toBe('medium');
+  expect(effort.querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认', '低', '高', '最高', '中（现在不可用）']);
+  expect(root.querySelector('.dispatch-chooser-effort-note')!.textContent).toBe('之前选的强度现在不可用，请重新选择。');
+  expect(root.querySelector('summary')!.textContent).toContain('@medium');
+  // Painting never changes what the Task would use: only the editor's own choice does.
+  expect(changed).not.toHaveBeenCalled();
+  effort.value = 'high'; effort.dispatchEvent({ type: 'change' });
+  expect(changed).toHaveBeenLastCalledWith({ ...frozen, reasoningEffort: 'high' });
+  expect(effort.querySelectorAll('option').map(option => option.value)).toEqual(['off', 'low', 'high', 'max']);
+  expect(root.querySelector('.dispatch-chooser-effort-note')!.hidden).toBe(true);
+  expectNoTechnicalText(root);
+  setTechnicalLayerVisible(true);
 });
 
 
@@ -779,17 +823,80 @@ it('names the effective models, clears the optional choice, and explains a refus
   } finally { vi.unstubAllGlobals(); }
 });
 
-it('groups configured recommendations before the remaining models and offers default, suggested and custom effort', () => {
+it('groups configured recommendations before the remaining models and offers 模型默认 with the model\'s own levels', () => {
   setTechnicalLayerVisible(false);
-  const projection = settings(['anthropic-claude']);
+  const projection = claude(['anthropic-claude']);
   const { node } = flow(projection);
   expect(node.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label).slice(0, 2)).toEqual(['推荐 · 主要模型', '推荐 · 较轻模型']);
-  const effort = node.querySelector('select[aria-label="思考强度"]')!;
-  expect(effort.querySelectorAll('option').map(option => option.textContent)).toEqual(expect.arrayContaining(['服务默认', '其他…']));
-  effort.value = '__other'; effort.dispatchEvent({ type: 'change' });
-  expect(node.querySelector('input[data-reasoning-effort="main"]')!.hidden).toBe(false);
+  expect(effortSelect(node, 'main').querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认', '低', '中', '高', '更高', '最高']);
+  expect(node.querySelector('.model-service-effort-note')!.hidden).toBe(true);
+  expectNoTechnicalText(node);
   const plain = { ...projection, channels: projection.channels.map(channel => { const { recommended: _recommendations, ...plain } = channel; return plain; }) };
   expect(flow(plain).node.querySelectorAll('optgroup')).toHaveLength(0);
+});
+
+it('lists only 模型默认, with the reason, for a model with no known or no settable levels', () => {
+  setTechnicalLayerVisible(false);
+  const unknown = flow(settings(['anthropic-claude'])).node;
+  expect(effortSelect(unknown, 'main').querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认']);
+  expect(unknown.querySelectorAll('.model-service-effort-note').map(note => note.textContent)).toEqual(['还没有查到这个模型的可选强度。', '还没有查到这个模型的可选强度。']);
+  expect(button(unknown, 'retry-model-list').disabled).toBe(false);
+  const unsupported = flow(withEfforts(settings(['anthropic-claude']), 'anthropic-claude', 'unsupported')).node;
+  expect(effortValues(unsupported, 'main')).toEqual(['off']);
+  expect(unsupported.querySelector('.model-service-effort-note')!.textContent).toBe('这个模型不能单独设置思考强度。');
+  expectNoTechnicalText(unsupported);
+  // Developer mode adds the service's names, the route, the source and its date.
+  setTechnicalLayerVisible(true);
+  const developer = flow(claude(['anthropic-claude'])).node;
+  expect(effortSelect(developer, 'main').querySelectorAll('option').map(option => option.textContent)).toContain('更高（xhigh）');
+  const detail = developer.querySelector('[data-effort-note="detail"]')!.textContent;
+  for (const word of ['anthropic-claude', 'low / medium / high / xhigh / max', DOCUMENTED.source, DOCUMENTED.readOn, '列表可能不完整']) expect(detail).toContain(word);
+});
+
+it('re-reads the levels when the model changes and never carries a level to another model', async () => {
+  setTechnicalLayerVisible(false);
+  const base = settings(['anthropic-claude'], 'anthropic-claude', null);
+  const [first, second] = base.channels.find(channel => channel.channelId === 'anthropic-claude')!.models.filter(model => model.main === 'eligible' && model.fast === 'eligible');
+  const projection = withEfforts(withEfforts(base, 'anthropic-claude', CLAUDE_LEVELS, [first!.modelId]), 'anthropic-claude', ['low', 'high'], [second!.modelId]);
+  const drafts = new Map<string, string>();
+  const { node, calls } = flow(projection, api(), { effortDraft: (_channel, role, modelId) => drafts.get(`${role}/${modelId}`),
+    setEffortDraft: (_channel, role, modelId, effort) => { if (effort === undefined) drafts.delete(`${role}/${modelId}`); else drafts.set(`${role}/${modelId}`, effort); } });
+  const model = node.querySelector('select[aria-label="AI7 使用的模型"]')!;
+  expect(model.value).toBe(first!.modelId);
+  setEffort(node, 'main', 'xhigh');
+  model.value = second!.modelId; model.dispatchEvent({ type: 'change' });
+  expect(effortValues(node, 'main')).toEqual(['off', 'low', 'high']);
+  expect(effortSelect(node, 'main').value).toBe('off');
+  button(node, 'use-model-for-both-roles').click();
+  await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: second!.modelId, reasoningEffort: 'off' }));
+  // Back on the first model its own unsaved choice is shown again.
+  model.value = first!.modelId; model.dispatchEvent({ type: 'change' });
+  expect(effortValues(node, 'main')).toEqual(['off', ...CLAUDE_LEVELS]);
+  expect(effortSelect(node, 'main').value).toBe('xhigh');
+});
+
+it('keeps a saved level the model no longer offers and asks the editor to choose again', async () => {
+  setTechnicalLayerVisible(false);
+  const base = withEfforts(settings(['anthropic-claude']), 'anthropic-claude', ['low', 'high']);
+  const projection = { ...base, modelRoles: base.modelRoles.map(role => ({ ...role, binding: role.binding && { ...role.binding, reasoningEffort: role.roleId === 'foreground-pro' ? 'xhigh' : 'low' } })) };
+  const { node, calls } = flow(projection);
+  const main = effortSelect(node, 'main');
+  expect(main.value).toBe('xhigh');
+  expect(main.querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认', '低', '高', '更高（现在不可用）']);
+  expect(main.dataset['effortState']).toBe('stale');
+  expect(node.querySelectorAll('.model-service-effort-note').map(note => note.hidden ? '' : note.textContent)).toEqual(['之前选的强度现在不可用，请重新选择。', '']);
+  // Nothing is saved or tested with the level until the editor chooses; the other role is untouched.
+  expect(button(node, 'use-model-for-both-roles').disabled).toBe(true);
+  expect(button(node, 'test-flow-connection').disabled).toBe(true);
+  expect(button(node, 'select-fast-role-model').disabled).toBe(false);
+  expect(effortSelect(node, 'fast').value).toBe('low');
+  expectNoTechnicalText(node);
+  setEffort(node, 'main', 'high');
+  expect(effortValues(node, 'main')).toEqual(['off', 'low', 'high']);
+  expect(node.querySelector('.model-service-effort-note')!.hidden).toBe(true);
+  expect(button(node, 'test-flow-connection').disabled).toBe(false);
+  button(node, 'use-model-for-both-roles').click();
+  await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
 });
 
 
@@ -807,7 +914,7 @@ it('lets an explicit settings entry reset the previous page scroll instead of re
 
 it('keeps the optional model independent, preserves Flash on main save, and places the summary between choices', async () => {
   setTechnicalLayerVisible(false);
-  const projection = settings(['anthropic-claude'], 'anthropic-claude', null);
+  const projection = claude(['anthropic-claude'], 'anthropic-claude', null);
   const { node, calls } = flow(projection);
   const main = node.querySelector('select[aria-label="AI7 使用的模型"]')!;
   const light = node.querySelector('select[data-flash-model]')!;
@@ -824,22 +931,6 @@ it('keeps the optional model independent, preserves Flash on main save, and plac
   const siblings = actions.parentElement!.children;
   expect(siblings[siblings.indexOf(actions) + 1]!.dataset['modelSummary']).toBe('true');
   expect(siblings[siblings.indexOf(actions) + 2]!.className).toBe('model-service-optional');
-});
-
-it('keeps Other open for blank and suggested text and sends the shown dropdown selection', async () => {
-  const { node, calls } = flow(settings(['anthropic-claude']));
-  const select = node.querySelector('select[aria-label="思考强度"]')!;
-  expect(select.querySelectorAll('option').map(option => option.value)).toEqual(expect.arrayContaining(['low', 'high']));
-  select.value = '__other'; select.dispatchEvent({ type: 'change' });
-  const input = node.querySelector('input[data-reasoning-effort="main"]')!;
-  input.value = 'low'; input.dispatchEvent({ type: 'input' });
-  expect(select.value).toBe('__other'); expect(input.hidden).toBe(false);
-  input.value = ''; input.dispatchEvent({ type: 'input' }); expect(select.value).toBe('__other');
-  select.value = 'high'; select.dispatchEvent({ type: 'change' }); expect(input.hidden).toBe(true);
-  input.value = 'low'; // A stale text-field restoration must not change the shown selection's request.
-  button(node, 'use-model-for-both-roles').click();
-  await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
-  expect(node.textContent).toContain('可能不被服务接受');
 });
 
 it('shows all four developer roles, their sources and their own effort', async () => {
@@ -881,7 +972,7 @@ it.each(['setup-required', 'needs-attention', 'unavailable'] as const)('does not
 
 it('tests the optional model with its own selected model and effort', async () => {
   setTechnicalLayerVisible(false);
-  const { node, calls } = flow(settings(['anthropic-claude']));
+  const { node, calls } = flow(claude(['anthropic-claude']));
   const select = node.querySelector('select[data-flash-model]')!;
   select.value = select.querySelectorAll('option').at(-1)!.value; select.dispatchEvent({ type: 'change' });
   setEffort(node, 'fast', 'low'); button(node, 'test-fast-flow-connection').click();
@@ -889,11 +980,11 @@ it('tests the optional model with its own selected model and effort', async () =
 });
 
 
-it('starts the optional effort at service default when no lighter model is chosen', async () => {
-  const projection = settings(['anthropic-claude'], 'anthropic-claude', null);
+it('starts the optional effort at the model default when no lighter model is chosen', async () => {
+  const projection = claude(['anthropic-claude'], 'anthropic-claude', null);
   const { node, calls } = flow({ ...projection, modelRoles: projection.modelRoles.map(role => ({ ...role, binding: role.binding && { ...role.binding, reasoningEffort: 'high' } })) });
   expect(node.querySelector('select[aria-label="思考强度"]')!.value).toBe('high');
-  expect(node.querySelector('select[aria-label="较轻模型的思考强度"]')!.value).toBe('');
+  expect(node.querySelector('select[aria-label="较轻模型的思考强度"]')!.value).toBe('off');
   expect(node.querySelector('[data-action="test-fast-flow-connection"]')).toBeNull();
   button(node, 'select-fast-role-model').click();
   await vi.waitFor(() => expect(calls.selectFlashModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'off' })));
@@ -920,20 +1011,19 @@ it('uses the configured lighter recommendation and labels its developer custom f
   expect(node.querySelector('[data-custom-flash-model-id]')!.parentElement!.textContent).toContain('手动输入较轻模型 ID');
 });
 
-it('drops unsaved lighter selection and Other mode on explicit re-entry, without rendering an empty ordinary role section', async () => {
+it('drops the unsaved lighter selection and its unsaved effort on explicit re-entry, without rendering an empty ordinary role section', async () => {
   setTechnicalLayerVisible(false);
-  const { screen, node } = mountSettings(api(completeSettings()));
+  const { screen, node } = mountSettings(api(withEfforts(completeSettings(), 'opencode-go', ['low', 'high', 'max'])));
   try {
     await screen.renderModelServiceSettings();
     const chosen = node.querySelector('select[data-flash-model]')!.value;
+    const saved = effortSelect(node, 'fast').value;
+    setEffort(node, 'fast', 'max');
     const select = node.querySelector('select[data-flash-model]')!;
     select.value = select.querySelectorAll('option').at(-1)!.value; select.dispatchEvent({ type: 'change' });
-    const effort = node.querySelector('select[aria-label="较轻模型的思考强度"]')!;
-    effort.value = '__other'; effort.dispatchEvent({ type: 'change' });
-    const other = node.querySelector('input[data-reasoning-effort="fast"]')!; other.value = 'vendor-future-level'; other.dispatchEvent({ type: 'input' });
     await screen.renderModelServiceSettings();
     expect(node.querySelector('select[data-flash-model]')!.value).toBe(chosen);
-    expect(node.querySelector('select[aria-label="较轻模型的思考强度"]')!.value).not.toBe('__other');
+    expect(effortSelect(node, 'fast').value).toBe(saved);
     expect(node.querySelector('.model-service-current-roles')).toBeNull();
   } finally { vi.unstubAllGlobals(); }
 });

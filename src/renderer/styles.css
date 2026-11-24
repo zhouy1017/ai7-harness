@@ -619,6 +619,8 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-overview-state { margin-left: auto; }
 .task-overview-card-line { color: var(--text-subdued); font-size: .92rem; }
 .task-overview-card-kind, .task-overview-card-time { color: var(--text-subdued); font-size: .82rem; }
+/* When it was recorded, how long it worked and its model: one line of facts with a separator between them (stage-4/5 R3). */
+.task-overview-card-facts { color: var(--text-subdued); font-size: .82rem; overflow-wrap: anywhere; }
 .task-overview-progress { width: 100%; height: 6px; accent-color: var(--action-text); }
 .task-overview-action-hint { color: var(--action-text); font-size: .86rem; }
 .task-overview-sheet-note { padding: 0 1.2rem; color: var(--text-subdued); }
@@ -1672,8 +1674,14 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .derivative-field { display: grid; gap: .25rem; }
 .derivative-modes, .derivative-sources { display: grid; gap: .3rem; margin: 0; padding: .5rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; }
 .derivative-writing-host .writing-task { margin: .25rem .75rem; }
-.document-title-row { display: flex; align-items: center; gap: .45rem; min-width: 0; }
-.document-title-row h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A derivative's name has the toolbar's first line (stage-4/5 R2): its type, the title in the width that is left, 重命名 on one line —
+   with the info line beside it while both fit, the editing controls on the line below. */
+.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar { flex-wrap: wrap; }
+.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar > div:first-child { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: .1rem 1rem; }
+.editor-shell[data-manuscript-kind="derivative"] .editor-meta { flex: 0 1 auto; }
+.document-title-row { display: flex; flex: 1 1 auto; align-items: center; gap: .45rem; min-width: 0; }
+.document-title-row h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-toolbar .document-title-row .btn { flex: 0 0 auto; white-space: nowrap; }
 .document-type-badge { flex: 0 0 auto; color: var(--text-subdued); font-size: .85rem; }
 .document-title-input { min-width: 12rem; max-width: 28rem; font-size: 1rem; }
 .deliverables-manuscript-pointer { margin-top: 1.3rem; padding: .9rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
@@ -1927,7 +1935,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
 .editorial-mark-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 4; font-size: .92rem; line-height: 1.6; }
 .editorial-mark-menu-layer { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-size: .92rem; line-height: 1.6; }
-.editorial-mark-menu { position: fixed; max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: auto; }
+.editorial-mark-menu { position: fixed; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; }
 .editorial-mark-card, .editorial-mark-composer { position: absolute; }
 .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer { border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); box-shadow: 0 14px 34px var(--shadow); }
 .editorial-mark-menu { width: min(19rem, calc(100vw - 2rem)); padding: .35rem; }
@@ -2633,7 +2641,10 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .model-service-catalogue-row[hidden] { display: none; }
 .model-service-filter, .model-service-effort { display: grid; gap: .3rem; min-width: 0; }
 .model-service-effort { margin-top: .6rem; }
-.model-service-effort input { width: 100%; min-width: 0; }
+.model-service-effort label { display: grid; gap: .3rem; min-width: 0; }
+.model-service-effort-note, .dispatch-chooser-effort-note { margin: 0; overflow-wrap: anywhere; }
+.model-service-effort-note[hidden], .dispatch-chooser-effort-note[hidden] { display: none; }
+.model-service-effort-note > span, .dispatch-chooser-effort-note > span { display: block; }
 [data-model-service-mode="ordinary"] > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 [data-model-service-mode="ordinary"] .model-service-flow-models { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 [data-model-service-mode="ordinary"] select { width: 100%; min-width: 0; }
@@ -2677,7 +2688,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
   .document-workspace:has(> .manuscript-navigator:not([hidden])) > .document-lens { grid-column: 1; grid-row: 3; }
   .editor-workspace > .region-separator { visibility: hidden; }
   .editor-meta { gap: .2rem .6rem; }
-  .editor-toolbar h2, .editor-toolbar .section-label { display: none; }
+  .editor-toolbar .section-label { display: none; }
 }
 @container (max-width: 34rem) {
   .editor-toolbar { flex-wrap: wrap; }
@@ -3010,7 +3021,7 @@ body[data-task-drawer="open"] .technical-layer-control { right: calc(min(var(--t
 .ui-select-option[aria-selected="true"] { font-weight: 600; }
 :is(.ui-select-popover, .ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px var(--shadow), 0 2px 6px var(--shadow); padding: 5px; animation: ui-menu-enter var(--motion-fast) var(--motion-ease); }
 .ui-menu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; min-width: 12rem; max-width: calc(100vw - 16px); }
-:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { overflow-y: auto; overscroll-behavior: contain; max-height: min(320px, calc(100vh - 16px)); }
+:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .export-menu-body) { overflow-y: auto; overscroll-behavior: contain; max-height: min(320px, calc(100vh - 16px)); }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn, .editorial-mark-menu .editorial-mark-menu-item { display: flex; align-items: center; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-weight: 400; }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:hover:not(:disabled), :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:focus-visible { background: var(--surface-subdued); }
 @keyframes ui-menu-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
