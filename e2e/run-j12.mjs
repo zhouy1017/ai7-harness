@@ -1036,7 +1036,7 @@ async function main() {
       for (const fallback of [false,true]) {
         at('upgrade-consent');
         const manager = await launch(undefined,undefined,root);
-        await pressUpgradeDialog(executable,root,'升级书库','升级');
+        await pressUpgradeDialog(executable,root,'升级书库','升级','升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。');
         await pressUpgradeDialog(executable,root,'书库升级','关闭');
         const [page] = await waitForRendererCount(manager,1,'upgrade-library-opened');
         await waitFor(page,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-ready');
