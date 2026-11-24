@@ -3875,7 +3875,7 @@ export async function runApplication(): Promise<void> {
       if (!(error instanceof ServiceCallError && error.code === 'DATA_VERSION_OLDER')) throw error;
       if (!(await storageMaintenance(serviceEntry,dataRoot,'preflight'))) { app.quit(); return; }
       const answer = await dialog.showMessageBox({ type:'question',title:'升级书库',
-        message:'AI7 将先备份，再整理为新格式。升级前的书库会保留，旧版 AI7 无法打开升级后的数据。',
+        message:'AI7 将先备份，再整理为新格式。升级前的书库会保留，旧版 AI7 无法打开升级后的数据。升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。',
         buttons:['升级','关闭'],defaultId:1,cancelId:1 });
       if (answer.response !== 0 || !(await storageMaintenance(serviceEntry,dataRoot,'upgrade'))) { app.quit(); return; }
       service = await startService();

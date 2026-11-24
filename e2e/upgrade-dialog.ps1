@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory)][string]$DataRoot,
   [Parameter(Mandatory)][string]$Executable,
   [Parameter(Mandatory)][string]$Title,
-  [Parameter(Mandatory)][string]$Button
+  [Parameter(Mandatory)][string]$Button,
+  [string]$Disclosure = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -52,6 +53,12 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $owner = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $window.Current.ProcessId)
     if (!$owner -or $owner.ExecutablePath -ne $Executable -or !$owner.CommandLine.Contains($DataRoot)) { continue }
     $matchedDialogs++
+    if ($Disclosure) {
+      $text = $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      if (!($text | Where-Object { !$_.Current.IsOffscreen -and $_.Current.Name.Contains($Disclosure) })) {
+        throw 'The owned upgrade dialog did not show the expected disclosure.'
+      }
+    }
     $hwnd = [IntPtr]$window.Current.NativeWindowHandle
     [void][UpgradeDialogMouse]::SetForegroundWindow($hwnd)
     if ([UpgradeDialogMouse]::ClickNamedButton($hwnd,$Button)) { exit 0 }
