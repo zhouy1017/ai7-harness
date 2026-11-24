@@ -1037,6 +1037,14 @@ async function main() {
         await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `ordinary-agent-memory-viewport-${width}`);
         await pointerClick(renderer, waitFor, foldSummary, `ordinary-agent-memory-open-${width}`);
         await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"]')?.open===true`, `ordinary-agent-memory-opened-${width}`);
+        // #1616 (stage-4/5 rework R6): the procedures the open fold shows are named in the editor's words — 评估报告, 重新生成 — with no
+        // version number, and none of them carries its stage chain in ordinary mode.
+        await assertRenderer(renderer, `(() => {
+          const rows=Array.from(document.querySelectorAll('[data-global-agent-fold="references"] .global-agent-procedure'));
+          const names=rows.map(row=>row.querySelector(':scope > summary')).filter(node=>node instanceof HTMLElement && node.getClientRects().length>0).map(node=>node.innerText.trim());
+          return names.includes('工序 · 评估报告') && names.includes('工序 · 按我的评分重新生成评语') && !names.some(name=>/AI7 初评|重写评语|第 \\d+ 版/u.test(name)) &&
+            !rows.some(row=>row.textContent.includes('阶段：'));
+        })()`, `ordinary-agent-procedure-words-${width}`);
         await pointerClick(renderer, waitFor, foldRow, `ordinary-agent-memory-tick-${width}`);
         await waitFor(renderer, `(() => {
           const fold=document.querySelector('[data-global-agent-fold="references"]');
