@@ -259,18 +259,19 @@ const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContrac
 it.each([1, 2] as const)('sends the exact retrieve declaration from a frozen version %s review plan', async (version) => {
   // Create the version 1 plan through the same writer, with the pre-versioning choice at the freeze boundary.
   const legacyFreeze = version === 1 ? vi.spyOn(platformTools, 'toolSchemaPinForNewPlan').mockReturnValue({}) : undefined;
-  let frozen: { runRecordId: string; ledger: ReturnType<EditorialStore['executionLedgerForRun']> } | undefined;
-  let before: ReturnType<NonNullable<typeof frozen>['ledger']['loadExecutionPlan']> | undefined;
+  let preparedDigest: string | null | undefined;
   try {
-    const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ready: ({ store }) => {
-      legacyFreeze?.mockRestore();
-      frozen = latestReviewExecution(store);
-      before = frozen.ledger.loadExecutionPlan(frozen.runRecordId);
+    const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ready: ({ store, bookId, reviewRunId }) => {
+      if (legacyFreeze !== undefined) {
+        expect(legacyFreeze).toHaveBeenCalled();
+        legacyFreeze.mockRestore();
+      }
+      preparedDigest = store.inspectReviewWorkspace(bookId, reviewRunId).run?.categories[0]?.planEnvelopeDigest;
     } });
-    const facts = frozen!.ledger.loadExecutionPlan(frozen!.runRecordId);
+    const { ledger, runRecordId } = latestReviewExecution(result.store);
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    expect(facts.planEnvelopeDigest).toBe(preparedDigest);
     expect(facts.compositionOptions?.toolSchemaVersion).toBe(version === 1 ? undefined : 2);
-    expect(facts.compositionOptions).toEqual(before!.compositionOptions);
-    expect(facts.behaviorCompositionDigest).toBe(before!.behaviorCompositionDigest);
     const request = JSON.parse(result.requests.find((entry) => entry.ordinal === 1)!.body) as { tools: Array<{ function: platformTools.PlatformToolSchema }> };
     expect(request.tools.find((tool) => tool.function.name === 'retrieve')?.function)
       .toEqual(platformTools.ruleNamedToolSchemas(false, true, version).find(({ name }) => name === 'retrieve'));
