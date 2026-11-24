@@ -504,7 +504,7 @@ Inert: 10 of 12 (no declared answer channel). Established:
 - `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
 - `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v18 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v18. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
-- `gemini-4-argon`: OpenCode Go catalogue entry selected for the 0.8.0 uses in ADR 0108.
+- `gemini-4-argon`: OpenCode Go catalogue entry selected for the 0.7.9 uses in ADR 0108.
 
 ### `opencode-go-messages`
 
