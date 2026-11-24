@@ -136,7 +136,7 @@ export function guidelineFixedStatement(document: Pick<ReviewGuidelineDocumentPr
   const categories = document.appliedBy.map((category) => `「${category.label}」`).join('、');
   const does = document.use === 'leads'
     ? `${categories}把基线分析里的线索变成批注，不按这里的条款找问题`
-    : `${categories}按 AI7 固定的事实核查契约执行，不读取这里的条款`;
+    : `${categories}按 AI7 固定的${technicalWords('事实核查契约', '事实核查规则')}执行，不读取这里的条款`;
   return `${does}。这是 AI7 的固定说明，不能导入新版本。`;
 }
 

@@ -1347,7 +1347,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       outcome.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(
-        element('h4', undefined, projection.taskOutcome.label),
+        element('h4', undefined, serviceWords(projection.taskOutcome.label)),
         element('p', undefined, serviceWords(projection.taskOutcome.safeNextAction)),
         runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
         technicalDetails('analysis-facts',

@@ -2255,6 +2255,18 @@ async function main() {
       const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
+    // Stage re-check (0.7.9): while that notice is on show, right after the manuscript opens, 改稿方式 stays the control a press reaches.
+    // No scripted scroll: its rectangle is inside the window and the topmost element at its centre is the control itself; the notice,
+    // still on show and still the topmost element at its own centre (it can be hovered to keep it), lies clear of the control's box.
+    await assertRenderer(primary, `(() => {
+      const toast=document.querySelector('[data-toast]:not([hidden])'), control=document.querySelector('[data-editor-input-mode-toggle="true"]');
+      if(!(toast instanceof HTMLElement)||!(control instanceof HTMLElement))return false;
+      const c=control.getBoundingClientRect(), t=toast.getBoundingClientRect();
+      const inside=c.width>0&&c.height>0&&c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight;
+      const clear=t.width>0&&t.height>0&&t.top>=0&&t.left>=0&&t.right<=innerWidth&&(t.bottom<=c.top||t.top>=c.bottom||t.right<=c.left||t.left>=c.right);
+      const hit=document.elementFromPoint(c.left+c.width/2,c.top+c.height/2), own=document.elementFromPoint(t.left+t.width/2,t.top+t.height/2);
+      return inside && clear && control.contains(hit) && toast.contains(own);
+    })()`, 'restart-entry-notice-leaves-edit-mode-reachable');
     // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode — the level in the
     // list's word (0.7.9): the record holds gpt-6-luna@high, the cards say gpt-6-luna@高.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');

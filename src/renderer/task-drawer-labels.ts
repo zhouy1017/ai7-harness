@@ -44,6 +44,13 @@ export const TASK_DRAWER_LOADING = '正在读取任务计划…';
 export const TASK_DRAWER_UNAVAILABLE = '无法读取这项任务的计划。';
 /** V2-UX-PLAN-007: the plan surface says, whatever else it shows, that the plan itself authorizes nothing. */
 export const TASK_DRAWER_FOOTER = '计划说明，不是运行授权';
+/**
+ * PLAN-007's line as the mode on show reads it (stage re-check, 0.7.9): developer mode keeps the sentence; an ordinary editor is told
+ * what a plan is while the Task has not started, and nothing once it has. `null` draws no line.
+ */
+export function taskDrawerFooter(started: boolean): string | null {
+  return technicalLayerVisible ? TASK_DRAWER_FOOTER : started ? null : '这里只是计划；开始任务之后才会运行。';
+}
 /** The entry each surface that raises a Task offers beside its one-line summary (S72 D4). */
 export const TASK_PLAN_OPEN = '查看计划';
 /**
@@ -254,6 +261,8 @@ export const TASK_PLAN_LOCKED_NOTE = '标「固定」的由授权规则固定，
  */
 export const TASK_PLAN_DEFAULT_RULE = '设为快速开始默认';
 export const TASK_PLAN_DEFAULT_RULE_HEADING = '这条默认规则会绑定的内容';
+/** The disclosure under 设为快速开始默认, in the words of the mode on show. */
+export const taskPlanDefaultRuleHeading = (): string => technicalWords(TASK_PLAN_DEFAULT_RULE_HEADING, '设为默认后会沿用哪些设置');
 /** What setting the rule means, above the rows it binds: a rule never starts anything by itself (TASK-028). */
 export const TASK_PLAN_DEFAULT_RULE_LEAD =
   '以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';

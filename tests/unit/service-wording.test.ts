@@ -24,6 +24,7 @@ import { KNOWN_RAW, NOT_SHOWN } from './service-wording.buckets.js';
 import { pausedDetail, resumableDetail, accountLimitDetail, BUDGET_REACHED_NEXT_ACTION } from '../../src/service/analysis/execution.js';
 import { awaitingClarificationDetail } from '../../src/service/analysis/clarifications.js';
 import { taskMaterialRefusal, taskMaterialReferenceLine } from '../../src/service/task-material-references.js';
+import { WRITING_MATERIALS_STATEMENT } from '../../src/service/writing-tasks.js';
 import { coverageAxis } from '../../src/service/analysis/reducers.js';
 import { evaluationReportOpenReason } from '../../src/service/evaluation-records.js';
 import { seriesScopeChangedReason, SERIES_SCOPE_STOP_SUMMARY } from '../../src/service/series-exclusions.js';
@@ -117,6 +118,13 @@ const PRODUCED: Readonly<Record<string, () => ReadonlyArray<string>>> = {
   // Stage-4/5 rework R6: the finished Run's count, the update mode's reason, and the plan preview's composed lines.
   '../shared/analysis-run-summary.ts#rework-r6': () => [completedWithGapsLabel(1, 8)],
   'analysis/run-state.ts#rework-r6': () => [changedModeUnavailableReason('同步到当前稿件')],
+  // 0.7.9 wording follow-up: a Task of the same kind under way, the fixed fact-check document in a plan's reference row, and 资料库 reference lines.
+  'analysis/run-state.ts#wording-079': () => [activeRunReason('executing'), activeRunReason('executing', 'evaluation'), activeRunReason('executing', 'review-run')],
+  'review/category-configuration.ts#wording-079': () => ['事实核查：事实核查契约 · 断言列举与引文定位'],
+  'writing-tasks.ts#wording-079': () => [WRITING_MATERIALS_STATEMENT],
+  'analysis/execution.ts#wording-079': () => ['模型服务暂时出错（TEMPORARY_FAILURE）'],
+  'provider/classification.ts#wording-079': () => ['适配器失败（AI7_UNKNOWN · 500）。', '适配器失败（AI7_UNKNOWN）。'],
+  'task-material-references.ts#wording-079': () => [taskMaterialReferenceLine({ source: { title: '合成资料', characters: 3000 }, refusal: null } as Parameters<typeof taskMaterialReferenceLine>[0])],
   'analysis/execution.ts#rework-r6': () => ['未完成：没有单元读成 · 没有收到可用的模型回答。'],
   'task-launch-preview.ts#rework-r6': () => (['允许', '先问我', '不允许'] as const).map((choice) => `模型服务暂时出错时，同一个阅读范围安全地再试一次：${choice}`),
   'task-plan.ts#1': () => [resendDisclosure([2, 3]), resendDisclosure([4])],
@@ -429,6 +437,17 @@ describe('the expanded display boundaries (#1616)', () => {
     ['launchPreview.send', '全书各阅读范围的稿件正文（8 个），以及汇总时各项依据的说明；所读范围内的稿件正文发往 合成模型服务', '全书各部分的稿件正文（8 个），以及汇总时各项依据的说明；所读范围内的稿件正文发往 合成模型服务'],
     ['taskPlan.step.result', '全书或多章审阅结束后，若覆盖多个阅读范围且已有模型发现，再向本次选定模型发送一次统合请求，计入本次预算；达到本次预算上限后不再发送新的请求，已发出的请求仍计入用量。发送发现的说明与引文（各最多 80 字）、证据索引及可用的分章概述（每段最多 400 字），不发送这些内容以外的章节正文。最多选取 200 条代表发现与 200 条证据、200 段概述；按出现次数保留可引用的问题组，概述保留独立的容量份额并利用剩余空间，容量不足时先均匀缩短再省略末尾，并说明覆盖缺口、缩短与省略数量。参考资料与编辑记忆沿用同一处理方式；本社审阅偏好、编辑任务说明及豁免规则沿用首个模型审阅类别。各类别规范条款已体现在发现中，统合时不另附原条款。', '全书或多章审阅结束后，若覆盖多个部分且已有模型发现，再向本次选定模型发送一次统合请求，计入本次预算；达到本次预算上限后不再发送新的请求，已发出的请求仍计入用量。发送发现的说明与引文（各最多 80 字）、证据索引及可用的分章概述（每段最多 400 字），不发送这些内容以外的章节正文。最多选取 200 条代表发现与 200 条证据、200 段概述；按出现次数保留可引用的问题组，概述保留独立的容量份额并利用剩余空间，容量不足时先均匀缩短再省略末尾，并说明未完成的部分、缩短与省略数量。参考资料与编辑记忆沿用同一处理方式；审阅偏好、编辑任务说明及豁免规则沿用首个模型审阅类别。各类别规范条款已体现在发现中，统合时不另附原条款。'],
     ['applyReceipt.reason', '权威稿件与应用凭据已确认。', '稿件与修改记录已确认。'],
+    // 0.7.9 wording follow-up: the five phrases left open by the stage-4/5 rework, as their pages now show them.
+    ['guideline.title', '事实核查契约', '事实核查规则'],
+    ['reviewPlan.reference', '事实核查：事实核查契约 · 断言列举与引文定位', '事实核查：事实核查规则 · 断言列举与引文定位'],
+    ['evaluation.prepare.reason', activeRunReason('executing', 'evaluation'), '已有一项评估任务正在进行；等它结束后才能准备新的评估任务。'],
+    ['writing.materials.statement', WRITING_MATERIALS_STATEMENT, '勾选的资料列进这次计划的「允许参考」，按任务开始时的资料内容读取：每份不超过 3,000 字，合计不超过 6,000 字，最多 4 份；只参照，不照抄。'],
+    ['plan.reference.material', '资料库资料《按计划冻结的索引版本读取》：已提取 3,000 字，按计划冻结的索引版本读取（只参照，不照抄）', '资料库资料《按计划冻结的索引版本读取》：已提取 3,000 字，按任务开始时的资料内容读取（只参照，不照抄）'],
+    ['plan.reference.material refused', '资料库资料《合成资料》：已提取 3,000 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能再开始', '资料库资料《合成资料》：已提取 3,000 字，按任务开始时的资料内容读取（只参照，不照抄）——做计划时的资料内容已不在本机，这次起草不能再开始'],
+    // Stage re-check: a failed part's reason without its code, and the fallback sentences.
+    ['gap.reason coded', '模型服务速率限制拒绝了本次请求。（AI7_RATE_LIMIT）', '模型服务速率限制拒绝了本次请求。'],
+    ['gap.reason fallback', '适配器失败。', '模型服务没有给出可用的回答。'],
+    ['gap.reason unclassified', '适配器失败（AI7_UNKNOWN · 500）。（AI7_UNKNOWN）', '模型服务出错，没有给出可用的回答。'],
     ['applyReceipt.reason unresolved', '权威记录尚不能证明结果；禁止重试或重复应用。可以重新核对权威记录。', '还不能确认这次修改是否已写入稿件；请不要重试或重复写入，可以重新核对。'],
     ['fact.correction.completionLabel', '已保存为更正提案：它是普通的修改建议，不会自动应用，是否接受由你决定。', '已保存为更正建议：它是普通的修改建议，不会自动写入稿件，是否接受由你决定。'],
   ])('renders %s from service text without mutating the record', (_field, stored, expected) => {

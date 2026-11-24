@@ -588,6 +588,9 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click();return true; })()`, 'dispatch-chooser-open-sheet');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] .dispatch-chooser select')?.options.length>0`, 'dispatch-chooser-models-ready');
+        // 0.7.9 wording follow-up (#1616): in ordinary mode the sheet names AI7's fixed fact-check document 事实核查规则, never 契约.
+        await assertRenderer(renderer, `(() => { const basis=Array.from(document.querySelectorAll('dialog.review-sheet[open] .review-category-basis')).map(node=>node.textContent.trim());
+          return document.documentElement.dataset.technicalLayerVisible==='false' && basis.includes('事实核查规则 · 断言列举与引文定位') && !basis.some(text=>text.includes('契约')); })()`, 'dispatch-chooser-fact-basis-words');
         const chosenLabel = await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer');
         requireJourney(chosenLabel.startsWith('模型 '), 'dispatch-chooser-choice-retained');
         await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-reset', { reset: true });
