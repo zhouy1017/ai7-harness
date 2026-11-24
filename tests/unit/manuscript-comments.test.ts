@@ -405,7 +405,7 @@ describe('comments command parity and refresh continuity', () => {
     const items = Array.from(menu.querySelectorAll<HTMLElement>('[aria-label="AI7 任务"] [role="menuitem"]'));
     expect(items.map(node => [node.dataset['markAction'], node.querySelector('.menu-caption span')?.textContent, node.querySelector('small')?.textContent, (node as HTMLButtonElement).disabled])).toEqual([
       ['scoped-ai-edit','让 AI 修改','润色、改写或按要求修改选中文字。',false],
-      ['task-on-selection','审阅选中内容','专项审阅选中段落，给出修改建议或批注。',true],
+      ['task-on-selection','就这段发起任务','默认审阅，也可改为分析、事实核查或写作。',true],
       ['ask-on-selection','问 AI 助手','带着选中文字提问或讨论，不直接改稿。',true],
     ]);
     expect(menu.querySelector('[data-mark-action="preset-polish"]')).toBeNull();

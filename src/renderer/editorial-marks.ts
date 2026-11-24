@@ -2993,13 +2993,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // Keep the existing action hooks; saved procedures remain in the selection task composer (#1539, I-1b).
+  // Keep the existing action hooks; saved procedures remain in the selection task composer (#1539, I-1b). Its entry carries
+  // the title of the draft it opens and says which outcome that draft starts on (stage 4/5 rework R4).
   const AI7_TASK_REASON = SELECTION_TASK_DOCUMENT_REASON;
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
   const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
     action: 'task-on-selection',
-    label: '审阅选中内容',
-    hint: '专项审阅选中段落，给出修改建议或批注。',
+    label: SELECTION_TASK_TITLE,
+    hint: '默认审阅，也可改为分析、事实核查或写作。',
     ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
       : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
   });
