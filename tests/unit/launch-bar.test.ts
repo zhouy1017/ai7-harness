@@ -85,6 +85,21 @@ it.each([false, true])('shows the service estimate before launching, keeping tok
   } finally { setTechnicalLayerVisible(true); }
 });
 
+it.each([false, true])('reads the scope and adaptation lines of the plan preview in ordinary words, and as the service wrote them in developer mode (%s)', async developer => {
+  setTechnicalLayerVisible(developer);
+  try {
+    const { api } = launchApi('launchWritingTask');
+    const scope = '《合成书》全书 · 8,289 字 · 8 个阅读范围', adaptation = '模型服务暂时出错时，同一个阅读范围安全地再试一次：允许';
+    const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取（重新读取 2 个阅读范围，沿用 6 个）'], scope, units: 8, reference: [], send: '', usage: '', adaptations: [adaptation] }));
+    const { bar } = await mount({ ...api, previewTaskLaunch }, { bookId: 'book', operation: 'launchWritingTask', title: '写作', input: WRITING_REQUEST });
+    await bar.openPlan();
+    const plan = miniDocument.querySelector('.task-launch-estimate')!.textContent;
+    expect(miniDocument.querySelector('.task-launch-scope')?.textContent).toBe(developer ? `处理范围：${scope}` : '处理范围：《合成书》全书 · 8,289 字 · 8 个部分');
+    expect(miniDocument.querySelector('.task-launch-adaptation')?.textContent).toBe(developer ? adaptation : '模型服务暂时出错时，同一部分安全地再试一次：允许');
+    expect(plan.includes('阅读范围')).toBe(developer);
+  } finally { setTechnicalLayerVisible(true); }
+});
+
 it.each(OPERATIONS)('builds the %s input from the run options and the remembered choice, with a fresh clientCommandId after a change', async operation => {
   const kind = LEDGER_TASK_LAUNCH_KINDS[operation];
   const remembered = { modelConnectionId: 'connection', modelId: 'model', reasoningEffort: 'high' };

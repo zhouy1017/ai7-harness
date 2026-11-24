@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type {
   CapturedProcedureProjection,
   CapturedProcedureRunProjection,
@@ -105,8 +105,9 @@ export function mountProcedureRecommendation(options: ProcedureRecommendationSur
       item.append(choose); list.append(item);
     }
     root.append(list, button('修改意图', 'edit', options.edit), button('浏览可用工序', 'browse', options.browse),
-      node('p', state.projection?.excludedSkillReason ?? '外部 Skill 在此版本没有执行器，不参与工序推荐。'),
-      node('p', '推荐与选择不会获取、安装、启用或运行工序；计划与授权仍需另行确认。'));
+      // External Skills are a developer-mode page; ordinary mode has none to exclude and reads the one plain promise (#1616).
+      ...(technicalLayerVisible ? [node('p', state.projection?.excludedSkillReason ?? '外部 Skill 在此版本没有执行器，不参与工序推荐。')] : []),
+      node('p', technicalWords('推荐与选择不会获取、安装、启用或运行工序；计划与授权仍需另行确认。', '查看推荐或选择工序不会开始任务；开始前会先给你看计划。')));
   }
   async function load(): Promise<void> {
     if (busy) return;

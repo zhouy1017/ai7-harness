@@ -229,12 +229,12 @@ export function reviewChangedScopeNotes(
 ): string[] {
   return coverage
     .filter((row) => chosen.has(row.categoryId) && row.state !== 'unavailable' && row.unavailableReason !== null)
-    .map((row) => `${row.label}：${row.unavailableReason}`);
+    .map((row) => `${row.label}：${serviceWords(row.unavailableReason)}`);
 }
 
 /** One entry of the 审阅记录: `第 N 次 · 类别 · 范围 · 状态`, newest first. */
 export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' | 'categoryLabels' | 'scopeLabel' | 'stateLabel'>): string {
-  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel.replaceAll('内容块', '段落')} · ${summary.stateLabel}`;
+  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel.replaceAll('内容块', '段落')} · ${serviceWords(summary.stateLabel)}`;
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
@@ -687,7 +687,7 @@ export function reviewOverviewLine(workspace: Pick<ReviewWorkspaceProjection, 'r
   const stale = workspace.coverage.filter((row) => row.state === 'needs-review').length;
   const staleClause = stale === 0 ? '' : `；${stale} 类需复审`;
   if (latest === undefined) return `审阅 · 还没有审阅记录${staleClause}`;
-  return `审阅 · 最近一次是${latest.label}（${latest.stateLabel}），待处理 ${latest.findingCounts.pending} 条${staleClause}`;
+  return `审阅 · 最近一次是${latest.label}（${serviceWords(latest.stateLabel)}），待处理 ${latest.findingCounts.pending} 条${staleClause}`;
 }
 
 /** 查看任务 on a Mark Card while the mark's Review Run is looked up, and when there is none to open. */

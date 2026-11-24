@@ -206,7 +206,7 @@ export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
     scope: { ...plan.scope, process: serviceWords(plan.scope.process),
       reference: plan.wording?.reference?.map((parts) => serviceWords(words(parts, ''))) ?? all(plan.scope.reference),
       send: serviceWords(words(plan.wording?.scopeSend, plan.scope.send)) },
-    steps: plan.steps.map((step) => ({ ...step, label: serviceWords(step.label) })),
+    steps: plan.steps.map((step) => ({ ...step, label: serviceWords(step.label), result: serviceWords(step.result) })),
     participation: { during: serviceWords(plan.participation.during), after: serviceWords(plan.participation.after) },
     service: { ...plan.service, send: serviceWords(words(plan.wording?.serviceSend, plan.service.send)), usage: serviceWords(plan.service.usage),
       budgetCeiling: serviceWords(plan.service.budgetCeiling) },

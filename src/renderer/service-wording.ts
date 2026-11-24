@@ -200,6 +200,8 @@ const EXACT: ReadonlyArray<ExactRule> = [
   exact('manuscript-apply.ts', '其中有修改建议已经处理过；请重新准备这次应用。', '其中有修改建议已经处理过；请另做一份修改计划。'),
   exact('manuscript-apply.ts', '找不到这次应用的凭据。', '找不到这次修改的记录。'),
   exact('manuscript-apply.ts', '权威稿件与应用凭据已确认。', '稿件与修改记录已确认。'),
+  exact('manuscript-apply.ts', '正在按同一应用标识核对本地权威记录，不会再次派发。', '正在核对这次修改是否已写入稿件，不会重复写入。'),
+  exact('manuscript-apply.ts', '权威记录尚不能证明结果；禁止重试或重复应用。可以重新核对权威记录。', '还不能确认这次修改是否已写入稿件；请不要重试或重复写入，可以重新核对。'),
   exact('manuscript-apply.ts', '已重新核对：本地记录中没有这一应用标识的应用意图，证明没有任何修改写入稿件；重新准备后需新的明确批准。', '已重新核对：本地记录中没有这次修改的开始记录，证明没有任何修改写入稿件；另做一份修改计划后需重新确认。'),
   exact('manuscript-apply.ts', '本地原子事务与凭据记录证明此次未提交；重新准备后需新的明确批准。', '本地事务与修改记录证明此次未提交；另做一份修改计划后需重新确认。'),
   exact('manuscript-apply.ts', '找不到原应用凭据。', '找不到原来的修改记录。'),
@@ -268,6 +270,12 @@ const EXACT: ReadonlyArray<ExactRule> = [
   exact('review/review-runs.ts', '稿件在准备期间已变化；请重新准备。', '稿件在准备期间已变化；请另做一份计划。'),
   exact('review/review-runs.ts', '这次审阅需要先取消，才能改计划重做。', '这次审阅需要先取消，才能重新开始。'),
   exact('review/review-runs.ts', '已形成结果集修订版 · 有缺口单元。', '已形成分析结果 · 有未完成的部分。'),
+  // Stage-4/5 rework R6: state words and names an editor reads on 分析, 审阅, 工作概览 and in AI 助手.
+  exact('review/review-runs.ts', '已形成结果集修订版。', '已形成分析结果。'),
+  exact('analysis/baseline-analysis-store.ts', '已形成结果集修订版', '已形成分析结果'),
+  exact('analysis/baseline-analysis-store.ts', '计划已冻结 · 待授权', '已准备好 · 还没有开始'),
+  exact('review/review-run-state.ts', '计划已冻结 · 待授权', '已准备好 · 还没有开始'),
+  exact('procedures/preinstalled.ts', '按我的评分重写评语', '按我的评分重新生成评语'),
   exact('review/review-runs.ts', '本地检查未能完成；请重新准备。', '本地检查未能完成；请另做一份计划。'),
   exact('review/review-runs.ts', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请重新准备并开始。', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请另做一份计划再开始。'),
   exact('review/review-runs.ts', '无法读取的本社审阅偏好记录', '无法读取的审阅偏好记录'),
@@ -559,6 +567,12 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
     (_, reference, why) => reference + '——' + ordinaryServiceWords(why)),
   family('analysis/execution.ts', /^(.+)（([^（）]+)）；本社审阅偏好已停止使用，没有再试一次$/u,
     (_, reason, code) => ordinaryServiceWords(reason) + '（' + code + '）；审阅偏好已停止使用，没有再试一次'),
+  // Stage-4/5 rework R6: a finished Run's count, why an update cannot be asked yet, and the plan preview's own composed lines.
+  family('../shared/analysis-run-summary.ts', /^已完成 · (\d+)\/(\d+) 个单元未读成$/u, (_, gaps, total) => `已完成 · ${total} 个部分中有 ${gaps} 个没有读成`),
+  family('analysis/execution.ts', /^未完成：没有单元读成 · (.+)$/u, (_, reason) => `未完成：没有读成任何部分 · ${ordinaryServiceWords(reason)}`),
+  family('analysis/run-state.ts', /^结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可(.+)。$/u,
+    (_, action) => `分析结果与当前稿件一致；稿件有了已保存的改动之后才可${action}。`),
+  family('task-launch-preview.ts', /^(.+)：(允许|先问我|不允许)$/u, (_, step, choice) => `${ordinaryServiceWords(step)}：${choice}`),
 ];
 
 /**

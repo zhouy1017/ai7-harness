@@ -4485,6 +4485,8 @@ async function main() {
             // The card's own controls, by pointer: 查看计划 and 运行 go to the plan and back, and 查看结果 opens the result.
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="full-link"]',`task-status-finished-plan-${planWidth}`);
             await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
+            // #1616 (stage-4/5 rework R6): the review plan's 统合 step reads in the editor's words — 部分, 未完成的部分, 审阅偏好.
+            await assertRenderer(renderer,`(() => {const text=document.querySelector('#task-drawer').innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('若覆盖多个部分') && text.includes('并说明未完成的部分、缩短与省略数量') && !/阅读范围|缺口|本社审阅偏好/u.test(text);})()`,`task-status-finished-plan-words-${planWidth}`);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
             await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
@@ -4497,6 +4499,8 @@ async function main() {
         }
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-choice-tasks');
         await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenLabel)})`, 'dispatch-choice-frozen-task-row');
+        // #1616 (stage-4/5 rework R6): on 任务, in ordinary mode, a finished analysis that left parts unread counts them in the editor's words.
+        if (width===1008) await waitFor(renderer, `(() => { const text=document.querySelector('[data-screen="task-overview"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && /已完成 · \\d+ 个部分中有 \\d+ 个没有读成/u.test(text) && !text.includes('单元未读成'); })()`, 'dispatch-choice-task-card-words');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
