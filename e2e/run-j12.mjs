@@ -999,6 +999,7 @@ async function main() {
     launchForCleanup = launch;
     const close = closeOwnedBrowser;
 
+    const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
     if (process.platform === 'win32') {
       at('upgrade-release-library');
       const { createUpgradeSample1 } = await import('../tests/support/upgrade-sample1.ts');
@@ -1059,7 +1060,9 @@ async function main() {
           await close();
           const unavailable = resolve(runRoot,'upgrade-without-sources');
           await cp(root,unavailable,{recursive:true});
-          const kept = (await readdir(unavailable)).filter(name => /^store-before-0\.8\.0-\d{13}-[a-f0-9-]{36}$/.test(name));
+          const keptPrefix = `store-before-${packageVersion}-`;
+          const kept = (await readdir(unavailable)).filter(name =>
+            name.startsWith(keptPrefix) && /^\d{13}-[a-f0-9-]{36}$/.test(name.slice(keptPrefix.length)));
           requireJourney(kept.length === 1,'upgrade-retained-library');
           await rm(join(unavailable,kept[0]),{recursive:true});
           const recovery = await launch(undefined,undefined,unavailable);
@@ -2332,7 +2335,6 @@ async function main() {
     await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('密钥与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
     // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart. The same software reopened the data
     // after the restart, so the store keeps its one version record and has seen no software update.
-    const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
     await waitFor(primary, `document.querySelector('.data-version')?.dataset.dataVersion === '2'`, 'data-version-read');
     const versionSection = await primary.evaluate(`(() => { const section = document.querySelector('.data-version'); const text = (selector) => section?.querySelector(selector)?.textContent ?? null; return [text('.data-version-software'), text('.data-version-data'), text('.data-version-state'), text('.data-version-update'), text('.data-version-history > summary'), section?.dataset.frozen ?? null]; })()`);
     // Synchronized delta with Issue #967 and #1634: the folded baseline is Data Version 2 (ADR 0105 §4), frozen as Data Version 1

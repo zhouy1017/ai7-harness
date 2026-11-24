@@ -13,11 +13,13 @@ const run = promisify(execFile);
 const release = '790acbcbde8ca268217b152194f83241d1f13d10';
 
 /** Build the released service outside the checkout, using only its committed source and installed dependencies. */
-async function historicalModule(root: string, codeRoot: string, revision: string, source: string | { contents: string }) {
+async function historicalModule(root: string, codeRoot: string, revision: string, source: string | { contents: string },
+  prepare?: (checkout: string) => Promise<void>) {
   const checkout = await mkdtemp(join(dirname(root), 'released-service-'));
   const archive = join(checkout, 'release.tar');
   await run('git', ['-C', codeRoot, 'archive', '--format=tar', '-o', archive, revision, 'src', 'config', 'package.json']);
   await run('tar', ['-xf', archive, '-C', checkout]);
+  await prepare?.(checkout);
   await symlink(join(codeRoot, 'node_modules'), join(checkout, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const entry = join(checkout, 'service.mjs');
   const input = typeof source === 'string'
@@ -55,15 +57,30 @@ export async function legacySampleService(root: string, codeRoot: string, revisi
   return (dataRoot: string) => service.EditorialStore.open(dataRoot, checkout);
 }
 
-export async function historicalUpgradeService(root: string,codeRoot: string,revision: string) {
-  const {entry} = await historicalModule(root,codeRoot,revision,'in-app-upgrade.ts');
+export async function historicalUpgradeService(root: string,codeRoot: string,revision: string,softwareVersion: string) {
+  // Use the same directory labels for historical recovery and its backup inventory.
+  const {entry} = await historicalModule(root,codeRoot,revision,'in-app-upgrade.ts',async checkout => {
+    const service = join(checkout,'src','service');
+    const upgrade = join(service,'in-app-upgrade.ts');
+    const exporter = join(service,'database-exports.ts');
+    const [upgradeCode, exportCode] = await Promise.all([readFile(upgrade,'utf8'),readFile(exporter,'utf8')]);
+    const versionPattern = softwareVersion.replace(/[.+]/gu,'\\$&');
+    await Promise.all([
+      writeFile(upgrade,upgradeCode.replace(/store-(before|after)-0\.8\.0-/gu, `store-$1-${softwareVersion}-`)),
+      writeFile(exporter,exportCode.replace(String.raw`-0\.8\.0-`, `-${versionPattern}-`)),
+    ]);
+  });
   return createRequire(import.meta.url)(entry) as typeof import('../../src/service/in-app-upgrade.js');
 }
 
-export async function upgradeWithEarlierOrigin(root: string,codeRoot: string,revision: string): Promise<void> {
-  const earlier = await historicalUpgradeService(root,codeRoot,revision);
+export async function upgradeWithEarlierOrigin(root: string,codeRoot: string,revision: string,softwareVersion: string): Promise<void> {
+  const earlier = await historicalUpgradeService(root,codeRoot,revision,softwareVersion);
   await earlier.beginUpgrade(root);
-  await earlier.resumeUpgrade(root,'0.8.0');
+  await earlier.resumeUpgrade(root,softwareVersion);
+  // Supply the directory label while retaining the historical backup metadata under test.
+  const originPath = join(root,'store','upgrade-origin.json');
+  const origin = JSON.parse(await readFile(originPath,'utf8'));
+  await writeFile(originPath,JSON.stringify({...origin,softwareVersion}));
 }
 
 // The released service performs its actual migrations and records its own version.

@@ -1,21 +1,23 @@
-# AI7 development plan — #1516 · R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.8.0
+# AI7 development plan — #1516 · R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.7.9
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `3031f87a1b7cf01899ff25e99fba94867d4ad31c` (0.7.3 Alpha, #1517, PR #1619). The Owner's 2026-11-16 / 17 decisions in [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) replaced the earlier order: R4 → 0.7.3 Alpha, the interface and pages round → 0.7.4 Alpha, R5 → 0.8.0 Alpha, and one human test after all of it with no human test between rounds. R4 is delivered as 0.7.3 Alpha. The interface and pages round ([#1539](https://github.com/zhouy1017/ai7-harness/issues/1539)) on `codex/integration-0.7.4` and R5 ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)) on `codex/integration-0.8.0` run side by side under the schedule the Owner approved on 2026-11-20, below. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
+
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `3031f87a1b7cf01899ff25e99fba94867d4ad31c` (0.7.3 Alpha, #1517, PR #1619). The Owner's 2026-11-16 / 17 decisions in [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) replaced the earlier order: R4 → 0.7.3 Alpha, the interface and pages round → 0.7.4 Alpha, R5 → 0.8.0 Alpha, and one human test after all of it with no human test between rounds. R4 is delivered as 0.7.3 Alpha. The interface and pages round ([#1539](https://github.com/zhouy1017/ai7-harness/issues/1539)) on `codex/integration-0.7.4` and R5 ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)) on `codex/integration-0.8.0` were developed side by side under the schedule the Owner approved on 2026-11-20. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## After 0.7.3: the interface and pages round → 0.7.4 and R5 → 0.8.0 (#1516; schedule approved 2026-11-20)
+## After 0.7.3: the combined 0.7.9 Alpha delivery (#1516, #1539, #1540)
 
-The Owner's 2026-11-16 / 17 decisions moved the programme to this order and put one human test after all of it; no human test sits between rounds. Each round closes as usual — the test guest's full ladder, the hosted Full Gate, the merge into `dev`, the fixed human-test folder refresh and data-retention check, and the PROGRESS and plan updates.
+The interface and pages round integrated under its 0.7.4 identifier. The combined 0.7.9 Alpha delivery includes that round, R5, reasoning-effort discovery, multi-query retrieval and the unified recording. Closure includes the guest ladder, the hosted Full Gate, integration into `dev`, the fixed human-test folder refresh and data-retention check, and the PROGRESS and plan updates.
 
 | Round | Version | Scope | Issues |
 | --- | --- | --- | --- |
 | R4 | 0.7.3 Alpha — delivered | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement). [Delivered below](#delivered-r4--073-alpha-1517) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
-| Interface and pages round | 0.7.4 Alpha — in progress | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set; and, carried or brought forward on 2026-11-20, #1604, #1616, the four-role interface M1 and the test-speed slice T1 | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
-| R5 | 0.8.0 Alpha — in progress | The storage rearrangement and the in-app upgrade tool, trustworthy undo and the real version list ([ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md)); the 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)); the Underlying Flash Service and lightweight hybrid retrieval ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)); #1598 and #1585 | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) |
-| One human test | — | Arranged by the Owner after 0.8.0 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
+| Interface and pages round | 0.7.4 Alpha — integrated into the 0.7.9 candidate | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set; and, carried or brought forward on 2026-11-20, #1604, #1616, the four-role interface M1 and the test-speed slice T1 | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
+| R5 | 0.7.9 Alpha — in progress | The storage rearrangement and the in-app upgrade tool, trustworthy undo and the real version list ([ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md)); the 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)); the Underlying Flash Service and lightweight hybrid retrieval ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)); #1598 and #1585 | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) |
+| One human test | — | Arranged by the Owner after 0.7.9 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
 
-The two open rounds run side by side and keep this delivery order: 0.7.4 is delivered first, and R5-7 closes 0.8.0 after it. The sections below own each round's slices, batches and dependencies; the wave Issues carry the per-slice Issue numbers and records. This schedule refines the delivery tables of ADR 0105 §7, ADR 0106 §10 and ADR 0107 §5 and changes none of their decisions. [PROGRESS](../../PROGRESS.md) owns what is delivered.
+R5-7 closes the combined 0.7.9 delivery. The sections below retain the slice order, batches and dependencies. The wave Issues carry the per-slice Issue numbers and records. [PROGRESS](../../PROGRESS.md) owns what is delivered.
 
 ### Working rules (Owner, 2026-11-17 and 2026-11-20)
 
@@ -38,7 +40,7 @@ These are the Owner's session rules for the two rounds; they take precedence ove
 - **No overlap.** R5-1 changes the service's split and join; 0.7.4's N.1 changes the shared inline-revision diff and the renderer's edit cards. R5-F2a changes retrieval, which 0.7.4 does not touch.
 - **Model requests.** 0.7.4 changes nothing that is sent to a model: role names are neither in request content nor in cache keys.
 
-## The interface and pages round → 0.7.4 Alpha (#1539)
+## The interface and pages round (0.7.4 Alpha, #1539)
 
 0.7.4 builds on `codex/integration-0.7.4`, cut from delivered `dev@3031f87a`. Its scope is the 26 review items and the review's additions listed in [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) (item numbers below are that Issue's), plus [#1604](https://github.com/zhouy1017/ai7-harness/issues/1604), [#1616](https://github.com/zhouy1017/ai7-harness/issues/1616), M1 and T1. Interface changes are allowed and ride the one closure bump; nothing sent to a model changes; no schema revision is added. Hub files do not grow. Each interface batch ends with its stage acceptance before the next begins.
 
@@ -78,11 +80,11 @@ These are the Owner's session rules for the two rounds; they take precedence ove
 
 Closure needs the full ladder with all 15 Journeys at both window sizes and the hosted Full Gate, then the merge into `dev` and the human-test refresh. No human test is arranged.
 
-## R5 → 0.8.0 Alpha (#1540, ADR 0105, 0106, 0107)
+## R5 → 0.7.9 Alpha (#1540, ADR 0105, 0106, 0107)
 
 The storage design of [#1555](https://github.com/zhouy1017/ai7-harness/issues/1555) is accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md). The Owner answered all 13 of its decisions as recommended: 「R5按照推荐」, 2026-11-18, recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540#issuecomment-6975379870).
 
-0.8.0 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.8.0 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
+0.7.9 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.7.9 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
 
 R5 builds on `codex/integration-0.8.0`, cut from delivered `dev@3031f87a`, and merges `codex/integration-0.7.4` after each 0.7.4 batch. R5-2 through R5-6 travel as one train, so the fold never lands without its converter.
 
@@ -93,7 +95,7 @@ R5 builds on `codex/integration-0.8.0`, cut from delivered `dev@3031f87a`, and m
 | C | R5-F1, R5-L3, R5-L5 | After the train lands; R5-F1 also after 0.7.4's #1547 |
 | D | R5-L2, R5-F2b, R5-L4 | After R5-F1; R5-L4 after R5-L2 and R5-L3 |
 | E | One developer-live session | After R5-F1, R5-F2b and R5-L2; needs the Owner's authorization at that time |
-| F | R5-7 → 0.8.0 | After 0.7.4 is delivered and everything above |
+| F | R5-7 → 0.7.9 | After the 0.7.4 interface round is integrated and everything above |
 
 | Slice | What the editor can newly do | Order |
 | --- | --- | --- |
@@ -103,8 +105,8 @@ R5 builds on `codex/integration-0.8.0`, cut from delivered `dev@3031f87a`, and m
 | R5-2 | (internal) One baseline at revision 117 / Data Version 2, with the 字表与词表 relations, without `material_index_vectors` and with the four-role storage in final form; the migration chain and its old-revision tests are deleted; the 0.7.1 review compatibility store is rebuilt at 0.7.2 or becomes a refusal case | First on the train |
 | R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
 | R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
-| R5-6 | One-click upgrade to 0.8.0 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly. The converter installs the pre-installed tables, maps the two old model column groups onto the four roles and treats the vector table as an expected difference; each converter test file builds its store once | After R5-5 and #1556; lands the train |
-| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; the closing service-test measurement as interleaved pairs; 0.8.0 | Batch F |
+| R5-6 | One-click upgrade to 0.7.9 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly. The converter installs the pre-installed tables, maps the two old model column groups onto the four roles and treats the vector table as an expected difference; each converter test file builds its store once | After R5-5 and #1556; lands the train |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; the closing service-test measurement as interleaved pairs; 0.7.9 | Batch F |
 
 Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
 - a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
@@ -185,7 +187,7 @@ Carried out of R4, with the disposition the Owner approved on 2026-11-20:
 | [#1598](https://github.com/zhouy1017/ai7-harness/issues/1598) | Tool-turn captures as model fixtures: R5 batch A. |
 | [#1585](https://github.com/zhouy1017/ai7-harness/issues/1585) | Final-only re-recording blocked by changed identities: R5 batch A, the Owner's option 1, with the three items carried from the #1583 review. |
 | [#1582](https://github.com/zhouy1017/ai7-harness/issues/1582) | OpenCode Go Responses models sent to Chat Completions: the local refusal before sending is part of M1 (0.7.4); the proof on the real service is in R5's live session (batch E). |
-| The recordings #1538 left, the measurements #1074 left | R5's live session (batch E). The real-editor half of #1074 waits for the single human test after 0.8.0. |
+| The recordings #1538 left, the measurements #1074 left | R5's live session (batch E). The real-editor half of #1074 waits for the single human test after 0.7.9. |
 
 ## Delivered R3 → 0.7.2 Alpha (#1496)
 
@@ -211,7 +213,7 @@ R4 followed on its two lanes and is delivered above. What R3 carried forward:
 | --- | --- |
 | #1147 / #1027 → #1608 | #1147 offline validation is closed (batched inference failed the numerical tolerance). On 2026-11-19 the Owner closed [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) (retiring the local ONNX `multilingual-e5-small` route) and superseded it with [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)) in R5 (`R5-F1`, `R5-F2`). |
 | #1152 | The bounded R4 audit of the standards tables is merged ([#1593](https://github.com/zhouy1017/ai7-harness/pull/1593): four wrong character-form targets removed). The importable library is R5's ADR 0106 section above. |
-| #1074 | The R4 quality re-measurement is recorded ([#1600](https://github.com/zhouy1017/ai7-harness/pull/1600), after the #1538 re-recording in [#1583](https://github.com/zhouy1017/ai7-harness/pull/1583)); its real-editor half waits for the single human test after 0.8.0. |
+| #1074 | The R4 quality re-measurement is recorded ([#1600](https://github.com/zhouy1017/ai7-harness/pull/1600), after the #1538 re-recording in [#1583](https://github.com/zhouy1017/ai7-harness/pull/1583)); its real-editor half waits for the single human test after 0.7.9. |
 
 ## Delivered R2 → 0.7.1 Alpha (#1472)
 
