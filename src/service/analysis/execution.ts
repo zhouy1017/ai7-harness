@@ -2356,6 +2356,7 @@ export class BaselineAnalysisExecutionOwner {
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set(unitMessages.values()),
         ...(localRule === null ? {} : { localTools: localRule }),
+        ...(facts.compositionOptions?.toolSchemaVersion === undefined ? {} : { toolSchemaVersion: facts.compositionOptions.toolSchemaVersion }),
       };
       if (!settlingLocally()) await context.bind(bindingDigest, bindingFactsForRun);
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
