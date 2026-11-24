@@ -1,7 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { checkRetainedFindingSources } from './retained-finding-sources.mjs';
 import { pressReachable } from './task-card-reach.mjs';
-import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { capturePointerFailure, chooseDispatch, pointerClick, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
@@ -4444,8 +4444,18 @@ async function main() {
         await renderer.evaluate(`(() => {const sheet=document.querySelector('dialog.review-sheet');
           for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
           sheet.querySelector('input[name="review-scope"][value="whole"]').click();})()`);
-        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer')).replace(/^模型 /u,'').replace(/ ▾$/u,'');
-        requireJourney(typeof chosenLabel==='string' && chosenLabel.includes('@'), 'dispatch-choice-model-and-effort');
+        // 0.8.0 stage one: the hand-typed account model has no level on record (模型默认 alone, its sentence in view); the model with
+        // levels on record lists its own, and the level chosen for this review — a different one at each size — is what its launch freezes.
+        const levelModel = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>{const binding=settings.roles.find(role=>role.roleId==='main-editorial').binding,model=settings.channels.find(channel=>channel.route===binding.providerId).models.find(model=>model.modelId===binding.modelId);
+          return {modelId:model.modelId,label:model.modelLabel,levels:model.supportedEfforts?.status==='supported'?model.supportedEfforts.levels:[]};})`);
+        requireJourney(levelModel.levels.length>1, 'dispatch-choice-model-has-levels', levelModel);
+        const level = levelModel.levels[width===1280 ? 0 : levelModel.levels.length-1];
+        let unknownSeen = null, levelSeen = null;
+        const unknownLabel = await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-unknown', { model: 'account-future-model', seen: (facts) => { unknownSeen = facts; } });
+        requireJourney(unknownLabel.includes('account-future-model') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values)==='["off"]' && unknownSeen.selected==='off' &&
+          unknownSeen.note===EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside===true, 'dispatch-choice-unknown-default-only', unknownSeen);
+        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer', { model: levelModel.label, effort: level, seen: (facts) => { levelSeen = facts; } })).replace(/^模型 /u,'').replace(/ ▾$/u,'');
+        requireJourney(chosenLabel===`${levelModel.label}@${level}` && JSON.stringify(levelSeen.values)===JSON.stringify(['off', ...levelModel.levels]) && levelSeen.selected===level && levelSeen.note==='', 'dispatch-choice-model-and-effort', levelSeen);
         await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
         await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');
         const before = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -4457,7 +4467,7 @@ async function main() {
         try {
           requireJourney(after.prepare('SELECT count(*) n FROM task_launch_snapshots').get().n===snapshotsBefore+1 && after.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).n===1, 'dispatch-choice-one-launch');
           const frozen=JSON.parse(after.prepare('SELECT canonical_json FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).canonical_json);
-          requireJourney(frozen.executionConfig.reasoningEffort && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
+          requireJourney(frozen.executionConfig.reasoningEffort===level && frozen.executionConfig.modelId===levelModel.modelId && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
         } finally { after.close(); }
         requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`)===dispatchDefaults, 'dispatch-choice-role-defaults-unchanged');
         if(width===1008) {
