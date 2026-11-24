@@ -3503,6 +3503,10 @@ async function main() {
     await chooseCreateType('promotion-article', 'management-writing');
     await chooseCreateMode('writing', 'management-writing');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet`)})?.open === true`, 'management-writing-sheet', 60_000);
+    // 0.7.9 wording follow-up (#1616): in ordinary mode the sheet says what a ticked 资料库 item is read as in the editor's words.
+    await waitFor(renderer, `(() => { const line=document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet .writing-materials-statement`)});
+      return document.documentElement.dataset.technicalLayerVisible==='false' && line instanceof HTMLElement && line.getClientRects().length>0 &&
+        line.innerText.trim().startsWith('勾选的资料列进这次计划的「允许参考」，按任务开始时的资料内容读取：') && !line.innerText.includes('索引版本'); })()`, 'management-writing-materials-words', 60_000);
     const managementWritingTitle = await renderer.evaluate(`document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet [data-document-field="title"]`)})?.value ?? null`);
     requireJourney(typeof managementWritingTitle === 'string' && managementWritingTitle.length > 0, 'management-writing-title', managementWritingTitle);
     await typeInto(`${managementPage} .writing-task [data-writing-field="audience"]`, WRITING_REQUEST.audience, 'management-writing-audience');

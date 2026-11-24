@@ -1,5 +1,6 @@
 import { recordLibraryUse } from '../../src/renderer/library-materials.js';
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { nextIndexPollDelay, startsWaiting } from '../../src/renderer/library-materials.js';
 import {
   LIBRARY_EMPTY,
@@ -97,6 +98,11 @@ describe('知识库', () => {
     expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
     expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
       .toBe('「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。');
+    // 0.7.9 wording follow-up: an ordinary editor reads 事实核查规则; developer mode keeps the document's own name.
+    setTechnicalLayerVisible(false);
+    expect(guidelineFixedStatement({ use: 'factual-kind', appliedBy: [{ categoryId: 'f', label: '事实核查' }] }))
+      .toBe('「事实核查」按 AI7 固定的事实核查规则执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。');
+    setTechnicalLayerVisible(true);
     expect(guidelineFixedStatement({ use: 'factual-kind', appliedBy: [{ categoryId: 'f', label: '事实核查' }] }))
       .toBe('「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。');
     expect([guidelineCitations(0), guidelineCitations(4)]).toEqual(['未被引用', '被引用 4 次']);

@@ -2300,6 +2300,9 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
+    // 0.7.9 wording follow-up (#1616): the drawer left open by the report Task was painted in development mode; in ordinary mode its
+    // PLAN-007 line (「计划说明，不是运行授权」) is not drawn — the engine's own computed style, whatever the drawer last painted.
+    await assertRenderer(renderer, `(() => { const footer=document.querySelector('#task-drawer .task-drawer-footer'); return document.documentElement.dataset.technicalLayerVisible==='false' && footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !(document.querySelector('#task-drawer')?.innerText??'').includes('不是运行授权'); })()`, 'evaluation-rewrite-drawer-footer-hidden');
     requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改评估报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
@@ -3490,6 +3493,8 @@ async function main() {
       await renderer.evaluate(`window.ai7.controlTaskRun({kind:'initial-evaluation',ref:${JSON.stringify(taskId)},action:'pause'})`);
       await new Promise(resolve=>setTimeout(resolve,2200));
       await waitFor(renderer, `(() => {const current=document.querySelector('.evaluation-initial'),more=document.querySelector('.evaluation-more');return current!==globalThis.__j11PollInitial && current?.dataset.initialState==='pausing' && more?.open && document.activeElement===more.querySelector('summary') && document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'poll-evaluation-first-changed-paint');
+      // 0.7.9 wording follow-up (#1616): while the report Task is under way, why another cannot be prepared reads in the editor's words.
+      await assertRenderer(renderer, `(() => { const why=document.querySelector('.evaluation-initial-reason'); return why instanceof HTMLElement && why.getClientRects().length>0 && why.innerText.trim()==='已有一项评估任务正在进行；等它结束后才能准备新的评估任务。'; })()`, 'poll-evaluation-busy-reason-words');
       await renderer.evaluate(`globalThis.__j11PollInitial=document.querySelector('.evaluation-initial')`);
       await writeFile(unitHoldPath, '1', 'utf8');
       await new Promise(resolve=>setTimeout(resolve,2200));
