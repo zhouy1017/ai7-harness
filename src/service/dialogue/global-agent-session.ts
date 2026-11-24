@@ -9,6 +9,7 @@ import { RetrievalError, RetrievalIndex, type RetrievalSource } from '../retriev
 import { validSupervisionInput } from '../learning/supervision-directives.js';
 import { admittedFastRoleRoute, type AdmittedDialogueRoute } from './dialogue-route.js';
 import { buildDialogueMessage, parseDialogueMessage, type DialogueMessageInput } from './contract.js';
+import { RECORDING_GLOBAL_QUESTION } from './recording-scope.js';
 import { resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue-history.js';
 import type { DialogueLedger, QualifiedGlobalAttemptMetadata, StoredDialogueAttempt, StoredGlobalDialogueTask } from './dialogue-ledger.js';
 import { DialogueError, type DialogueTurnStart } from './dialogue-ledger.js';
@@ -104,8 +105,9 @@ export function readGlobalAgentHistory(task: StoredGlobalDialogueTask, attempts:
 export function admittedGlobalAgentRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
   const route = admittedFastRoleRoute(policy, 'global-agent-dialogue', 'house-review-preference-excerpt');
   const rule = route?.globalAgentDialogue;
-  const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === 'ordinary-production-global-agent-dialogue');
-  return route?.operationalScope === 'ordinary-production' && route.ruleId === 'ordinary-production-global-agent-dialogue' &&
+  const id = policy.operationalScope === 'developer-live' ? 'recording-080-global-agent-dialogue' : 'ordinary-production-global-agent-dialogue';
+  const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === id);
+  return route?.ruleId === id &&
     route.modelRole === 'Fast Interaction Role' && declared.length === 1 && declared[0]!.webSearchToolAllowed === false &&
     declared[0]!.platformTools === null && declared[0]!.localTools.targetedRetrieval.allowed === false && rule?.source?.bookRequired === false &&
     rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true && rule.source.eligibleRevisionPinsRequired === true &&
@@ -121,10 +123,12 @@ export function admittedGlobalAgentRoute(policy: LaunchPolicyProjection): Admitt
  */
 export function admittedGlobalAgentScopedRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
   const route = admittedFastRoleRoute(policy, GLOBAL_AGENT_SCOPED_KIND, 'house-review-preference-excerpt');
-  const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === GLOBAL_AGENT_SCOPED_RULE_ID);
+  const recording = policy.operationalScope === 'developer-live';
+  const id = recording ? 'recording-080-global-agent-scoped-dialogue' : GLOBAL_AGENT_SCOPED_RULE_ID;
+  const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === id);
   const rule = route?.globalAgentScopedDialogue;
   const local = route?.localTools;
-  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || (route.providerProcessingVersion !== 'v31' && (route.providerProcessingVersion !== 'v32' && route.providerProcessingVersion !== 'v33' && route.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(route.providerProcessingVersion))) ||
+  if (route?.ruleId !== id || (!recording && route.providerProcessingVersion !== 'v31' && (route.providerProcessingVersion !== 'v32' && route.providerProcessingVersion !== 'v33' && route.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(route.providerProcessingVersion))) ||
       route.modelRole !== 'Fast Interaction Role' || declared.length !== 1 || declared[0]!.webSearchToolAllowed !== false ||
       declared[0]!.platformTools !== null || rule === undefined || local == null || local.targetedRetrieval.allowed !== true) return null;
   const { source, scopedTools: tools } = rule;
@@ -287,10 +291,21 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
 export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput): GlobalAgentDisclosure {
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(policy) : owner.requireGlobalReady(policy);
+  const message = store.prepareGlobalAgentTurn(input);
+  requireRecordingDialogue(store, route, message);
   if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || supportsEditorialMemoryPolicy(policy.providerProcessing.version))))
-    return qualifiedGlobalPreparation(store, owner, policy, input, store.prepareGlobalAgentTurn(input)).disclosure;
-  return globalAgentDisclosure(store.prepareGlobalAgentTurn(input), store.inspectGlobalAgent().sourceCandidates ?? [],
+    return qualifiedGlobalPreparation(store, owner, policy, input, message).disclosure;
+  return globalAgentDisclosure(message, store.inspectGlobalAgent().sourceCandidates ?? [],
     route, owner.globalDisclosureReference());
+}
+
+function requireRecordingDialogue(store: GlobalAgentTurnStore, route: AdmittedDialogueRoute, message: DialogueMessageInput): void {
+  if (route.operationalScope !== 'developer-live') return;
+  const scope = message.globalScope;
+  if (message.question !== RECORDING_GLOBAL_QUESTION || message.kept !== null || message.globalSources?.length !== 0 ||
+      (scope !== undefined && !store.globalAgentScopeCurrent(scope))) {
+    throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '录制对话只接受固定问题和公开样书。');
+  }
 }
 
 /** Direct send prepares its payload in the same action; recheck it at the final payload gate, including queued turns. */
@@ -311,13 +326,15 @@ export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: Dialogu
     try {
       const message = turn.message;
       if (prepared !== null) return qualifiedGlobalPreparation(store, owner, policy(), input, message).disclosure.sha256 === disclosure.sha256;
+      const currentRoute = message.globalScope === undefined ? owner.requireGlobalReady(policy()) : owner.requireGlobalScopedReady(policy());
+      requireRecordingDialogue(store, currentRoute, message);
       const candidates = store.inspectGlobalAgent().sourceCandidates ?? [];
       return store.globalAgentSourcesCurrent(message.globalSources ?? []) &&
         (message.globalSources ?? []).every((pin) => candidates.some((entry) => entry.itemId === pin.itemId &&
           entry.revisionId === pin.revisionId && entry.text === pin.text)) &&
         [message.question, message.kept ?? '', ...(message.globalSources ?? []).map((pin) => pin.text)]
           .every((text) => store.globalAgentRedact(text) === text) &&
-        globalAgentDisclosure(message, candidates, owner.requireGlobalReady(policy()), owner.globalDisclosureReference()).sha256 === disclosure.sha256;
+        globalAgentDisclosure(message, candidates, currentRoute, owner.globalDisclosureReference()).sha256 === disclosure.sha256;
     } catch { return false; }
   };
   owner.beginGlobal(turn, prepared?.route ?? route, current);

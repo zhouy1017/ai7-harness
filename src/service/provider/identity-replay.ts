@@ -111,7 +111,21 @@ export function identityForm(body: string): IdentityForm | null {
   };
   let form: string;
   try {
-    form = JSON.stringify(canonical(JSON.parse(body)));
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    // Native text blocks have a different field from Chat's string content. Only normalize
+    // user text in the actual conversation. Tool results, opaque state and system text stay exact.
+    for (const [turns, parts] of [[parsed.messages, 'content'], [parsed.input, 'content'], [parsed.contents, 'parts']] as const) {
+      if (!Array.isArray(turns)) continue;
+      for (const turn of turns) {
+        if (turn?.role !== 'user' || !Array.isArray(turn[parts])) continue;
+        for (const part of turn[parts]) {
+          if (typeof part?.text === 'string' && (part.type === 'text' || part.type === 'input_text' || (parts === 'parts' && part.type === undefined))) {
+            part.text = message(part.text);
+          }
+        }
+      }
+    }
+    form = JSON.stringify(canonical(parsed));
   } catch {
     return null;
   }

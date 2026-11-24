@@ -1,5 +1,6 @@
 import { learningCurationRule } from './analysis/live-kind-admission.js';
 import { learningTidying } from './fast-role/flash-task-contract.js';
+import { isSyntheticLearningRecording } from './fast-role/recording-inputs.js';
 import { appendOnly } from './append-only.js';
 import { one } from './store-operation-support.js';
 import { dialogueMemoryContext } from './learning/editorial-memory.js';
@@ -1599,8 +1600,9 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
   const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
   const live = launch.learningBinding ? launch.learningBinding('underlying-pro') : launch.live;
   const flash = launch.learningBinding ? launch.learningBinding('underlying-flash') : launch.live;
-  if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-      flash?.scope !== 'ordinary-production' || identity?.providerProcessingVersion !== 'v36' ||
+  const recording = launch.operationalScope === 'developer-live' && launch.liveForKind !== undefined;
+  if (live === null || flash === null || identity === null ||
+      (!recording && (live.scope !== 'ordinary-production' || flash.scope !== 'ordinary-production' || identity.providerProcessingVersion !== 'v36')) ||
       learningCurationRule(policy, live) === null || learningCurationRule(policy, flash, 'learning-sample-tidying') === null) return null;
   const pin = (role: typeof live): EnabledLearningEnvelope['binding'] => ({ route: role.route, model: role.model, endpoint: role.endpoint,
     credentialSlot: role.credentialSlot, credentialReference: role.credentialReference,
@@ -1624,7 +1626,7 @@ function pendingCuration(host: EditorialLearningStoreHost) {
   if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
   for (const bookId of learning.curationBooks()) {
     const bundle = learning.nextCuration(bookId);
-    if (bundle?.state === 'ready') return { bundle, current };
+    if (bundle?.state === 'ready' && (host.baselineAnalysis.launch.operationalScope !== 'developer-live' || isSyntheticLearningRecording(bundle))) return { bundle, current };
   }
   return null;
 }

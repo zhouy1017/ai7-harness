@@ -3,6 +3,7 @@ import { isRecord, canonicalJson } from '../analysis/canonical.js';
 import { taskSynopsisMessageRequestDigest } from '../analysis/baseline-synopsis.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
+import { scopedDialogueRecordingKey } from '../dialogue/recording-scope.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { clarificationMessageRequestDigest } from './clarification-contract.js';
 import {
@@ -372,6 +373,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     requestDigest: string,
     subject: string,
     failure: (code: string, message: string, status?: number) => StreamChunk,
+    scopedIdentities?: ReadonlyArray<string>,
   ): AsyncIterable<StreamChunk> {
     const pairKey = fixtureEntryKey(0, requestDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
@@ -384,15 +386,31 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const response = entry.response;
     switch (response.kind) {
       case 'tool-calls':
+        if (entry.capture?.subject === 'scoped-global-dialogue' && scopedIdentities !== undefined) {
+          const args = response.calls.map(call => substituteToolIdPlaceholders(JSON.stringify(call.arguments), scopedIdentities));
+          if (args.some(value => value.includes('{{tool-id:'))) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '范围对话夹具的工具标识缺失。'); return; }
+          for (const [index, call] of response.calls.entries()) {
+            const id = `fixture-${this.#served}-${index}` as CallId;
+            yield { type: 'block-start', index, blockType: 'tool-call' };
+            yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: args[index]! };
+            yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: args[index]! } };
+          }
+          yield { type: 'usage', usage: response.usage };
+          yield { type: 'finish', reason: { kind: 'tool-calls' } };
+          return;
+        }
         yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '工具脚本只答复分析单元。');
         return;
-      case 'unit-result':
+      case 'unit-result': {
+        const text = scopedIdentities === undefined ? response.text : substituteToolIdPlaceholders(response.text, scopedIdentities);
+        if (scopedIdentities !== undefined && text.includes('{{tool-id:')) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '范围对话夹具的工具标识缺失。'); return; }
         yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: response.text };
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: response.text } };
+        yield { type: 'text-delta', index: 0, text };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } };
         yield { type: 'usage', usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } };
         yield { type: 'finish', reason: { kind: 'stop' } };
         return;
+      }
       case 'answer-chunks':
         yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '分段回答只答复编辑对话。');
         return;
@@ -473,6 +491,24 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const originalUser = options.messages.findLast((message) => message.role === 'user' && message.source?.kind === 'user');
     const text = originalUser === undefined ? lastUserMessageText(options) : messageText(originalUser);
+    if (text !== null) {
+      const index = originalUser === undefined ? -1 : options.messages.indexOf(originalUser);
+      const scoped = index < 0 ? null : scopedDialogueRecordingKey(text, this.#promptContractDigest);
+      if (scoped !== null) {
+        const rounds = toolExchangeOf(options.messages, index);
+        const exchange = rounds === null ? null : normalizeToolExchange(rounds, [], scoped.identities);
+        const key = exchange === null ? scoped.digest : toolTurnRequestDigest(scoped.digest, exchange);
+        if ((exchange !== null || index === options.messages.length - 1) && this.#entries.get(fixtureEntryKey(0, key))?.capture?.subject === 'scoped-global-dialogue') {
+          yield* this.#fastRole(key, '范围对话', failure, exchange?.foreign ?? scoped.identities);
+          return;
+        }
+      }
+      const key = sha256Hex(canonicalJson({ contract: this.#promptContractDigest, message: text }));
+      if (this.#entries.get(fixtureEntryKey(0, key))?.capture?.subject === 'recording-task') {
+        yield* this.#fastRole(key, '录制任务', failure);
+        return;
+      }
+    }
     const parsedDialogue = text === null ? null : parseDialogueMessage(text);
     const dialogue = parsedDialogue?.followUp === true
       ? { kind: parsedDialogue.kind, questionDigest: dialogueQuestionDigest(parsedDialogue.question) }

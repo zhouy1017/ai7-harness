@@ -67,9 +67,10 @@ export interface NormalizedToolExchange {
   readonly foreign: ReadonlyArray<string>;
 }
 
-export function normalizeToolExchange(rounds: ReadonlyArray<ToolExchangeRound>, ownBlockIds: ReadonlyArray<string>): NormalizedToolExchange {
+export function normalizeToolExchange(rounds: ReadonlyArray<ToolExchangeRound>, ownBlockIds: ReadonlyArray<string>, seed: ReadonlyArray<string> = []): NormalizedToolExchange {
   const names = new Map<string, string>(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
-  const foreign: string[] = [];
+  const foreign = [...seed];
+  foreign.forEach((id, index) => names.set(id, `{{tool-id:${index + 1}}}`));
   const rename = (text: string): string => text.replace(IDENTITY_TOKEN, (identity) => {
     let name = names.get(identity);
     if (name === undefined) { foreign.push(identity); name = `{{tool-id:${foreign.length}}}`; names.set(identity, name); }
