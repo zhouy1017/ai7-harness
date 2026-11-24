@@ -1,6 +1,7 @@
 import { windowStep } from './components/controls.js';
 import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
+import { serviceGoalWords } from './service-wording.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
   GUIDELINE_CANCEL,
@@ -87,7 +88,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     node.dataset['guidelineVersion'] = String(document.currentOrdinal);
     node.dataset['guidelineUse'] = document.use;
     const heading = el('div', 'guideline-heading');
-    const title = el('h3', undefined, document.title);
+    const title = el('h3', undefined, serviceGoalWords(document.title));
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
     heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));

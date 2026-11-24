@@ -3300,6 +3300,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
+    // Stage re-check (0.7.9): in ordinary mode a part that was not read gives its reason without the failure's code in brackets.
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('.findings-center')?.innerText??''; return text.includes('确定性夹具没有该单元与请求摘要对应的响应。') && !/（[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+）/u.test(text); })()`, 'book-findings-gap-reason-words');
     const pollFindings=remainingFindings.filter(item=>item.target.kind==='review').slice(0,2);
     requireJourney(pollFindings.length===2,'findings-poll-two-records');
     await renderer.evaluate(`document.querySelector('[data-findings-filter="category"] [data-filter-value=""]').focus()`);
@@ -3742,6 +3744,8 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('factual-card-source-open');
+    // 0.7.9 wording follow-up (#1616): in ordinary mode the open fact card names what it goes by as 事实核查规则, never 契约.
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="book-review"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('依据：事实核查规则 · 断言列举与引文定位') && !text.includes('依据：事实核查契约'); })()`, 'factual-card-basis-words');
     // Issue #1683 item 12.1: 在浏览器中打开 on the web source's row by a real pointer press hands exactly the recorded address to the
     // opener — the record file stands in for the system browser — once per press sequence, even for two presses before the answer;
     // 复制链接 puts exactly that address on the clipboard. The label's host is the address's own.
@@ -4498,6 +4502,10 @@ async function main() {
             await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
             // #1616 (stage-4/5 rework R6): the review plan's 统合 step reads in the editor's words — 部分, 未完成的部分, 审阅偏好.
             await assertRenderer(renderer,`(() => {const text=document.querySelector('#task-drawer').innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('若覆盖多个部分') && text.includes('并说明未完成的部分、缩短与省略数量') && !/阅读范围|缺口|本社审阅偏好/u.test(text);})()`,`task-status-finished-plan-words-${planWidth}`);
+            // 0.7.9 wording follow-up: the disclosure under 设为快速开始默认 says what it lists in the editor's words.
+            await assertRenderer(renderer,`(() => {const summary=document.querySelector('#task-drawer .task-plan-default-rule-detail > summary');return summary instanceof HTMLElement && summary.getClientRects().length>0 && summary.innerText.trim()==='设为默认后会沿用哪些设置';})()`,`task-status-finished-default-rule-words-${planWidth}`);
+            // Stage re-check (0.7.9): a Task that has run shows no PLAN-007 line to an ordinary editor.
+            await assertRenderer(renderer,`(() => {const drawer=document.querySelector('#task-drawer'),footer=drawer.querySelector('.task-drawer-footer');return footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !/运行授权|这里只是计划/u.test(drawer.innerText);})()`,`task-status-finished-no-plan-line-${planWidth}`);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
             await waitFor(renderer,statusCardExpression({ ended: true, model: await frozenModelWords(renderer, `${levelModel.label}@${level}`) }),`task-status-finished-card-again-${planWidth}`,30_000);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
