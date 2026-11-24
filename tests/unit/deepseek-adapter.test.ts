@@ -362,6 +362,7 @@ describe('model capability profiles', () => {
       'opencode-go-responses/gpt-5.6-luna', 'opencode-go-responses/grok-4.6',
       // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
       'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro', 'opencode-go/deepseek-v4.1-flash',
+      'opencode-go/gemini-4-argon',
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
       'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
@@ -428,8 +429,8 @@ describe('model capability profiles', () => {
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
       .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
     // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
-    // five it admits on `/messages` (S54b), and the two on `/responses` (S54c).
-    expect(inert).toHaveLength(16);
+    // five it admits on `/messages` (S54b), two on `/responses` (S54c), and Argon (ADR 0108).
+    expect(inert).toHaveLength(17);
     // One evidence record for one reading of the documentation pair, shared rather than restated —
     // by both paths, because reading which path a model is served on is the same reading.
     const documentation = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3-flash')!.evidence.requestShape;
@@ -461,8 +462,7 @@ describe('model capability profiles', () => {
       expect(normalizeModelResponse(profile, { output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }] }), profile.key)
         .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
     }
-    // Every id is distinct, so sixteen rows are sixteen models rather than one written sixteen ways.
-    expect(new Set(inert.map((profile) => profile.model)).size).toBe(16);
+    expect(new Set(inert.map((profile) => profile.model)).size).toBe(inert.length);
   });
 
   it('assembles each inert chat-completions model without a branch, as the live route bytes', () => {
@@ -471,7 +471,7 @@ describe('model capability profiles', () => {
     const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
       .filter((profile) => profile.route === OPENCODE_GO_ROUTE && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
-    expect(inert).toHaveLength(9);
+    expect(inert).toHaveLength(10);
 
     for (const profile of inert) {
       // Assembly needed no branch for any of them: each sends the live route's bytes with its own
