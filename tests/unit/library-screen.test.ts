@@ -106,6 +106,40 @@ describe('library cards (I-8)', () => {
     expect(view.screen.textContent).not.toContain(summary.lastWorkedAt!);
   });
 
+  it('keeps each card in place while its words are refreshed, so a press that is down on it still opens the Book', async () => {
+    const first = book('first', '2026-11-23T08:00:00Z'), second = book('second', '2026-11-12T08:00:00Z');
+    let answerAttention!: (value: { groups: [] }) => void;
+    let answerBooks!: (value: { items: BookSummaryProjection[]; nextCursor: null }) => void;
+    const view = await mount([first, second], [prior(first)], {
+      inspectGlobalAttention: () => new Promise((resolve) => { answerAttention = resolve; }),
+      listBooks: () => new Promise((resolve) => { answerBooks = resolve; }),
+    });
+    const cards = () => view.screen.querySelectorAll('article button[data-book-id]');
+    const [pressed, other] = cards();
+    expect(view.screen.textContent).toContain('正在读取待处理数…');
+    // The pending counts arrive after the page is on screen: the cards are the same nodes, only their words changed.
+    answerAttention({ groups: [] }); await flush();
+    expect(view.screen.textContent).not.toContain('正在读取待处理数…');
+    expect(view.screen.querySelectorAll('.book-card-facts').map(line => line.textContent)).toEqual([
+      `上次工作：${localDayTimeLabel(first.lastWorkedAt!)} · 暂无待处理`, `上次工作：${localDayTimeLabel(second.lastWorkedAt!)} · 暂无待处理`]);
+    expect(cards()[0] === pressed && cards()[1] === other).toBe(true);
+    // A filter keeps the matching card while it narrows the list, and the service's answer keeps it again.
+    view.type('first');
+    expect(cards()).toHaveLength(1); expect(cards()[0] === pressed).toBe(true);
+    answerBooks({ items: [first], nextCursor: null }); await flush();
+    expect(cards()[0] === pressed).toBe(true);
+    // Cleared: the other Book's own card comes back, in order, and the pressed card never left.
+    view.type('');
+    expect(cards()[0] === pressed && cards()[1] === other).toBe(true);
+    // A Book whose record changed is drawn again from the new record; the others keep their cards.
+    answerBooks({ items: [{ ...second, title: '改名后的图书' }, first], nextCursor: null }); await flush();
+    expect(cards()[0] === pressed).toBe(true);
+    expect(cards()[1] === other).toBe(false);
+    expect(cards()[1]!.textContent).toContain('改名后的图书');
+    pressed!.click(); await flush();
+    expect(view.open).toHaveBeenCalledWith({ kind: 'book', bookId: 'first' }, undefined, undefined, expect.anything());
+  });
+
   it('keeps navigation and card facts honest when reads fail or finish after leaving', async () => {
     const answer = Promise.withResolvers<{ items: BookSummaryProjection[]; nextCursor: null }>();
     const view = await mount([book('one', 'invalid')], [], {

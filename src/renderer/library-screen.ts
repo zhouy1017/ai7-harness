@@ -257,47 +257,64 @@ async function renderLanding(
       const query = activeFilter.text.normalize('NFC').toLowerCase();
       return words.some(word => word.normalize('NFC').toLowerCase().includes(query));
     };
+    // One card per Book, kept for as long as the page shows it. A repaint (the pending counts arriving, a filter answer, another
+    // page) changes a kept card's words in place and leaves it where it is: taking a card out and putting a new one back would
+    // lose a press that was down on it (the Book would not open; J-12 `first-review-help-returned-manuscript`).
+    const cards = new Map<string, { drawnFrom: string; row: HTMLElement; facts: HTMLElement }>();
+    const card = (summary: Card): { row: HTMLElement; facts: HTMLElement } => {
+      const item = recent.get(summary.bookId);
+      const drawnFrom = JSON.stringify([summary, item ?? null]);
+      const kept = cards.get(summary.bookId);
+      if (kept?.drawnFrom === drawnFrom) return kept;
+      const recovery = item?.recoveryAttention;
+      const open = bookCardOpen(summary.title, recovery ? '恢复待确认状态' : summary.manuscriptStateLabel, async () => {
+        const navigationRoute = navigation.begin();
+        open.disabled = true;
+        setStatus('正在打开图书…', 'busy');
+        try {
+          if (recovery) await returnToRecoveryComparison(recovery.attentionId, navigationRoute);
+          else await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
+        } catch (error) {
+          if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
+        } finally { open.disabled = false; }
+      });
+      open.dataset['bookId'] = summary.bookId;
+      if (item) open.dataset['manuscriptId'] = item.manuscriptId;
+      const row = element('article', `book-summary-item${item ? ' recent-work-item' : ''}`);
+      row.append(open, bookCardAction(recovery ? '返回恢复比较' : item ? '继续编辑' : '打开图书'));
+      const peopleLine = bookCardPeopleLine(summary.people);
+      const relatedLine = bookCardRelatedLine(summary.people);
+      const people = element('p', 'book-people-line field-note');
+      if (peopleLine !== null) people.append(peopleLine);
+      if (relatedLine !== null) people.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
+      if (summary.internalNumber !== null) people.append(people.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
+      if (people.childNodes.length > 0) row.append(people);
+      const facts = element('p', 'field-note book-card-facts');
+      row.append(facts);
+      if (item) row.append(element('p', 'field-note', `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`));
+      if (recovery) row.append(element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。'));
+      row.append(bookIdentityDisclosure(summary));
+      const drawn = { drawnFrom, row, facts };
+      cards.set(summary.bookId, drawn);
+      return drawn;
+    };
     const paint = (): void => {
       library.dataset['bookFilter'] = activeFilter?.field ?? 'none';
       onboarding.hidden = activeFilter !== null;
       const shown = [...known.values()].filter(matches).sort((a, b) =>
         (Date.parse(b.lastWorkedAt ?? '') || 0) - (Date.parse(a.lastWorkedAt ?? '') || 0));
-      list.replaceChildren();
-      for (const summary of shown) {
-        const item = recent.get(summary.bookId);
-        const recovery = item?.recoveryAttention;
-        const open = bookCardOpen(summary.title, recovery ? '恢复待确认状态' : summary.manuscriptStateLabel, async () => {
-          const navigationRoute = navigation.begin();
-          open.disabled = true;
-          setStatus('正在打开图书…', 'busy');
-          try {
-            if (recovery) await returnToRecoveryComparison(recovery.attentionId, navigationRoute);
-            else await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
-          } catch (error) {
-            if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
-          } finally { open.disabled = false; }
-        });
-        open.dataset['bookId'] = summary.bookId;
-        if (item) open.dataset['manuscriptId'] = item.manuscriptId;
-        const row = element('article', `book-summary-item${item ? ' recent-work-item' : ''}`);
-        row.append(open, bookCardAction(recovery ? '返回恢复比较' : item ? '继续编辑' : '打开图书'));
-        const peopleLine = bookCardPeopleLine(summary.people);
-        const relatedLine = bookCardRelatedLine(summary.people);
-        const facts = element('p', 'book-people-line field-note');
-        if (peopleLine !== null) facts.append(peopleLine);
-        if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
-        if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
-        if (facts.childNodes.length > 0) row.append(facts);
+      const rows = shown.map((summary) => {
+        const { row, facts } = card(summary);
         const time = summary.lastWorkedAt && Number.isFinite(Date.parse(summary.lastWorkedAt)) ? localDayTimeLabel(summary.lastWorkedAt) : '暂无记录';
         const count = pending?.get(summary.bookId)?.size ?? 0;
         const pendingLine = pending === null ? pendingFailed ? '待处理数暂不可用' : '正在读取待处理数…'
           : pendingIncomplete ? `${count}+ 项待处理` : count > 0 ? `${count} 项待处理` : '暂无待处理';
-        row.append(element('p', 'field-note book-card-facts', `上次工作：${time} · ${pendingLine}`));
-        if (item) row.append(element('p', 'field-note', `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`));
-        if (recovery) row.append(element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。'));
-        row.append(bookIdentityDisclosure(summary));
-        list.append(row);
-      }
+        const words = `上次工作：${time} · ${pendingLine}`;
+        if (facts.textContent !== words) facts.textContent = words;
+        return row;
+      });
+      for (const row of Array.from(list.children)) if (!rows.includes(row as HTMLElement)) row.remove();
+      for (const [index, row] of rows.entries()) if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null);
       result.replaceChildren();
       if (activeFilter !== null) result.append(element('span', 'book-filter-line', bookFilterLine(activeFilter)));
       if (shown.length === 0) result.append(element('span', 'book-filter-none', BOOK_FILTER_NONE));
