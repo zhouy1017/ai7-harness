@@ -58,11 +58,17 @@ export async function legacySampleService(root: string, codeRoot: string, revisi
 }
 
 export async function historicalUpgradeService(root: string,codeRoot: string,revision: string,softwareVersion: string) {
-  // Run the historical recovery algorithm against the directory names used by this test's current writer.
+  // Use the same directory labels for historical recovery and its backup inventory.
   const {entry} = await historicalModule(root,codeRoot,revision,'in-app-upgrade.ts',async checkout => {
-    const source = join(checkout,'src','service','in-app-upgrade.ts');
-    const code = await readFile(source,'utf8');
-    await writeFile(source,code.replace(/store-(before|after)-0\.8\.0-/gu, `store-$1-${softwareVersion}-`));
+    const service = join(checkout,'src','service');
+    const upgrade = join(service,'in-app-upgrade.ts');
+    const exporter = join(service,'database-exports.ts');
+    const [upgradeCode, exportCode] = await Promise.all([readFile(upgrade,'utf8'),readFile(exporter,'utf8')]);
+    const versionPattern = softwareVersion.replace(/[.+]/gu,'\\$&');
+    await Promise.all([
+      writeFile(upgrade,upgradeCode.replace(/store-(before|after)-0\.8\.0-/gu, `store-$1-${softwareVersion}-`)),
+      writeFile(exporter,exportCode.replace(String.raw`-0\.8\.0-`, `-${versionPattern}-`)),
+    ]);
   });
   return createRequire(import.meta.url)(entry) as typeof import('../../src/service/in-app-upgrade.js');
 }
