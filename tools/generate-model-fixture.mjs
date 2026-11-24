@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { admittedCaptureEndpoint, captureAnswer, captureMessages } from './model-fixture-families.mjs';
 
 /**
  * Turn one Provider Result Cache entry (ADR 0067, ADR 0089) into an `ai7.model-fixture/1` file.
@@ -414,6 +415,11 @@ async function loadSample1Owners() {
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
         "export { EDITORIAL_POLISH_PROMPT_CONTRACT, parseEditorialPolishMessage } from './src/service/fast-role/polish-contract.ts';",
         "export { CONFLICT_REGENERATE_PROMPT_CONTRACT, parseConflictRegenerateMessage } from './src/service/fast-role/conflict-regenerate-contract.ts';",
+        "export { FLASH_TASK_REGISTRY } from './src/service/fast-role/flash-task-registry.ts';",
+        "export { isSyntheticRecordingInput } from './src/service/fast-role/recording-inputs.ts';",
+        "export { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST } from './src/service/learning/curation.ts';",
+        "export { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST } from './src/service/dialogue/global-agent-session.ts';",
+        "export { SCOPED_EDIT_PROMPT_CONTRACT, SCOPED_EDIT_PROMPT_CONTRACT_DIGEST, parseScopedEditMessageHeader, scopedEditRequestDigest } from './src/service/fast-role/scoped-edit-contract.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
       bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
     });
@@ -895,11 +901,13 @@ export function evidenceGeneration(namespace, promptContractDigest, taskPromptCo
   return sha256Hex(JSON.stringify([namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest, ...task]));
 }
 
-/** The two usage counts an OpenAI-compatible response states, or `null`: what `usageOfResponse` reads. */
-function usageOfResponse(response) {
-  const usage = response !== null && typeof response === 'object' ? response.usage : undefined;
-  if (usage === null || typeof usage !== 'object') return null;
-  const { prompt_tokens: inputTokens, completion_tokens: outputTokens } = usage;
+/** The reported input and output counts, matching the live cache owner's reading. */
+function usageOfResponse(response, shape) {
+  const usage = response?.usage;
+  const [inputTokens, outputTokens] = shape === 'google-generate-content'
+    ? [response?.usageMetadata?.promptTokenCount, response?.usageMetadata?.candidatesTokenCount]
+    : shape === 'openai-responses' || shape === 'anthropic-messages'
+      ? [usage?.input_tokens, usage?.output_tokens] : [usage?.prompt_tokens, usage?.completion_tokens];
   return Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0
     ? { inputTokens, outputTokens }
     : null;
@@ -972,7 +980,7 @@ export async function readSelectedEntry(cacheRoot, selection) {
   refuse(entry.model === selection.model && entry.requestDigest === selection.requestDigest && sha256Hex(entry.requestBody) === selection.requestDigest &&
     entry.status === selection.captured.status && typeof entry.transmittedAt === 'string' && !Number.isNaN(Date.parse(entry.transmittedAt)) &&
     (selection.replayCapturedAt === null || selection.replayCapturedAt === entry.transmittedAt) &&
-    (!('usage' in entry) || sameUsage(entry.usage, usageOfResponse(entry.response))),
+    (!('usage' in entry) || sameUsage(entry.usage, usageOfResponse(entry.response, entry.requestShape))),
   'FIXTURE_GEN/entry-invalid', '缓存条目与账本记录的请求不一致。');
   const responseDigest = sha256Hex(JSON.stringify(entry.response) ?? 'null');
   refuse(!('responseDigest' in entry) || entry.responseDigest === responseDigest, 'FIXTURE_GEN/entry-invalid', '缓存响应摘要不一致。');
@@ -1015,12 +1023,12 @@ function chatMessageText(content) {
  * which a reduction, a sampling turn or the reflection names as its `stageContractDigest` for the caller to prove against the
  * capture. Any other request shape refuses rather than being guessed at.
  */
-export function parseCachedRequest(requestBody, promptContractDigest, structuredStageContractDigest) {
+export function parseCachedRequest(requestBody, promptContractDigest, structuredStageContractDigest, shape = 'openai-chat-completions') {
   let body;
   try {
-    body = JSON.parse(requestBody);
+    body = { messages: captureMessages(JSON.parse(requestBody), shape) };
   } catch {
-    throw new FixtureGenerationError('FIXTURE_GEN/request-shape-unsupported', '缓存条目的请求体不是 JSON。');
+    throw new FixtureGenerationError('FIXTURE_GEN/request-shape-unsupported', '缓存条目的请求体不是可识别的模型请求。');
   }
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
@@ -1037,13 +1045,15 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   'FIXTURE_GEN/identity-unmapped', '工具交换已含有占位符形式的文字，回放无法与捕获区分。');
   const normalized = normalizeToolExchange(rounds, base.identities.map(({ identity }) => identity));
   const resultTexts = rounds.flatMap((round) => round.results.map((result) => result.text));
+  const assistantTexts = body.messages.slice(lastUser + 1).filter(message => message.role === 'assistant')
+    .flatMap(message => chatMessageText(message.content) ?? []);
   return {
     ...base,
     toolResultTexts: resultTexts,
     requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
     contentDigest: null,
     // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
-    carriedBlockTexts: [...base.carriedBlockTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves)],
+    carriedBlockTexts: [...base.carriedBlockTexts, ...assistantTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves)],
     identities: [...base.identities, ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
   };
 }
@@ -1129,7 +1139,7 @@ function parseToolExchange(tail) {
       const text = message.role === 'tool' && typeof message.tool_call_id === 'string' ? chatMessageText(message.content) : null;
       refuse(text !== null && rounds.length > 0, 'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
       // The chat-completions wire carries no error flag, so none is recorded; the replay rebuilds the same wire.
-      rounds.at(-1).results.push({ callId: message.tool_call_id, text, isError: false });
+      rounds.at(-1).results.push({ callId: message.tool_call_id, text, isError: message.isError === true });
     }
   }
   refuse(rounds.every((round) => round.results.length === round.calls.length && round.calls.every((call) => round.results.filter((result) => result.callId === call.id).length === 1)),
@@ -1161,6 +1171,16 @@ function parseUnitRequest(body, promptContractDigest, structuredStageContractDig
   // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
   // The product's own stage identity selects its structured builder; its wire format is never duplicated here.
+  if (structuredStageContractDigest !== null && typeof structuredStageContractDigest === 'object') {
+    const { digest, systemPrompt, requireMessage, subject, requestDigestOf, carriedTextOf } = structuredStageContractDigest;
+    refuse(digest === promptContractDigest && systemMessages.length === 1 && systemMessages[0] === systemPrompt &&
+      carriedMessages.length === 1 && requireMessage(unitMessage),
+    'FIXTURE_GEN/contract-mismatch', '录制任务与固定契约不一致。');
+    return { subject, stageContractDigest: digest, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts: [...carriedBlockTexts, ...(carriedTextOf?.(unitMessage) ?? [])],
+      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null, identities: [],
+      requestDigest: requestDigestOf?.(unitMessage) ?? sha256Hex(canonicalJson({ contract: digest, message: unitMessage })) };
+  }
   if (structuredStageContractDigest !== undefined && promptContractDigest === structuredStageContractDigest) {
     return { subject: 'task-synthesis', stageContractDigest: structuredStageContractDigest, unitMessage, header: null,
       ownBlockTexts: [], carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages,
@@ -1469,17 +1489,14 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   if (entry.status !== 200) {
     return { kind: 'adapter-failure', code: `PROVIDER_HTTP_${entry.status}`, message: HTTP_FAILURE_MESSAGE, status: entry.status };
   }
-  const response = entry.response;
-  refuse(response !== null && typeof response === 'object' && !Array.isArray(response) && Array.isArray(response.choices),
-    'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不是 openai-chat-completions 结果。');
-  const message = response.choices[0] === undefined ? undefined : response.choices[0].message;
+  let answer;
+  try { answer = captureAnswer(entry.response, entry.requestShape ?? 'openai-chat-completions'); }
+  catch { throw new FixtureGenerationError('FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应与捕获的请求形态不符。'); }
+  const { message, inputTokens, outputTokens } = answer;
   const text = message === null || typeof message !== 'object' ? undefined : message.content;
   const calling = message !== null && typeof message === 'object' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
   refuse(calling || (typeof text === 'string' && text.length > 0),
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不含 choices[0].message.content 文本。');
-  const usage = response.usage;
-  const inputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.prompt_tokens;
-  const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
   if (calling) return mapToolCalls(message, { inputTokens, outputTokens }, request);
@@ -1604,19 +1621,54 @@ function requireStageContract(selection, parsed) {
   refuse(selection.promptContractDigest === parsed.stageContractDigest, 'FIXTURE_GEN/contract-mismatch', '捕获的阶段契约与请求消息不一致。');
 }
 
+function recordingTaskContract(owners, selection) {
+  const kind = selection.captured.purpose;
+  if (!selection.captured.validation?.family.startsWith('four-provider-recording-')) return null;
+  if (kind === 'editorial-polish' && selection.promptContractDigest === owners.SCOPED_EDIT_PROMPT_CONTRACT_DIGEST) {
+    const digest = owners.SCOPED_EDIT_PROMPT_CONTRACT_DIGEST;
+    return { digest, systemPrompt: owners.SCOPED_EDIT_PROMPT_CONTRACT.systemPrompt, subject: 'recording-task',
+      requireMessage: message => owners.parseScopedEditMessageHeader(message) !== null,
+      requestDigestOf: message => {
+        const { instructionDigest, scopeDigest } = owners.parseScopedEditMessageHeader(message);
+        return owners.scopedEditRequestDigest(digest, instructionDigest, scopeDigest);
+      },
+      carriedTextOf: message => [...message.matchAll(/<readonly_context>(.*?)<\/readonly_context>|<target_to_modify id="T\d+">(.*?)<\/target_to_modify>/gsu)]
+        .map(match => match[1] ?? match[2]) };
+  }
+  const flash = Object.hasOwn(owners.FLASH_TASK_REGISTRY, kind) ? owners.FLASH_TASK_REGISTRY[kind] : null;
+  if (flash !== null) return { digest: flash.promptContractDigest, systemPrompt: flash.systemPrompt, subject: 'recording-task',
+    requireMessage: message => kind === 'model-connection-test' ? message === flash.message() :
+      kind === 'material-translation' ? message.startsWith('AI7 来源译文 · ') :
+      kind === 'learning-sample-tidying' ? message.startsWith('[{') : owners.isSyntheticRecordingInput(kind, message) };
+  if (kind === 'learning-curation') return { digest: owners.CURATION_CONTRACT_DIGEST, systemPrompt: owners.CURATION_CONTRACT.systemPrompt,
+    subject: 'recording-task', requireMessage: message => message.includes('"schema":"' + owners.CURATION_CONTRACT.schema + '"') };
+  const scoped = kind === 'global-agent-scoped-dialogue';
+  if (scoped || kind === 'global-agent-dialogue') {
+    const contract = scoped ? owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT : owners.GLOBAL_AGENT_PROMPT_CONTRACT;
+    const digest = scoped ? owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : owners.GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST;
+    return { digest, systemPrompt: contract.systemPrompt, subject: 'recording-task', requireMessage: message => message.startsWith('AI7 全域对话\n') };
+  }
+  return null;
+}
+
 /** Everything but the write: a caller that refuses here has left nothing on disk. */
 export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
+  const shape = entry.requestShape ?? 'openai-chat-completions';
   let parsed;
-  try { parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest); }
+  try { parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, undefined, shape); }
   catch (error) {
     if (!(error instanceof FixtureGenerationError) || error.code !== 'FIXTURE_GEN/unit-message-unrecognized') throw error;
     const owners = await loadSample1Owners();
-    if (selection.promptContractDigest !== owners.RUN_SYNTHESIS_PROMPT_DIGEST) throw error;
-    refuse(request.sample1Store !== undefined && request.sample1Task !== undefined,
-      'FIXTURE_GEN/sample1-source-unproved', 'structured-stage');
-    parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, owners.RUN_SYNTHESIS_PROMPT_DIGEST);
+    const recording = recordingTaskContract(owners, selection);
+    if (recording !== null) parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, recording, shape);
+    else {
+      if (selection.promptContractDigest !== owners.RUN_SYNTHESIS_PROMPT_DIGEST) throw error;
+      refuse(request.sample1Store !== undefined && request.sample1Task !== undefined,
+        'FIXTURE_GEN/sample1-source-unproved', 'structured-stage');
+      parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, owners.RUN_SYNTHESIS_PROMPT_DIGEST, shape);
+    }
   }
   if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
     parsed.contentDigest = null;
@@ -1624,21 +1676,19 @@ export async function generateModelFixture(request, now = new Date()) {
   }
   requireStageContract(selection, parsed);
   // Keyed as the deterministic adapter of the wrapped Task asks it: under the Task's contract (Issue #812).
-  if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest);
+  if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest, undefined, shape);
   if (parsed.subject === 'task-synthesis') {
     const owners = await loadSample1Owners();
     parsed.requestDigest = owners.taskSynopsisMessageRequestDigest(parsed.requestDigest, parsed.unitMessage);
   }
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
-  refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
+  refuse(shape === 'google-generate-content' || JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
   if (selection.cacheKey !== null) {
     let endpoint;
     try { endpoint = new URL(entry.endpoint); } catch { /* Refuse below without echoing the URL. */ }
-    refuse(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
-      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
-      (entry.requestShape === 'openai-chat-completions' ||
-        (entry.requestShape === 'editorial-dialogue-sse' && parsed.subject === 'dialogue' && entry.route === 'opencode-go')),
+    refuse(endpoint !== undefined && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
+      admittedCaptureEndpoint(endpoint, shape, selection.model, parsed.subject, { route: entry.route, stream: entry.streamedAnswer !== undefined }),
       'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
   }
   refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');

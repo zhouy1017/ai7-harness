@@ -1,7 +1,7 @@
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { reviewCategoryKindId } from '../../shared/protocol.js';
-import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools } from '../analysis/live-kind-admission.js';
+import { liveKindAdmission, liveKindRule, liveNonWebReviewAllowed, modelAdmitsPlatformTools } from '../analysis/live-kind-admission.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
 
 /** The verified policy projection supplied by the policy-selection owner (#831). */
@@ -31,8 +31,7 @@ export function liveReviewRule(
   if (entry.categoryId === 'publication-risk') {
     const kind = reviewCategoryKindId(entry.categoryId);
     const rule = liveKindRule(policy, kind, ['public-or-synthetic']);
-    return policy.operationalScope === 'ordinary-production' && entry.executor === 'review-category-contract' &&
-      rule?.taskKindOverrides?.[kind]?.webSearch === false ? rule : null;
+    return entry.executor === 'review-category-contract' && liveNonWebReviewAllowed(policy, kind) ? rule : null;
   }
   if (entry.searchEngine) {
     if (!['factual-review', 'academic-integrity'].includes(entry.categoryId)) return null;

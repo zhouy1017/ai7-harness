@@ -5,6 +5,7 @@ import { PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/
 import { type OutboundDataCategory, type RemoteExecutionRoute } from '../provider/egress-gate.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import { modelProfileFor, type ProviderModelProfile } from '../provider/model-profile.js';
+import { RECORDING_ROUTES } from '../recording-launch.js';
 
 /**
  * Which live route an Interactive Editorial Dialogue may take (Issue #52, plan slice S17c; ADR 0088; ADR 0089): exactly the
@@ -44,7 +45,7 @@ export type AdmittedDialogueRoute = AdmittedFastRoleRoute;
  * routes an editor may configure (Issue #811). A rule naming any other route admits nothing.
  */
 const LIVE_ROUTES: Readonly<Record<'developer-live' | 'ordinary-production', ReadonlyArray<RemoteExecutionRoute>>> = {
-  'developer-live': [CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.route],
+  'developer-live': [CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.route, ...RECORDING_ROUTES],
   'ordinary-production': [...new Set(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast.map((binding) => binding.route))],
 };
 

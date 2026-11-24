@@ -193,7 +193,7 @@ function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelP
 }
 
 /** The stream reader of one model's family, aggregating to that family's buffered body. */
-function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
+export function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
   switch (model.capabilities.requestShape) {
     case 'openai-responses': return responsesSseEvents(response);
     case 'anthropic-messages': return messagesSseEvents(response);

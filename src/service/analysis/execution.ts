@@ -9,6 +9,7 @@ import { parseFactualClaimVerification } from './factual-claim-contract.js';
 import { withProviderResponseSalvage } from '../provider/response-normalization.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './factual-recheck.js';
 import { learningTidying, runStructuredFlashTask } from '../fast-role/flash-task-contract.js';
+import { isSyntheticLearningRecording } from '../fast-role/recording-inputs.js';
 import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
@@ -31,13 +32,12 @@ import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { PLATFORM_TOOL_CALL_PROGRESS, STOCK_TYPOS_FANOUT, describeComposition, prepareExecution, type HarnessSignal, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
   DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
   ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
   allowedProductionBindingOf,
-  isOrdinaryProductionRuntime, searchFallbackTermsOf,
+  developerLiveBindingFor, isOrdinaryProductionRuntime, searchFallbackTermsOf,
   type DeveloperLiveRuntime,
   type LiveRuntime,
   type OrdinaryProductionRuntime,
@@ -51,7 +51,6 @@ import { OPENCODE_GO_V41_FLASH_PROFILE, modelProfileFor, type ProviderModelProfi
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
-  OPENCODE_GO_ROUTE,
   evaluateEgress,
   type EgressBindingFacts,
   type EgressCeilingState,
@@ -557,8 +556,9 @@ export class BaselineAnalysisExecutionOwner {
 
   /** One tool-free turn on the existing F17 lane, using the same broker, physical governor and final gate. */
   startLearningCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
+    const live = this.#live();
     if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
-      !isOrdinaryProductionRuntime(this.#live())) return;
+      (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'learning-curation'))) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
     this.#curation = active;
     active.done = this.#executeCuration(store, active.abort.signal).finally(() => { this.#curation = null; this.#drain(); this.#changed(); });
@@ -567,7 +567,10 @@ export class BaselineAnalysisExecutionOwner {
   async #executeCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
     signal: AbortSignal): Promise<void> {
     const live = this.#live();
-    if (!isOrdinaryProductionRuntime(live)) return;
+    if (live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const validation = production ? null : live.launch.validation;
+    if (!production && (live.launch.recordingProvider === undefined || validation?.case !== 'learning-curation')) return;
     const ledger = this.#deps.ledger;
     let run: CurationRun | null = null, harness: PrimaryAgentHarnessHandle | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, producer: ModelRequestProducer | null = null;
@@ -583,6 +586,9 @@ export class BaselineAnalysisExecutionOwner {
       run = store.nextLearningCuration(control.entryId);
       if (run === null) return;
       const frozen = run;
+      if (!production && !isSyntheticLearningRecording(frozen.bundle)) throw new ExecutionAdmissionError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
+      const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
+      await cache?.open();
       const flash = frozen.envelope.tidying;
       if (!flash || flash.contractDigest !== learningTidying.promptContractDigest || !frozen.bundle.emittedText) {
         throw new ExecutionAdmissionError('CURATION_STALE', '学习整理范围已变化。');
@@ -613,7 +619,9 @@ export class BaselineAnalysisExecutionOwner {
         const facts: EgressBindingFacts = { bindingDigest: stageDigest, route: binding.route, model: binding.model,
           ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
           systemPrompt, outboundDataCategory: category,
-          policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          policy: production
+            ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+            : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
           admittedUserMessages: new Set([message]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
           contractCategories: new Set(tidying ? [category] : [category, 'house-review-preference-excerpt']),
           structuredTaskMessageDigest: messageDigest, learningCurationScope: { messageDigest, current } };
@@ -647,7 +655,16 @@ export class BaselineAnalysisExecutionOwner {
               onRequestNotSent: error => { missingCredential = error instanceof CredentialBrokerError && error.code === 'CREDENTIAL_MISSING'; },
               profile: { ...routeProfile, maxOutputTokens, taskOutputTokenLimit: maxOutputTokens }, modelProfile: productionModelProfile(binding.route, binding.model),
               ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
-              sessionId: () => sessionId, transport: (url, init) => { requireCurrent(); sent = true; return live.nativeFetch(url, init); } });
+              sessionId: () => sessionId, transport: (url, init) => {
+                requireCurrent();
+                const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
+                  requireCurrent(); sent = true; return live.nativeFetch(target, request);
+                };
+                return cache === null || validation === null ? send(url, init) : transmitOnce(cache, send,
+                  { purpose: stage, slice: 'S80', promptContractDigest, taskPromptContractDigest: promptContractDigest },
+                  { intent: validation, step: stage, requestShape: productionModelProfile(binding.route, binding.model).capabilities.requestShape },
+                  routeProfile, binding.model, url, init);
+              } });
             return adapter;
           },
         });
@@ -688,7 +705,9 @@ export class BaselineAnalysisExecutionOwner {
     }
   }
   startFactualRecheck(store: Pick<EditorialStore, 'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>): void {
-    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') || !isOrdinaryProductionRuntime(this.#live())) return;
+    const live = this.#live();
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
+        (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'factual-recheck'))) return;
     const candidate = store.nextFactualRecheck();
     if (candidate === null) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
@@ -700,7 +719,10 @@ export class BaselineAnalysisExecutionOwner {
   async #executeFactualRecheck(store: Pick<EditorialStore, 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>,
     candidate: FactualRecheckCandidate, signal: AbortSignal): Promise<void> {
     const live = this.#live();
-    if (!isOrdinaryProductionRuntime(live)) return;
+    if (live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const validation = production ? null : live.launch.validation;
+    if (!production && (live.launch.recordingProvider === undefined || validation?.case !== 'factual-recheck')) return;
     const ledger = store.factualReviewLedger;
     const owner = ledger.factualVerification;
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
@@ -709,6 +731,7 @@ export class BaselineAnalysisExecutionOwner {
     try {
       const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
+      const routeProfile = productionRouteProfile(candidate.binding.route);
       const backend = searchBackend(candidate.search.backendId);
       if (admitted?.factualRecheck === undefined || platformToolsFromProjection(admitted) === null ||
         admitted.route !== candidate.binding.route || admitted.model !== candidate.binding.model ||
@@ -718,6 +741,10 @@ export class BaselineAnalysisExecutionOwner {
         await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, candidate.search.credentialReference) !== 'present' ||
         !this.#backgroundIdle || signal.aborted) return;
       run = store.startFactualRecheck(candidate);
+      const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
+      const snapshots = production ? null : new ResearchSnapshotCache(live.launch.providerCacheRoot);
+      await cache?.open();
+      await snapshots?.open();
       const frozen = run;
       const binding = frozen.binding;
       const bound = ledger.bindFactualRecheck(frozen);
@@ -739,14 +766,16 @@ export class BaselineAnalysisExecutionOwner {
       };
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
-        systemPrompt: frozen.prompt, outboundDataCategory: 'unpublished-excerpts',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        systemPrompt: frozen.prompt, outboundDataCategory: production ? 'unpublished-excerpts' : 'public-or-synthetic',
+        policy: production
+          ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.message]), ruleOutboundCategories: new Set(rule!.outboundDataCategories),
         factualClaimScope: { stage: 'web-verification', current }, platformTools: tools,
         searchBackend: { backendId: frozen.search.backendId, host: frozen.search.host, endpoint: backend.declaration.endpoint!,
           credentialSlot: backend.declaration.credentialSlot, credentialReference: frozen.search.credentialReference } };
       const platform = new PlatformToolSession({ binding: facts, scope: { currentBindingDigest: () => current() ? bound.bindingDigest : null, acceptedOutputDigests, ceilingState },
-        fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, purpose: 'factual-recheck', onUsage: (value) => spent.push(value),
+        fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, cache, snapshots, purpose: 'factual-recheck', onUsage: (value) => spent.push(value),
         factualClaimAccounting: { sourceExcluded: (url) => frozen.selection.excludedSources.includes(url),
           reserveTool: (id) => owner.reserveClaimCall(frozen.session.sessionId, 'tool', id),
           reserveSearch: (digest) => owner.reserveClaimCall(frozen.session.sessionId, 'search', digest),
@@ -779,8 +808,17 @@ export class BaselineAnalysisExecutionOwner {
             slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
             tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
             promptContractDigest: frozen.promptDigest, codes, signal, beforeSend: requireCurrent,
-            profile: productionRouteProfile(binding.route), modelProfile: productionModelProfile(binding.route, binding.model),
-            sessionId: () => frozen.session.sessionId, transport: (url, init) => { requireCurrent(); return live.nativeFetch(url, init); } });
+            profile: routeProfile, modelProfile: profile,
+            sessionId: () => frozen.session.sessionId, transport: (url, init) => {
+              requireCurrent();
+              const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
+                requireCurrent(); return live.nativeFetch(target, request);
+              };
+              return cache === null || validation === null ? send(url, init) : transmitOnce(cache, send,
+                { purpose: 'factual-recheck', promptContractDigest: frozen.promptDigest },
+                { intent: validation, step: 'factual-recheck/verification', requestShape: profile.capabilities.requestShape },
+                routeProfile, binding.model, url, init);
+            } });
           return adapter;
         } });
       requireCompositionMatch(harness.composition.digest, frozen.compositionDigest);
@@ -944,9 +982,9 @@ export class BaselineAnalysisExecutionOwner {
     }
     const rule = liveKindRule(policy, definition.kind, [production ? 'unpublished-excerpts' : 'public-or-synthetic'],
       facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
-    const binding = routeFactsOf(facts, live);
+    const binding = routeFactsOf(facts, live, definition.kind);
     if (rule === null || rule.modelRole !== 'Main Editorial Role' || rule.route !== binding.route || rule.model !== binding.model ||
-        rule.credentialSlot !== binding.credentialSlot || rule.endpoint !== (production ? facts.productionBinding!.endpoint : OPENCODE_GO_ROUTE_PROFILE.endpoint) ||
+        rule.credentialSlot !== binding.credentialSlot || rule.endpoint !== productionRouteProfile(binding.route).endpoint ||
         production && definition.kind !== BASELINE_ANALYSIS_KIND && liveKindAdmission(policy, definition, facts.productionBinding!) === null) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', '当前策略未唯一准许本任务固定连接的实际执行规则。');
     }
@@ -1209,7 +1247,7 @@ export class BaselineAnalysisExecutionOwner {
     const production = isOrdinaryProductionRuntime(live);
     const rule = ledger.definition.kind !== BASELINE_ANALYSIS_KIND ? null
       : liveKindRule(policy, BASELINE_ANALYSIS_KIND, [production ? 'unpublished-excerpts' : 'public-or-synthetic'], 'background');
-    const { route, model, credentialSlot } = routeFactsOf(facts, live);
+    const { route, model, credentialSlot } = routeFactsOf(facts, live, ledger.definition.kind);
     if (rule === null || rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot) {
       throw new ExecutionAdmissionError('EXECUTION_ORIGIN_NOT_ADMITTED', '当前策略没有准许后台分析登记开始的运行发送内容；什么都没有发送。');
     }
@@ -1240,7 +1278,8 @@ export class BaselineAnalysisExecutionOwner {
       const allowed = allowedProductionBindingOf(configured);
       return configured === null || allowed === null ? 'missing' : this.#broker.checkPlanReadiness(allowed.credentialSlot, configured.credentialReference);
     }
-    return this.#broker.checkPlanReadiness(OPENCODE_GO_ROUTE_PROFILE.credentialSlot, DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
+    const configured = developerLiveBindingFor(live.launch);
+    return this.#broker.checkPlanReadiness(configured.credentialSlot, configured.credentialReference);
   }
 
   /**
@@ -1379,7 +1418,7 @@ export class BaselineAnalysisExecutionOwner {
     // The composition this launch would execute under — its harness pins included — as `prepareExecution` will
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
-    const { route, model } = routeFactsOf(facts, live);
+    const { route, model } = routeFactsOf(facts, live, ledger.definition.kind);
     // A factual plan executes under the level it froze (Issue #901): 快速整理 declares no local tool.
     const definition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const webTools = definition.factualClaims === undefined && definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
@@ -1792,11 +1831,12 @@ export class BaselineAnalysisExecutionOwner {
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
-    const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+    const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live, definition.kind);
     const effortConfig = facts.productionBinding?.reasoningEffort === undefined ? {} : { reasoningEffort: facts.productionBinding.reasoningEffort };
     // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
-    const routeProfile: ProviderRouteProfile = production === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
-    let liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
+    const routeProfile: ProviderRouteProfile = live === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
+    let liveModelProfile: ProviderModelProfile = live === null || (!isOrdinaryProductionRuntime(live) && live.launch.recordingProvider === undefined)
+      ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
     // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
@@ -2145,7 +2185,7 @@ export class BaselineAnalysisExecutionOwner {
                   }, {
                     intent: validation,
                     step: `${testItemPurpose}/${validationStep}`,
-                    requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape,
+                    requestShape: liveModelProfile.capabilities.requestShape,
                   }, routeProfile, model, url, init);
                 }
                 catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
@@ -4100,7 +4140,7 @@ function liveRuleOf(ledger: BaselineAnalysisStore): LiveKindRule | null {
 }
 
 /** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
-function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null): {
+function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null, kind: string): {
   route: ExecutionRouteId;
   model: string;
   credentialSlot: CredentialSlotBinding['slot'];
@@ -4119,13 +4159,10 @@ function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null): {
       runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
     };
   }
-  return {
-    route: live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE,
-    model: live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V41_FLASH_PROFILE.model,
-    credentialSlot: live === null ? 'deepseek-api-key' : OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
-    credentialReference: live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-    runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
-  };
+  const binding = live === null
+    ? { route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, credentialSlot: 'deepseek-api-key' as const, credentialReference: facts.credentialReference }
+    : developerLiveBindingFor(live.launch, kind);
+  return { ...binding, runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling };
 }
 
 /**
@@ -4144,7 +4181,7 @@ function executionBindingRecordOf(input: {
   compositionDigest: string;
 }): ExecutionBindingRecord {
   const { facts, definition, live, fixture } = input;
-  const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+  const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live, definition.kind);
   const update = facts.update;
   return {
     attemptId: input.attemptId,

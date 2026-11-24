@@ -43,9 +43,10 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { armHostAllowanceSet, armSingleHostAllowance, armPerTicketHostAdmission, admitTicketHost, installNodeNetworkDenial } from '../shared/network-denial.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
+import { recordingHostAllowances } from './recording-launch.js';
 import {
   DEVELOPER_LIVE_POLICY_BINDING,
+  developerLiveBindingFor,
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
   ordinaryProductionHostAllowances,
@@ -2145,9 +2146,11 @@ async function run(): Promise<void> {
   const nativeFetch: typeof fetch = globalThis.fetch;
   const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
     backgroundQuietMs, calibrationMinBooks, journalFaultArmed } = parseArguments(process.argv.slice(2));
-  if (launchForm.trustedOperationalScope === 'developer-live') {
-    // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
-    // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
+  const liveLaunch = launchForm.trustedOperationalScope === 'developer-live'
+    ? resolveDeveloperLiveLaunch(launchForm, fileURLToPath(new URL('../../', import.meta.url))) : null;
+  if (liveLaunch?.recordingProvider !== undefined) {
+    armHostAllowanceSet(recordingHostAllowances(liveLaunch.recordingProvider));
+  } else if (liveLaunch !== null) {
     const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
   } else if (launchForm.trustedOperationalScope === 'ordinary-production') {
@@ -2162,13 +2165,13 @@ async function run(): Promise<void> {
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
     { CooperativeJobOwner },
-    { resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync },
+    { resolveSourceCheckoutLaunchPolicySync },
     { BaselineAnalysisExecutionOwner, ModelRequestGovernor },
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner, dialogueLiveRoute, productionDialogueRoute },
-    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes, testModelServiceConnection },
+    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes, recordModelConnectionTest, testModelServiceConnection },
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
@@ -2263,14 +2266,14 @@ async function run(): Promise<void> {
     if (buildIdentity.dataVersion !== DATA_VERSION) throw new Error('AI7_BUILD_IDENTITY_MISMATCH');
     // Under ordinary-production the policy is resolved again with the editor's configured binding once the store is open, and
     // again after every model-service settings change (Issue #811); under every other scope it is the launch's, once.
-    let launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
+    let launchPolicy = resolveSourceCheckoutLaunchPolicySync(codeRoot, launchForm.trustedOperationalScope, null, null, undefined, liveLaunch ?? undefined);
     // The developer-live runtime exists only when the requested scope actually verified; a denied policy
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
     // v5. The captured `fetch` travels with the launch facts and reaches no other owner. Either live scope reaches it through
     // the device's 网络代理 setting (Issue #854), read again for every request.
     const modelServiceFetch = proxyAwareFetch(nativeFetch, () => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; });
-    const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
-      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: modelServiceFetch }
+    const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live' && liveLaunch !== null
+      ? { launch: liveLaunch, nativeFetch: modelServiceFetch }
       : null;
     // Ordinary production (Issue #811): the captured transport and nothing of development — no Provider Result Cache, no
     // Provider Test Ledger and no validation intent is ever constructed under this scope.
@@ -2341,14 +2344,11 @@ async function run(): Promise<void> {
       : {
           operationalScope: 'developer-live',
           policy: launchPolicy,
-          live: {
-            route: DEVELOPER_LIVE_POLICY_BINDING.route,
-            model: DEVELOPER_LIVE_POLICY_BINDING.model,
-            endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
-            credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
-            credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-            runBudgetCeiling: developerLive.launch.runBudgetCeiling,
-          },
+          live: developerLiveBindingFor(developerLive.launch),
+          ...(developerLive.launch.recordingProvider === undefined ? {} : {
+            liveForKind: (kind: string) => developerLiveBindingFor(developerLive.launch, kind),
+            learningBinding: role => developerLiveBindingFor(developerLive.launch, role === 'underlying-pro' ? 'learning-curation' : 'learning-sample-tidying'),
+          }),
         };
     store.baselineAnalysisLedger.bindLaunch(launch);
     // 事实核查 is a Review Category executed on the factual kind's own ledger (Issue #417), which the one
@@ -2514,17 +2514,18 @@ async function run(): Promise<void> {
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
     // policy before one names it, which refuses it with 「当前策略未开放来源译文」.
-    const underlyingFlash = () => openedStore.getConfiguredModelRoleBinding('underlying-flash');
+    const recording = developerLive?.launch.recordingProvider !== undefined;
+    const underlyingFlash = () => recording ? developerLiveBindingFor(developerLive!.launch, MATERIAL_TRANSLATION_KIND) : openedStore.getConfiguredModelRoleBinding('underlying-flash');
     const underlyingOwner = production === null ? fastRoleOwner : fastRoleOwner.fork(productionFastRoleRoutes(production, () => launchPolicy,
         () => underlyingFlash()?.credentialReference ?? null, createKeyringSecretResolver(),
         (reference, route) => { const now = underlyingFlash(); return now?.credentialReference === reference && now.route === route.profile.route && now.model === route.modelProfile.model; },
         () => openedStore.getModelServiceConnections().find(entry => entry.credentialReference === underlyingFlash()?.credentialReference)?.credentialUpdatedAt ?? null,
-        () => underlyingFlash()?.reasoningEffort));
-    if (production !== null) store.useStandardTableFormatter({
+        () => openedStore.getConfiguredModelRoleBinding('underlying-flash')?.reasoningEffort));
+    if (production !== null || recording) store.useStandardTableFormatter({
       model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('standards-table-formatting') === null ? selected.route + ' / ' + selected.model : null; },
       format: paragraphs => underlyingOwner.execute(standardsTable, paragraphs, 'standard-table-preview'),
     });
-    if (production !== null) store.useGuidelineFormatter({
+    if (production !== null || recording) store.useGuidelineFormatter({
       model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('guideline-clause-formatting') === null ? selected.route + ' / ' + selected.model : null; },
       format: paragraphs => underlyingOwner.execute(guidelineClauses, paragraphs, 'guideline-preview'),
     });
@@ -2549,6 +2550,7 @@ async function run(): Promise<void> {
     const reading = connectivityPath === undefined ? hostConnectivity : () => controlledConnectivity(connectivityPath);
     const reachesNetwork = (routeKind: string): boolean =>
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route ||
+      (recording && launchPolicy.providerProcessing.admittedRules?.some(rule => rule.route === routeKind) === true) ||
       (production !== null && ORDINARY_PRODUCTION_ALLOWED_BINDINGS.some((binding) => binding.route === routeKind)) ||
       (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
@@ -2640,7 +2642,9 @@ async function run(): Promise<void> {
         return failureResponse(id, error, StoreError);
       },
       onFatal: () => stop(),
-      probe: (input, execution) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
+      probe: (input, execution) => recording
+        ? recordModelConnectionTest(developerLive!, launchPolicy, input, createKeyringSecretResolver(), execution)
+        : testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
       probeCompleted: async () => { await modelServiceChanged(); },
       // 替换本机全部数据 waits for AI7's next start (Issue #434 review): the probe writes its result, so it is refused as dispatch refuses it.
       admitProbe: () => {

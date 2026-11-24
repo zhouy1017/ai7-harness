@@ -128,7 +128,7 @@ const CAPTURE_KEYS = [
   'subject', 'itemId', 'selectedItemId', 'evidenceScope', 'route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest',
   'capturedAt', 'providerRequestDigest', 'providerResponseDigest', 'validation', 'identityMap', 'cacheKey', 'generation', 'fixtureResponseDigest', 'responseDigestOrigin',
 ] as const;
-const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate'] as const;
+const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate', 'recording-task'] as const;
 const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
 const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3}|tool-id:[1-9][0-9]{0,3})\}\}$/u;
 const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -371,10 +371,15 @@ function parseCapture(value: unknown): ModelFixtureCapture {
   if (namespaced) {
     let endpoint: URL | undefined;
     try { endpoint = new URL(value.endpoint as string); } catch { /* Refuse without printing a payload field. */ }
+    const gemini = value.requestShape === 'google-generate-content';
+    const shapeAccepted = gemini
+      ? endpoint?.pathname.endsWith('/' + value.model + ':generateContent') && endpoint.search === '' ||
+        (value.subject === 'dialogue' || value.subject === 'recording-task' && isRecord(validation) && validation.step === 'global-agent-dialogue/ask') &&
+          endpoint?.pathname.endsWith('/' + value.model + ':streamGenerateContent') && endpoint.search === '?alt=sse'
+      : endpoint?.search === '' && (['openai-chat-completions', 'openai-responses', 'anthropic-messages'].includes(value.requestShape as string) ||
+        value.requestShape === 'editorial-dialogue-sse' && value.subject === 'dialogue' && value.route === 'opencode-go');
     requireFixture(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
-      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) &&
-      (value.requestShape === 'openai-chat-completions' ||
-        (value.requestShape === 'editorial-dialogue-sse' && value.subject === 'dialogue' && value.route === 'opencode-go')),
+      endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) && shapeAccepted,
       '夹具条目的捕获路由或形态无效。');
   }
   requireFixture(Array.isArray(value.identityMap) && value.identityMap.length <= MAX_IDENTITY_MAP && value.identityMap.every((mapping) =>

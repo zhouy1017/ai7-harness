@@ -1,4 +1,6 @@
 import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
+import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../shared/public-samplebooks.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/provider-configuration.generated.js';
 import type { RetrievalSource } from './retrieval/index.js';
 import { randomUUID } from 'node:crypto';
 import { selectedPolicyIdentityOf, type ConfiguredProviderBinding } from './launch-policy.js';
@@ -139,13 +141,16 @@ export function recordResearchEvidence(host: FactualVerificationOperationsHost, 
 export function internalFactualRecheckCandidate(host: FactualVerificationOperationsHost, enrollment: BackgroundAnalysisEnrollmentRecord, decisionId: string): FactualRecheckCandidate | null {
   const launch = host.baselineAnalysis.launch;
   const live = launch.live;
+  const recording = launch.operationalScope === 'developer-live' && launch.liveForKind !== undefined;
   const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
   const admitted = liveKindRule(launch.policy, 'factual-recheck', [], 'background');
   const rule = admitted?.factualRecheck;
   if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
-    launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && (policy?.providerProcessingVersion !== 'v32' && policy?.providerProcessingVersion !== 'v33' && policy?.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(policy?.providerProcessingVersion))) ||
+    live === null || policy === null || (!recording && (launch.operationalScope !== 'ordinary-production' || live.scope !== 'ordinary-production' || (policy.providerProcessingVersion !== 'v31' && (policy.providerProcessingVersion !== 'v32' && policy.providerProcessingVersion !== 'v33' && policy.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(policy.providerProcessingVersion))))) ||
+    recording && admitted?.ruleId !== 'recording-080-factual-recheck' ||
     rule?.maximumClaims !== 1 || host.replacementFrozen()) return null;
-  const binding = host.getConfiguredModelRoleBinding('main-editorial');
+  const binding = recording ? { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot,
+    credentialReference: live.credentialReference } : host.getConfiguredModelRoleBinding('main-editorial');
   if (binding === null || canonicalJson(binding) !== canonicalJson({ route: live.route, endpoint: live.endpoint, model: live.model,
     credentialSlot: live.credentialSlot, credentialReference: live.credentialReference }) ||
     admitted?.route !== live.route || admitted.model !== live.model || admitted.endpoint !== live.endpoint || admitted.credentialSlot !== live.credentialSlot ||
@@ -161,9 +166,25 @@ export function internalFactualRecheckCandidate(host: FactualVerificationOperati
   const point = host.factualReview.workingPointOf(enrollment.bookId);
   if (checkpoint === undefined || checkpoint.revision_id !== point.revisionId || checkpoint.revision_digest !== point.workingDigest ||
     Number(checkpoint.journal_sequence) !== point.journalSequence) return null;
+  if (recording && !host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN source_versions sv USING(source_version_id)
+    WHERE mr.revision_id = ? AND mr.parent_revision_id IS NULL AND mr.ordinal = 1 AND sv.source_digest = ?`)
+    .get(point.revisionId, SAMPLE1_PUBLIC_SAMPLEBOOK.sha256)) return null;
+  if (recording && !host.authority.prepare(`SELECT 1 FROM analysis_run_records r
+    JOIN analysis_run_authorizations a USING(authorization_id)
+    JOIN analysis_plan_versions v ON v.plan_envelope_sha256 = a.plan_envelope_sha256 AND v.task_intent_id = r.task_intent_id
+    JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal
+    WHERE r.run_record_id = ? AND p.component = 'provider-resolution-plan'
+    AND json_extract(p.canonical_json, '$.remoteBinding.providerProcessing.operationalScope') = 'developer-live'`)
+    .get(selection.originalRunRecordId)) return null;
   const search = host.getSearchBackendConnections().find((entry) => entry.selected && entry.credentialOperationState === 'ready' && entry.credentialReference !== null);
   if (search === undefined) return null;
   const backend = searchBackend(search.backendId);
+  const searchRule = platformToolsFromProjection(admitted)?.websearch;
+  const searchReference = recording
+    ? (CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES as Readonly<Record<string, string>>)[backend.declaration.credentialSlot]
+    : search.credentialReference!;
+  if (searchReference === undefined || recording && (searchRule === undefined || !('backends' in searchRule) || !searchRule.backends.some(candidate =>
+    candidate.id === search.backendId && candidate.host === backend.declaration.host && candidate.credentialSlot === backend.declaration.credentialSlot))) return null;
   const ledger = host.factualVerification.claims(selection.originalRunRecordId)!;
   const message = factualClaimVerificationInput(ledger, selection.claimId, rule.verificationContract.maximumMetadataUtf8Bytes);
   const prompt = factualClaimVerificationPrompt(selection.level);
@@ -172,7 +193,7 @@ export function internalFactualRecheckCandidate(host: FactualVerificationOperati
     onceKey: canonicalRecord({ enrollmentId: enrollment.enrollmentId, ledgerDigest: ledger.digest, claimId: selection.claimId, decisionId }).digest,
     selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
     search: { backendId: search.backendId, host: backend.declaration.host!, selectedAt: search.selectedAt,
-      configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: search.credentialReference! },
+      configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: searchReference },
     procedure: pin, maximumTokens: enrollment.version.share.maxTotalTokens, message: message.message,
     prompt: prompt.systemPrompt, promptDigest: canonicalRecord(prompt).digest,
     limits: { model: rule.verificationContract.maximumModelRequestsPerSession, tool: rule.verificationContract.maximumPlatformToolRoundsPerSession,

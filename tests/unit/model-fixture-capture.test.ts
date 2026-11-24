@@ -85,19 +85,21 @@ describe('converted capture proof and replay', () => {
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'ai7-capture-proof-')); });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
-  async function synthetic(message: string | ReadonlyArray<{ role: string; content: string }>, contract = BASELINE_PROMPT_CONTRACT_DIGEST, content = '{"note":"独立合成响应。"}') {
-    const requestBody = typeof message === 'string' ? body(message) : canonicalJson({ model: MODEL, messages: message });
+  async function synthetic(message: string | ReadonlyArray<{ role: string; content: string }>, contract = BASELINE_PROMPT_CONTRACT_DIGEST,
+    content = '{"note":"独立合成响应。"}', wire?: { namespace: typeof NAMESPACE; request: unknown; response: unknown }) {
+    const namespace = wire?.namespace ?? NAMESPACE;
+    const requestBody = wire ? canonicalJson(wire.request) : typeof message === 'string' ? body(message) : canonicalJson({ model: MODEL, messages: message });
     const lastUser = typeof message === 'string' ? message : message.filter((turn) => turn.role === 'user').at(-1)!.content;
     const requestDigest = sha256Hex(requestBody);
-    const cacheKey = tool.namespacedCacheKey(NAMESPACE, requestDigest);
-    const response = { choices: [{ message: { content } }], usage: { prompt_tokens: 20, completion_tokens: 5 } };
+    const cacheKey = tool.namespacedCacheKey(namespace, requestDigest);
+    const response = wire?.response ?? { choices: [{ message: { content } }], usage: { prompt_tokens: 20, completion_tokens: 5 } };
     const usage = { inputTokens: 20, outputTokens: 5 };
     const validation = { family: 'capture-proof', case: 'synthetic', step: 'contract' };
     const taskPromptContractDigest = lastUser.startsWith('AI7 编辑对话') ? contract : BASELINE_PROMPT_CONTRACT_DIGEST;
-    const generation = tool.evidenceGeneration(NAMESPACE, contract, taskPromptContractDigest);
-    const entry = { ...NAMESPACE, itemId: ITEM, requestBody, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract,
+    const generation = tool.evidenceGeneration(namespace, contract, taskPromptContractDigest);
+    const entry = { ...namespace, itemId: ITEM, requestBody, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract,
       taskPromptContractDigest, validation, transmittedAt: AT, status: 200, response, usage, responseDigest: sha256Hex(JSON.stringify(response)) };
-    const line = { ...NAMESPACE, itemId: ITEM, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract, taskPromptContractDigest,
+    const line = { ...namespace, itemId: ITEM, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract, taskPromptContractDigest,
       validation: { ...validation, decision: 'first-capture', evidence: [], delta: null }, outcome: 'transmitted', status: 200, usage, recordedAt: AT };
     await mkdir(join(root, 'entries'), { recursive: true });
     const path = join(root, 'entries', `${cacheKey}.json`);
@@ -107,6 +109,32 @@ describe('converted capture proof and replay', () => {
   }
 
   const generate = () => tool.generateModelFixture({ selector: ITEM, cacheRoot: root, identity: 'converted', description: '合成证据', out: join(root, 'out.json') });
+
+  it.each(['openai-responses', 'anthropic-messages', 'google-generate-content'])('converts a synthetic %s capture and rejects echoed source', async requestShape => {
+    const message = `分析单元 1/1 · 单元摘要 ${D}${blocks}`;
+    const isResponses = requestShape === 'openai-responses';
+    const isMessages = requestShape === 'anthropic-messages';
+    const route = isResponses ? 'openai-platform' : isMessages ? 'anthropic-claude' : 'google-gemini';
+    const endpoint = isResponses ? 'https://synthetic.invalid/v1/responses' : isMessages ? 'https://synthetic.invalid/v1/messages'
+      : `https://synthetic.invalid/v1beta/models/${MODEL}:generateContent`;
+    const request = isResponses ? { model: MODEL, instructions: 'Synthetic', input: [{ role: 'user', content: message }] }
+      : isMessages ? { model: MODEL, system: 'Synthetic', messages: [{ role: 'user', content: [{ type: 'text', text: message }] }] }
+        : { contents: [{ role: 'user', parts: [{ text: message }] }] };
+    const record = async (text: string) => {
+      const usage = { input_tokens: 20, output_tokens: 5 };
+      const response = isResponses ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }], usage }
+        : isMessages ? { content: [{ type: 'text', text }], usage } :
+          { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } };
+      await synthetic(message, BASELINE_PROMPT_CONTRACT_DIGEST, '', { namespace: { route, endpoint, requestShape, model: MODEL }, request, response });
+    };
+    await record('{"note":"独立合成响应。"}');
+    expect(parseModelFixture(await generate()).entries[0]).toMatchObject({
+      requestDigest: unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 1, D),
+      capture: { requestShape, route }, response: { kind: 'unit-result', usage: { inputTokens: 20, outputTokens: 5 } },
+    });
+    await record(JSON.stringify({ note: TEXT.slice(2, 18) }));
+    await expect(generate()).rejects.toThrow(/FIXTURE_GEN\/manuscript-echo/u);
+  });
 
   async function replay(message: string, contract: string): Promise<StreamChunk[]> {
     await writeFile(join(root, 'converted.json'), JSON.stringify(await generate()));

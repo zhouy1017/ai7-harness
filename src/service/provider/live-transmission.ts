@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
-import { dialogueSseEvents, isProviderAccountLimit, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { dialogueSseEvents, familyStreamEvents, isProviderAccountLimit, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { modelProfileFor } from './model-profile.js';
 import {
   NO_INCURRED_USAGE,
   ProviderResultCache,
@@ -54,6 +55,7 @@ export interface LiveModelValidation {
   readonly step: string;
   /** The wire shape of the request body, as the model profile declares it. */
   readonly requestShape: string;
+  readonly stream?: boolean;
 }
 
 /** What a live model call hands back: the response, and whether it was a replay that sent nothing and incurred nothing. */
@@ -254,7 +256,7 @@ export async function transmitOnce(
     if (!(await cache.claim(claimFacts))) {
       throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
     }
-    return send(cache, nativeFetch, item, profile, model, url, init, { itemId, requestDigest, identity, record, claimFacts });
+    return send(cache, nativeFetch, item, profile, model, url, init, { itemId, requestDigest, identity, record, claimFacts, stream: validation.stream === true });
   });
 }
 
@@ -278,10 +280,15 @@ function evidenceStep(step: string): string {
 function validationStep(step: string, body: string): string {
   const base = step.replace(/\/(?:turn|tool-turn)-\d+$/u, '');
   try {
-    const request: unknown = JSON.parse(body);
-    if (request === null || typeof request !== 'object' || !('messages' in request) || !Array.isArray(request.messages)) return base;
-    const tools = request.messages.filter((message: unknown) => message !== null && typeof message === 'object' &&
-      'role' in message && message.role === 'tool').length;
+    const request = JSON.parse(body) as { messages?: unknown[]; input?: unknown[]; contents?: unknown[] };
+    const turns = request.messages ?? request.input ?? request.contents ?? [];
+    const tools = turns.reduce<number>((count, turn) => {
+      if (turn === null || typeof turn !== 'object') return count;
+      const message = turn as { role?: string; type?: string; content?: unknown; parts?: unknown };
+      if (message.role === 'tool' || message.type === 'function_call_output') return count + 1;
+      const parts = message.parts ?? message.content;
+      return count + (Array.isArray(parts) ? parts.filter(part => part?.type === 'tool_result' || part?.functionResponse !== undefined).length : 0);
+    }, 0);
     return tools === 0 ? base : `${base}/tool-turn-${tools}`;
   } catch { return base; }
 }
@@ -294,7 +301,7 @@ async function send(
   model: string,
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
-  facts: { readonly itemId: string; readonly requestDigest: string; readonly identity: RequestIdentity; readonly record: ProviderValidationRecord; readonly claimFacts: ClaimFacts },
+  facts: { readonly itemId: string; readonly requestDigest: string; readonly identity: RequestIdentity; readonly record: ProviderValidationRecord; readonly claimFacts: ClaimFacts; readonly stream: boolean },
 ): Promise<LiveModelResponse> {
   const { itemId, requestDigest, identity, record, claimFacts } = facts;
   const line = (settled: Pick<ProviderLedgerLine, 'outcome' | 'status' | 'usage' | 'incurredUsage' | 'classification' | 'resetWindow'>): ProviderLedgerLine => ({
@@ -312,7 +319,8 @@ async function send(
     await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
     throw error;
   }
-  if (identity.requestShape === 'editorial-dialogue-sse' && (response.status >= 200 && response.status < 300)) {
+  if ((identity.requestShape === 'editorial-dialogue-sse' || facts.stream) && (response.status >= 200 && response.status < 300)) {
+    const streamProfile = identity.requestShape === 'editorial-dialogue-sse' ? null : modelProfileFor(profile.route, model);
     let consumed = false;
     return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')), stream: async function* () {
       if (consumed) throw new Error('AI7_OUTCOME_UNKNOWN');
@@ -323,7 +331,8 @@ async function send(
       let streamError: Extract<DialogueStreamEvent, { kind: 'error' }> | null = null;
       let kept = false;
       try {
-        for await (const event of response.stream?.() ?? dialogueSseEvents(response, model)) {
+        for await (const event of response.stream?.() ?? (streamProfile === null
+          ? dialogueSseEvents(response, model) : familyStreamEvents(response, streamProfile))) {
           if (event.kind === 'text') chunks.push(event.text);
           // The capture keeps the chat-completions aggregate alone; an in-stream refusal is never a whole answer here.
           else if (event.kind === 'complete') { aggregate = event.response; complete = true; }
@@ -338,7 +347,7 @@ async function send(
           // or send again. The Harness alone owns the editor's preserved complete fragments.
           await cache.holdUnknown(claimFacts);
         }
-        const usage = usageOfResponse(aggregate);
+        const usage = usageOfResponse(aggregate, identity.requestShape);
         try {
           await cache.keep({
             model, requestDigest, requestBody: init.body, status: response.status, response: aggregate, usage, transmittedAt,
@@ -372,7 +381,7 @@ async function send(
     }
     body = null;
   }
-  const usage = usageOfResponse(body);
+  const usage = usageOfResponse(body, identity.requestShape);
   // Only a 200 is kept. Explicit refusals settle; uncertain timeout/server outcomes remain held. The entry is kept before the
   // claim is settled; a crash between the two leaves both, and verified evidence answers. A 200 that cannot be kept leaves its claim
   // standing, so an answer that was paid for is never paid for again by accident.

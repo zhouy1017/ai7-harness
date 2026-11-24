@@ -91,6 +91,64 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
     model: 'deepseek-v4.1-flash',
     credentialSlot: 'opencode-go',
   },
+  recordingProviders: {
+    'openai-platform': {
+      pro: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-sol',
+        credentialSlot: 'openai-platform',
+      },
+      flash: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-luna',
+        credentialSlot: 'openai-platform',
+      },
+    },
+    'anthropic-claude': {
+      pro: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-opus-5',
+        credentialSlot: 'anthropic-claude',
+      },
+      flash: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-haiku-4-5',
+        credentialSlot: 'anthropic-claude',
+      },
+    },
+    'google-gemini': {
+      pro: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'google-gemini',
+      },
+      flash: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-hydrogen',
+        credentialSlot: 'google-gemini',
+      },
+    },
+    'opencode-go': {
+      pro: {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
+      flash: {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+    },
+  },
   legacyDeepSeek: {
     route: 'deepseek-open-platform',
     endpoint: 'https://api.deepseek.com/chat/completions',

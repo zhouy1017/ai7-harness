@@ -353,13 +353,15 @@ export function providerResponseDigest(response: unknown): string {
   return providerRequestDigest(JSON.stringify(response) ?? 'null');
 }
 
-/** The OpenAI-compatible usage shape, reduced to the two counts the ceiling and the report use. */
-export function usageOfResponse(body: unknown): ProviderUsageRecord | null {
+/** The response family's reported input and output counts. */
+export function usageOfResponse(body: unknown, shape = 'openai-chat-completions'): ProviderUsageRecord | null {
   if (body === null || typeof body !== 'object') return null;
-  const usage = (body as { usage?: unknown }).usage;
-  if (usage === null || typeof usage !== 'object') return null;
-  const prompt = (usage as { prompt_tokens?: unknown }).prompt_tokens;
-  const completion = (usage as { completion_tokens?: unknown }).completion_tokens;
+  const fields = body as { usage?: Record<string, unknown>; usageMetadata?: Record<string, unknown> };
+  const [prompt, completion] = shape === 'google-generate-content'
+    ? [fields.usageMetadata?.promptTokenCount, fields.usageMetadata?.candidatesTokenCount]
+    : shape === 'openai-responses' || shape === 'anthropic-messages'
+      ? [fields.usage?.input_tokens, fields.usage?.output_tokens]
+      : [fields.usage?.prompt_tokens, fields.usage?.completion_tokens];
   if (!Number.isSafeInteger(prompt) || !Number.isSafeInteger(completion) || (prompt as number) < 0 || (completion as number) < 0) return null;
   return { inputTokens: prompt as number, outputTokens: completion as number };
 }
@@ -921,7 +923,7 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
       typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
       typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
       !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||
-      !sameUsage(entry.usage, usageOfResponse(entry.response)) ||
+      !sameUsage(entry.usage, usageOfResponse(entry.response, entry.requestShape)) ||
       (entry.streamedAnswer !== undefined && (typeof entry.streamedAnswer.complete !== 'boolean' ||
         !Array.isArray(entry.streamedAnswer.chunks) || !entry.streamedAnswer.chunks.every((chunk) => typeof chunk === 'string') ||
         !entry.response || typeof entry.response !== 'object' ||

@@ -11,14 +11,13 @@ import type { EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
-import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import { developerLiveBindingFor, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
   type DeveloperLiveProviderProcessingVersion,
   type LaunchPolicyProjection,
   type OrdinaryProductionProviderProcessingVersion,
 } from '../../shared/protocol.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, streamingDeclared, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -122,7 +121,7 @@ export function dialogueLiveRoute(runtime: DeveloperLiveRuntime, policy: LaunchP
     transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
     route: admittedDialogueRoute(policy),
-    credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    credentialReference: developerLiveBindingFor(runtime.launch, DIALOGUE_TASK_KIND).credentialReference,
   };
 }
 
@@ -466,6 +465,7 @@ export class DialogueExecutionOwner {
       // the request. A live launch outside one is business, and the request reaches the transport itself.
       // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
       const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
+      const validationPurpose = !global ? DIALOGUE_TEST_ITEM_PURPOSE : scoped === null ? 'global-agent-dialogue' : 'global-agent-scoped-dialogue';
       let cache: ProviderResultCache | null = null;
       if (live !== null && validation !== null && !isOrdinaryProductionRuntime(live.runtime)) {
         cache = new ProviderResultCache(live.runtime.launch.providerCacheRoot);
@@ -544,10 +544,12 @@ export class DialogueExecutionOwner {
                 // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
                 // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
                 // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
-                transmitOnce(cache, observedSend, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
+                transmitOnce(cache, observedSend, { purpose: validationPurpose, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                   intent: validation,
-                  step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
-                  requestShape: streamShape ?? route.modelProfile.capabilities.requestShape,
+                  step: `${validationPurpose}/${turn.message.kind}`,
+                  requestShape: !global && streamShape !== null && route.modelProfile.capabilities.requestShape === 'openai-chat-completions'
+                    ? streamShape : route.modelProfile.capabilities.requestShape,
+                  ...(streamShape === null ? {} : { stream: true }),
                 }, route.profile, model, url, init);
               } catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
             },

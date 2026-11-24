@@ -473,6 +473,13 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const originalUser = options.messages.findLast((message) => message.role === 'user' && message.source?.kind === 'user');
     const text = originalUser === undefined ? lastUserMessageText(options) : messageText(originalUser);
+    if (text !== null) {
+      const key = sha256Hex(canonicalJson({ contract: this.#promptContractDigest, message: text }));
+      if (this.#entries.get(fixtureEntryKey(0, key))?.capture?.subject === 'recording-task') {
+        yield* this.#fastRole(key, '录制任务', failure);
+        return;
+      }
+    }
     const parsedDialogue = text === null ? null : parseDialogueMessage(text);
     const dialogue = parsedDialogue?.followUp === true
       ? { kind: parsedDialogue.kind, questionDigest: dialogueQuestionDigest(parsedDialogue.question) }

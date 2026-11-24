@@ -713,8 +713,17 @@ function resolveRuntimeBindings(input, providers) {
     return { route, endpoint: declared.profile.endpoint, model, credentialSlot: declared.profile.credentialSlot };
   };
   const resolveRoles = (roles, readableRequired = true) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map((binding) => resolveBinding(binding, readableRequired))]));
+  const recordingProviders = Object.fromEntries(Object.entries(input.data.recordingProviders).map(([id, tiers]) => {
+    const provider = providers.find((entry) => entry.providerId === id);
+    refuse(provider?.credential.developmentCredentialReference != null, `PROVIDER_CONFIGURATION/recording-credential: ${id}`);
+    return [id, Object.fromEntries(Object.entries(tiers).map(([tier, binding]) => {
+      refuse(provider.routes.some((route) => route.profile.route === binding.route), `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
+      return [tier, resolveBinding(binding, false)];
+    }))];
+  }));
   const result = {
     developerLive: resolveBinding(input.data.developerLive),
+    recordingProviders,
     legacyDeepSeek: resolveBinding(input.data.legacyDeepSeek),
     policyBaseline: resolveRoles(input.data.policyBaseline, false),
     ordinaryProduction: resolveRoles(input.data.ordinaryProduction),

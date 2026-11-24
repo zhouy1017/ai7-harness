@@ -780,13 +780,9 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
-    // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
     const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
-    // Editorial memory is read from the Store that owns this ledger, which binds its reader first: a launch carried over from
-    // another (possibly closed) Store never redirects a plan's memory read to that Store's database.
     const editorialMemory = this.#launch.editorialMemory ?? launch.editorialMemory;
-    if ((launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
+    if (launch.liveForKind === undefined && (launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
     else {
       const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
       for (const key of Reflect.ownKeys(descriptors)) {
@@ -795,6 +791,7 @@ export class BaselineAnalysisStore {
         if (descriptor.set !== undefined) descriptor.set = descriptor.set.bind(launch);
       }
       this.#launch = Object.defineProperties({}, { ...descriptors,
+        ...(launch.liveForKind === undefined ? {} : { live: { get: () => launch.liveForKind!(this.#definition.kind), enumerable: true } }),
         ...(retainedPolicyFor === undefined ? {} : { retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }),
         ...(editorialMemory === undefined ? {} : { editorialMemory: { value: editorialMemory, enumerable: true } }) }) as LaunchBinding;
     }
@@ -3800,7 +3797,7 @@ export class BaselineAnalysisStore {
     const stopCondition = production !== null
       ? `Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} binds the configured ${production.route} under ordinary-production; the Coverage Manifest unit count and the plan's own Run Budget Ceiling, when set, bound every transmission`
       : live !== null
-      ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
+      ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds ${live.route} under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
