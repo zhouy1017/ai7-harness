@@ -132,7 +132,7 @@ const SHAPE_RULES = Object.freeze({
     toolCalling: ['none', 'function'],
     streaming: 'generate-content-sse',
     requiresOutputCap: false,
-    headerForms: ['x-goog-api-key'],
+    headerForms: ['x-goog-api-key', 'authorization-bearer'],
   },
 });
 
@@ -722,7 +722,7 @@ function resolveRuntimeBindings(input, providers) {
       const route = provider.routes.find((route) => route.profile.route === binding.route);
       refuse(route !== undefined, `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
       const { reasoningEffort } = binding;
-      const reasoning = route.models.find(model => model.model === binding.model)?.reasoning ?? route.profile.reasoning;
+      const reasoning = route.models.find(model => model.model === binding.model)?.reasoning;
       refuse(reasoningEffort === undefined || reasoning?.efforts.includes(reasoningEffort) === true,
         `PROVIDER_CONFIGURATION/recording-effort: ${id}/${tier}`);
       return [tier, { ...resolveBinding(binding, false), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }];
@@ -1101,7 +1101,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
       lines.push(`| Per-turn output cap | ${route.profile.maxOutputTokens === null ? 'none' : grouped(route.profile.maxOutputTokens)} |`);
       if (route.profile.reasoning !== undefined) {
         const reasoning = route.profile.reasoning;
-        lines.push(`| Reasoning control / suggestions | \`${reasoning.control}\` / ${reasoning.efforts.map((effort) => `\`${effort}\``).join(', ')} |`);
+        lines.push(`| Reasoning encoding / route hints | \`${reasoning.control}\` / ${reasoning.efforts.map((effort) => `\`${effort}\``).join(', ')} |`);
         lines.push(`| Reasoning protocol source | ${reasoning.source}, read ${reasoning.readOn} |`);
       }
       lines.push('');
@@ -1129,7 +1129,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
           record(model.model, `\`${capability}: ${model.capabilities[capability]}\` — ${describeEvidence(evidence)}`);
         }
         if (model.context.tokens !== null) record(model.model, `context ${grouped(model.context.tokens)} — ${describeEvidence(model.context.evidence)}`);
-        if (model.reasoning !== undefined) record(model.model, `reasoning control ${model.reasoning.control}; suggestions ${model.reasoning.efforts.join(', ')} — ${model.reasoning.source}, read ${model.reasoning.readOn}`);
+        if (model.reasoning !== undefined) record(model.model, `reasoning control ${model.reasoning.control}; documented choices ${model.reasoning.efforts.join(', ')} — ${model.reasoning.source}, read ${model.reasoning.readOn}`);
         if (model.pre114ReasoningEffort !== undefined) record(model.model, `pre-114 selected-role effective effort ${model.pre114ReasoningEffort}; retained during upgrade only`);
       }
       const every = route.models.length;

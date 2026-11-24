@@ -175,20 +175,25 @@ const EVIDENCE_37: CapabilityEvidence = {
 };
 const EVIDENCE_38: CapabilityEvidence = {
   kind: 'vendor-documentation',
+  source: 'https://opencode.ai/docs/console/go/#endpoints ; https://opencode.ai/docs/console/api/inference/#gemini ; https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml',
+  readOn: '2026-11-24',
+};
+const EVIDENCE_39: CapabilityEvidence = {
+  kind: 'vendor-documentation',
   source: 'https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses',
   readOn: '2026-11-02',
 };
-const EVIDENCE_39: CapabilityEvidence = {
+const EVIDENCE_40: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'Tencent Cloud documentation, TokenHub web search (`web_search_options`), cloud.tencent.com/document',
   readOn: '2026-09-10',
 };
-const EVIDENCE_40: CapabilityEvidence = {
+const EVIDENCE_41: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'Xiaomi MiMo API documentation, web search tool, mimo.mi.com',
   readOn: '2026-09-11',
 };
-const EVIDENCE_41: CapabilityEvidence = {
+const EVIDENCE_42: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn',
   readOn: '2026-09-10',
@@ -357,6 +362,19 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
     maxOutputTokens: null,
     credentialHeaderEvidence: EVIDENCE_9,
     displayName: 'OpenCode Go · Responses（开发者实时）',
+  },
+  'opencode-go-gemini': {
+    route: 'opencode-go-gemini',
+    endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+    credentialSlot: 'opencode-go',
+    credentialHeader: 'authorization-bearer',
+    anthropicVersion: null,
+    limitPolicy: 'account-limit-terminal',
+    dshAttribution: false,
+    sessionHeader: false,
+    maxOutputTokens: null,
+    credentialHeaderEvidence: EVIDENCE_9,
+    displayName: 'OpenCode Go · generateContent',
   },
   'opencode-zen': {
     route: 'opencode-zen',
@@ -536,6 +554,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'none',
       webSearchTool: 'provider-tool',
     },
+    reasoning: {
+      control: 'anthropic-messages',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+      readOn: '2026-11-24',
+    },
     evidence: {
       requestShape: EVIDENCE_2,
       reasoningControl: EVIDENCE_14,
@@ -562,6 +586,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       usageAttribution: 'unknown',
       toolCalling: 'none',
       webSearchTool: 'provider-tool',
+    },
+    reasoning: {
+      control: 'anthropic-messages',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+      readOn: '2026-11-24',
     },
     evidence: {
       requestShape: EVIDENCE_2,
@@ -945,6 +975,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'none',
       webSearchTool: 'none',
     },
+    reasoning: {
+      control: 'google-generate-content',
+      efforts: ['low', 'medium', 'high'],
+      source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+      readOn: '2026-11-24',
+    },
     evidence: {
       requestShape: EVIDENCE_25,
       reasoningControl: EVIDENCE_14,
@@ -971,6 +1007,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       usageAttribution: 'unknown',
       toolCalling: 'none',
       webSearchTool: 'none',
+    },
+    reasoning: {
+      control: 'google-generate-content',
+      efforts: ['low', 'medium', 'high', 'xhigh'],
+      source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+      readOn: '2026-11-24',
     },
     evidence: {
       requestShape: EVIDENCE_25,
@@ -1161,6 +1203,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'none',
       webSearchTool: 'provider-tool',
     },
+    reasoning: {
+      control: 'openai-responses',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      source: 'https://developers.openai.com/api/docs/guides/deployment-checklist#set-up-reasoningeffort',
+      readOn: '2026-11-24',
+    },
     evidence: {
       requestShape: EVIDENCE_8,
       reasoningControl: EVIDENCE_14,
@@ -1187,6 +1235,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       usageAttribution: 'unknown',
       toolCalling: 'none',
       webSearchTool: 'provider-tool',
+    },
+    reasoning: {
+      control: 'openai-responses',
+      efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+      source: 'https://developers.openai.com/api/docs/models/gpt-6.1-terra',
+      readOn: '2026-11-24',
     },
     evidence: {
       requestShape: EVIDENCE_8,
@@ -1351,6 +1405,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
       streaming: 'chat-completions-sse',
     },
+    reasoning: {
+      control: 'openai-chat-completions',
+      efforts: ['low', 'high', 'max'],
+      source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/deepseek-v4.1-flash.toml ; https://api-docs.deepseek.com/api/create-chat-completion/ (documented; acceptance on the Go gateway is unverified)',
+      readOn: '2026-11-24',
+    },
     evidence: {
       requestShape: EVIDENCE_32,
       reasoningControl: EVIDENCE_14,
@@ -1423,33 +1483,6 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
     route: 'opencode-go',
     model: 'glm-5.3',
     displayName: 'GLM-5.3（OpenCode Go）',
-    capabilities: {
-      requestShape: 'openai-chat-completions',
-      reasoningControl: 'none',
-      structuredOutput: 'none',
-      answerChannel: 'none',
-      reasoningChannel: 'none',
-      usageAttribution: 'unknown',
-      toolCalling: 'none',
-      webSearchTool: 'none',
-    },
-    evidence: {
-      requestShape: EVIDENCE_36,
-      reasoningControl: EVIDENCE_14,
-      structuredOutput: EVIDENCE_14,
-      answerChannel: EVIDENCE_14,
-      reasoningChannel: EVIDENCE_14,
-      usageAttribution: EVIDENCE_14,
-      toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_31,
-    },
-    context: { tokens: null, evidence: EVIDENCE_14 },
-  },
-  {
-    key: 'opencode-go/gemini-4-argon',
-    route: 'opencode-go',
-    model: 'gemini-4-argon',
-    displayName: 'Gemini 4 Argon（OpenCode Go）',
     capabilities: {
       requestShape: 'openai-chat-completions',
       reasoningControl: 'none',
@@ -1824,6 +1857,41 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
     context: { tokens: null, evidence: EVIDENCE_14 },
   },
   {
+    key: 'opencode-go-gemini/gemini-4-argon',
+    route: 'opencode-go-gemini',
+    model: 'gemini-4-argon',
+    displayName: 'Gemini 4 Argon（OpenCode Go）',
+    capabilities: {
+      requestShape: 'google-generate-content',
+      reasoningControl: 'none',
+      structuredOutput: 'none',
+      answerChannel: 'candidate-parts-text',
+      reasoningChannel: 'none',
+      usageAttribution: 'unknown',
+      toolCalling: 'function',
+      webSearchTool: 'none',
+      streaming: 'generate-content-sse',
+    },
+    reasoning: {
+      control: 'google-generate-content',
+      efforts: ['low', 'medium', 'high'],
+      source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml',
+      readOn: '2026-11-24',
+    },
+    evidence: {
+      requestShape: EVIDENCE_38,
+      reasoningControl: EVIDENCE_14,
+      structuredOutput: EVIDENCE_14,
+      answerChannel: EVIDENCE_38,
+      reasoningChannel: EVIDENCE_14,
+      usageAttribution: EVIDENCE_14,
+      toolCalling: EVIDENCE_38,
+      webSearchTool: EVIDENCE_14,
+      streaming: EVIDENCE_38,
+    },
+    context: { tokens: null, evidence: EVIDENCE_14 },
+  },
+  {
     key: 'opencode-zen/qwen3.8-max',
     route: 'opencode-zen',
     model: 'qwen3.8-max',
@@ -1839,7 +1907,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1866,7 +1934,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1893,7 +1961,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1920,7 +1988,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1947,7 +2015,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1974,7 +2042,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2001,7 +2069,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2028,7 +2096,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2055,7 +2123,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2082,7 +2150,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2109,7 +2177,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2136,7 +2204,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2163,7 +2231,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2190,7 +2258,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2217,7 +2285,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2244,7 +2312,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2271,7 +2339,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2298,7 +2366,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2325,7 +2393,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2352,7 +2420,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2379,7 +2447,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2406,7 +2474,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2433,7 +2501,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2460,7 +2528,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2487,7 +2555,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2514,7 +2582,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2541,7 +2609,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2568,7 +2636,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2595,7 +2663,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2622,7 +2690,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2649,7 +2717,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2676,7 +2744,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2703,7 +2771,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2730,7 +2798,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2757,7 +2825,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2784,7 +2852,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2811,7 +2879,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2838,7 +2906,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2865,7 +2933,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2892,7 +2960,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2919,7 +2987,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2946,7 +3014,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2973,7 +3041,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3000,7 +3068,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3027,7 +3095,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3054,7 +3122,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3081,7 +3149,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3108,7 +3176,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3135,7 +3203,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3162,7 +3230,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3189,7 +3257,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3216,7 +3284,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3243,7 +3311,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3270,7 +3338,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3297,7 +3365,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3324,7 +3392,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3351,7 +3419,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3378,7 +3446,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3405,7 +3473,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3432,7 +3500,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3459,7 +3527,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3486,7 +3554,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3513,7 +3581,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3540,7 +3608,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3567,7 +3635,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3594,7 +3662,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3621,7 +3689,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_38,
+      requestShape: EVIDENCE_39,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3655,7 +3723,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 960000, evidence: EVIDENCE_11 },
   },
@@ -3682,7 +3750,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 192000, evidence: EVIDENCE_11 },
   },
@@ -3709,7 +3777,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_12,
-      webSearchTool: EVIDENCE_40,
+      webSearchTool: EVIDENCE_41,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_12 },
   },
@@ -3736,7 +3804,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_12,
-      webSearchTool: EVIDENCE_40,
+      webSearchTool: EVIDENCE_41,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_12 },
   },
@@ -3763,7 +3831,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_41,
+      webSearchTool: EVIDENCE_42,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3790,7 +3858,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_41,
+      webSearchTool: EVIDENCE_42,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3817,7 +3885,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_41,
+      webSearchTool: EVIDENCE_42,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3844,7 +3912,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_41,
+      webSearchTool: EVIDENCE_42,
     },
     context: { tokens: 200000, evidence: EVIDENCE_13 },
   },
@@ -3975,9 +4043,9 @@ export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, Ro
   'opencode-go': {
     family: 'openai-chat-completions',
     supported: {
-      text: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'gemini-4-argon', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
-      stream: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'gemini-4-argon', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
-      functionTools: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'gemini-4-argon', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
+      text: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
+      stream: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
+      functionTools: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
     },
   },
   'opencode-go-messages': {
@@ -3995,6 +4063,10 @@ export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, Ro
       stream: ['grok-4.6', 'gpt-5.6-luna'],
       functionTools: ['grok-4.6', 'gpt-5.6-luna'],
     },
+  },
+  'opencode-go-gemini': {
+    family: 'google-generate-content',
+    supported: { text: ['gemini-4-argon'], stream: ['gemini-4-argon'], functionTools: ['gemini-4-argon'] },
   },
   'opencode-zen': {
     family: 'openai-chat-completions',

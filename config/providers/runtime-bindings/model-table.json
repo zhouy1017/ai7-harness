@@ -11,18 +11,19 @@
       "flash": { "route": "anthropic-claude", "model": "claude-sonnet-5-5", "reasoningEffort": "high" }
     },
     "google-gemini": {
-      "pro": { "route": "google-gemini", "model": "gemini-4-argon" },
-      "flash": { "route": "google-gemini", "model": "gemini-4-hydrogen" }
+      "pro": { "route": "google-gemini", "model": "gemini-4-argon", "reasoningEffort": "high" },
+      "flash": { "route": "google-gemini", "model": "gemini-4-hydrogen", "reasoningEffort": "high" }
     },
     "opencode-go": {
-      "pro": { "route": "opencode-go", "model": "gemini-4-argon" },
-      "flash": { "route": "opencode-go", "model": "deepseek-v4.1-flash" }
+      "pro": { "route": "opencode-go-gemini", "model": "gemini-4-argon", "reasoningEffort": "high" },
+      "flash": { "route": "opencode-go", "model": "deepseek-v4.1-flash", "reasoningEffort": "high" }
     }
   },
   "legacyDeepSeek": { "route": "deepseek-open-platform", "model": "deepseek-v4-pro" },
   "policyBaseline": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -48,6 +49,7 @@
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -75,6 +77,7 @@
   "ordinaryProduction": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -88,6 +91,7 @@
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },

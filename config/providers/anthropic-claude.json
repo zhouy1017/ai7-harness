@@ -49,8 +49,20 @@
       },
       "note": "The shape requires a per-turn output cap; the route declares the same 32,768 as the OpenCode Go `/messages` route for the same reason — headroom above the largest unit output observed (24,225 tokens), one turn only — and below every listed model's output limit.",
       "models": [
-        { "modelId": "claude-opus-5-5", "displayName": "Claude Opus 5.5", "context": { "tokens": null, "evidence": "unverified" }, "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)." },
-        { "modelId": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5", "context": { "tokens": null, "evidence": "unverified" }, "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)." },
+        {
+          "modelId": "claude-opus-5-5",
+          "displayName": "Claude Opus 5.5",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "anthropic-messages", "efforts": ["low", "medium", "high", "xhigh", "max"], "source": "https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels", "readOn": "2026-11-24" },
+          "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108). The documented levels are the fallback when the account reports no usable effort list."
+        },
+        {
+          "modelId": "claude-sonnet-5-5",
+          "displayName": "Claude Sonnet 5.5",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "anthropic-messages", "efforts": ["low", "medium", "high", "xhigh", "max"], "source": "https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels", "readOn": "2026-11-24" },
+          "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108). The documented levels are the fallback when the account reports no usable effort list."
+        },
         { "modelId": "claude-opus-5", "displayName": "Claude Opus 5", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
         { "modelId": "claude-fable-5-1", "displayName": "Claude Fable 5.1", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
         { "modelId": "claude-sonnet-5", "displayName": "Claude Sonnet 5", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },

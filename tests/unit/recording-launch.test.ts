@@ -37,9 +37,8 @@ it.each(Object.keys(providers) as RecordingProvider[])('freezes %s by the produc
   expect(model('standards-table-formatting')).toBe(providers[id].flash.model);
   expect(model('retrieval-query-expansion')).toBeUndefined();
   expect(developerLiveBindingFor(launch, 'learning-curation').model).toBe(providers[id].pro.model);
-  const effort = id === 'openai-platform' || id === 'anthropic-claude' ? 'high' : undefined;
-  expect(developerLiveBindingFor(launch, 'learning-curation').reasoningEffort).toBe(effort);
-  expect(developerLiveBindingFor(launch, 'standards-table-formatting').reasoningEffort).toBe(effort);
+  expect(developerLiveBindingFor(launch, 'learning-curation').reasoningEffort).toBe('high');
+  expect(developerLiveBindingFor(launch, 'standards-table-formatting').reasoningEffort).toBe('high');
   expect(PROVIDER_ROUTE_PROFILES[providers[id].pro.route].credentialSlot).toBe(providers[id].pro.credentialSlot);
 });
 
