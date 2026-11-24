@@ -556,9 +556,9 @@ export class BaselineAnalysisExecutionOwner {
 
   /** One tool-free turn on the existing F17 lane, using the same broker, physical governor and final gate. */
   startLearningCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment')) return;
     const live = this.#live();
-    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
-      (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'learning-curation'))) return;
+    if (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'learning-curation')) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
     this.#curation = active;
     active.done = this.#executeCuration(store, active.abort.signal).finally(() => { this.#curation = null; this.#drain(); this.#changed(); });
@@ -588,7 +588,7 @@ export class BaselineAnalysisExecutionOwner {
       const frozen = run;
       if (!production && !isSyntheticLearningRecording(frozen.bundle)) throw new ExecutionAdmissionError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
       const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
-      await cache?.open();
+      if (cache !== null) await cache.open();
       const flash = frozen.envelope.tidying;
       if (!flash || flash.contractDigest !== learningTidying.promptContractDigest || !frozen.bundle.emittedText) {
         throw new ExecutionAdmissionError('CURATION_STALE', '学习整理范围已变化。');
@@ -656,11 +656,12 @@ export class BaselineAnalysisExecutionOwner {
               profile: { ...routeProfile, maxOutputTokens, taskOutputTokenLimit: maxOutputTokens }, modelProfile: productionModelProfile(binding.route, binding.model),
               ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
               sessionId: () => sessionId, transport: (url, init) => {
-                requireCurrent();
                 const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
                   requireCurrent(); sent = true; return live.nativeFetch(target, request);
                 };
-                return cache === null || validation === null ? send(url, init) : transmitOnce(cache, send,
+                if (cache === null || validation === null) return send(url, init);
+                requireCurrent();
+                return transmitOnce(cache, send,
                   { purpose: stage, slice: 'S80', promptContractDigest, taskPromptContractDigest: promptContractDigest },
                   { intent: validation, step: stage, requestShape: productionModelProfile(binding.route, binding.model).capabilities.requestShape },
                   routeProfile, binding.model, url, init);
@@ -705,9 +706,9 @@ export class BaselineAnalysisExecutionOwner {
     }
   }
   startFactualRecheck(store: Pick<EditorialStore, 'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>): void {
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment')) return;
     const live = this.#live();
-    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
-        (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'factual-recheck'))) return;
+    if (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'factual-recheck')) return;
     const candidate = store.nextFactualRecheck();
     if (candidate === null) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
@@ -743,8 +744,8 @@ export class BaselineAnalysisExecutionOwner {
       run = store.startFactualRecheck(candidate);
       const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
       const snapshots = production ? null : new ResearchSnapshotCache(live.launch.providerCacheRoot);
-      await cache?.open();
-      await snapshots?.open();
+      if (cache !== null) await cache.open();
+      if (snapshots !== null) await snapshots.open();
       const frozen = run;
       const binding = frozen.binding;
       const bound = ledger.bindFactualRecheck(frozen);
