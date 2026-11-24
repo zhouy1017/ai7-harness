@@ -3315,7 +3315,28 @@ async function main() {
     at('multi-documents-ordinary-rename');
     // 重命名 on the document's own title: Enter saves, the editor stays the same one, its text untouched.
     await assertRenderer(renderer, `(() => { window.__j07.renameEditor = document.querySelector('[data-testid="manuscript-editor"]'); return window.__j07.renameEditor instanceof HTMLElement; })()`, 'multi-rename-hold-editor');
-    await clickSelector(renderer, '.editor-toolbar [data-document-action="rename"]', 'multi-rename-open');
+    // The name row as the editor reads it at this window (stage-4/5 R2), from the engine's own geometry: the type, the title — whole, or a
+    // readable part and then an ellipsis — and 重命名 stand on one line inside the window, 重命名's words on one line, the info line uncut.
+    const titleRow = await renderer.evaluate(`(() => {
+      const row = document.querySelector('.editor-toolbar .document-title-row');
+      const heading = row?.querySelector('.document-title-heading'), rename = row?.querySelector('[data-document-action="rename"]'), badge = row?.querySelector('.document-type-badge');
+      if (!(heading instanceof HTMLElement) || !(rename instanceof HTMLElement) || !(badge instanceof HTMLElement)) return null;
+      const h = heading.getBoundingClientRect(), r = rename.getBoundingClientRect(), b = badge.getBoundingClientRect(), style = getComputedStyle(heading);
+      const words = document.createRange(); words.selectNodeContents(rename);
+      return {
+        window: [innerWidth, innerHeight], title: heading.textContent, badge: [b.left, b.top, b.right, b.bottom], heading: [h.left, h.top, h.right, h.bottom], rename: [r.left, r.top, r.right, r.bottom],
+        whole: h.width > 0 && heading.scrollWidth <= heading.clientWidth,
+        readablePart: style.textOverflow === 'ellipsis' && h.width >= 8 * parseFloat(style.fontSize),
+        renameLines: new Set(Array.from(words.getClientRects(), (line) => Math.round(line.top))).size,
+        oneLine: b.right <= h.left + 1 && h.right <= r.left + 1 && [b, r].every((box) => box.top < h.bottom && box.bottom > h.top),
+        inWindow: b.left >= 0 && r.right <= innerWidth && Math.min(b.top, h.top, r.top) >= 0 && Math.max(b.bottom, h.bottom, r.bottom) <= innerHeight,
+        info: Array.from(document.querySelectorAll('.editor-toolbar .editor-meta > :is(.editor-revision, .editor-word-count)'), (node) => [node.textContent, node.getBoundingClientRect().width > 0 && node.scrollWidth <= node.clientWidth]),
+      };
+    })()`);
+    console.log(`J07_TITLE_ROW/${JSON.stringify(titleRow)}`);
+    requireJourney(titleRow !== null && titleRow.title === offeredTitle && (titleRow.whole || titleRow.readablePart) && titleRow.renameLines === 1 && titleRow.oneLine && titleRow.inWindow &&
+      titleRow.info.length === 2 && titleRow.info.every(([, uncut]) => uncut), 'multi-title-row-readable', titleRow);
+    await pressReachable({ renderer, waitFor, assertRenderer }, '.editor-toolbar [data-document-action="rename"]', 'multi-rename-open');
     await waitFor(renderer, `document.activeElement === document.querySelector('.editor-toolbar .document-title-input')`, 'multi-rename-input');
     await fill(renderer, '.editor-toolbar .document-title-input', '另一篇宣传文章', 'multi-rename-title');
     await assertRenderer(renderer, `(() => { const input = document.querySelector('.editor-toolbar .document-title-input'); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`, 'multi-rename-enter');

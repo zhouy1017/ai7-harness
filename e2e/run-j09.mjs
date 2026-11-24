@@ -3,7 +3,7 @@ import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
-import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
+import { planViewExpression, statusCardExpression, taskCardFactsExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1858,6 +1858,11 @@ async function main() {
     const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      // The 任务 page's card says when it finished, how long it worked and its model as separate pieces of one line (stage-4/5 R3).
+      await waitFor(renderer, `innerWidth === ${statusWidth} && document.querySelector(${JSON.stringify(`${finishedCard} .task-overview-usage`)}) !== null`, `task-status-finished-card-facts-shown-${statusWidth}`, 30_000);
+      const finishedFacts = await renderer.evaluate(taskCardFactsExpression(`document.querySelector(${JSON.stringify(finishedCard)})`));
+      console.log(`TASK_CARD_FACTS/${statusWidth}/${JSON.stringify(finishedFacts)}`);
+      requireJourney(finishedFacts !== null && finishedFacts.apart && finishedFacts.sentence && finishedFacts.inCard, `task-status-finished-card-facts-${statusWidth}`, finishedFacts);
       await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
       await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
       await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);
