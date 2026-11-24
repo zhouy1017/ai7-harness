@@ -1,4 +1,5 @@
 import { serviceWords } from './service-wording.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import type { ModelServiceSettingsProjection, ReviewSynthesisProjection } from '../shared/protocol.js';
 import type { ModelFavourites } from '../shared/preferences.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -38,7 +39,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
   }
   root.append(heading);
   if (modelLabel) {
-    const mark = document.createElement('p'); mark.className = 'review-synthesis-model'; mark.textContent = modelLabel; root.append(mark);
+    const mark = document.createElement('p'); mark.className = 'review-synthesis-model'; mark.textContent = modelEffortWords(modelLabel); root.append(mark);
   }
   const paragraph = (text: string, refs: readonly string[] = []): void => {
     const node = document.createElement('p'); node.textContent = text;

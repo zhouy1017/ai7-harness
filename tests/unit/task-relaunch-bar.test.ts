@@ -149,7 +149,7 @@ describe('重新开始… (Issue #1680)', () => {
 
   it('offers the cancellation first when a preview needs it, then shows the preview', async () => {
     const previewTaskLaunch = vi.fn().mockRejectedValueOnce(coded('TASK_RELAUNCH_PREVIEW_CANCEL_REQUIRED', '先取消这项任务，才能查看重新开始后的计划。'))
-      .mockResolvedValueOnce({ steps: ['读稿'], scope: '全书', units: 1, reference: [], send: '稿件', usage: '用量', adaptations: [] });
+      .mockResolvedValueOnce({ steps: ['读稿'], scope: '全书', units: 1, reference: [], send: '稿件发往 模型甲@max', usage: '用量', adaptations: [] });
     const { mounted, api, host } = mount(WRITING, { previewTaskLaunch, launchWritingTask: vi.fn() });
     await mounted.bar.openPlan();
     const first = host.querySelector<HTMLElement>('[data-task-relaunch-cancel-first]')!;
@@ -160,6 +160,7 @@ describe('重新开始… (Issue #1680)', () => {
     await vi.waitFor(() => expect(previewTaskLaunch).toHaveBeenCalledTimes(2));
     expect(api.controlTaskRun).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(host.textContent).toContain('处理范围：全书'));
+    expect(host.textContent).toContain('会发送：稿件发往 模型甲@最高');
     expect(first.hidden).toBe(true);
   });
 

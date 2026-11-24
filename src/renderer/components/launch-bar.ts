@@ -7,6 +7,7 @@ import { createDispatchChooser } from './dispatch-chooser.js';
 import { evaluationMaterialsField } from '../evaluation.js';
 import { similarMaterialsField } from '../task-material-selection.js';
 import { technicalLayerVisible, identityWords } from '../technical-layer.js';
+import { modelEffortWords } from '../model-effort-labels.js';
 import { serviceWords } from '../service-wording.js';
 import { parseBudgetCeiling, TASK_PLAN_BUDGET_INVALID } from '../task-drawer-labels.js';
 
@@ -336,7 +337,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       // The plan's own sentences read in the editor's words (#1616): the same rules the Task Drawer's plan reads through.
       const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, serviceWords(step)));
       usage.replaceChildren(el('p', 'task-launch-scope', `处理范围：${serviceWords(preview.scope)}`), steps,
-        ...preview.reference.map(line => el('p', undefined, `允许参考：${serviceWords(line)}`)), el('p', undefined, `会发送：${serviceWords(preview.send)}`), ...launchEstimateLines(preview),
+        ...preview.reference.map(line => el('p', undefined, `允许参考：${serviceWords(line)}`)), el('p', undefined, `会发送：${modelEffortWords(serviceWords(preview.send))}`), ...launchEstimateLines(preview),
         ...preview.adaptations.map(line => el('p', 'task-launch-adaptation', serviceWords(line))));
     } catch (error) { if (!stopped && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = false; }

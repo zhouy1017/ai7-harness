@@ -10,6 +10,7 @@ import { standingBatchSuggestions } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { reviewSynthesisGenerateRow, reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults, readEvidenceAssuranceLevel, rememberEvidenceAssuranceLevel } from './action-defaults.js';
 import {
@@ -1290,7 +1291,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const details = el('span', 'review-run-details');
       details.append(el('span', 'review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`), ' · ', created);
       const line = el('p', 'review-run-line', reviewRunLine(summary));
-      if (summary.modelLabel) line.append(' · ', el('span', 'review-run-model', summary.modelLabel));
+      if (summary.modelLabel) line.append(' · ', el('span', 'review-run-model', modelEffortWords(summary.modelLabel)));
       line.append(' · ', details);
       item.append(line);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
@@ -2236,7 +2237,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function renderReport(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
     const modelLabel = run.report?.record.run.modelLabel ?? run.modelLabel;
-    if (modelLabel) section.append(el('p', 'review-report-model', modelLabel));
+    if (modelLabel) section.append(el('p', 'review-report-model', modelEffortWords(modelLabel)));
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
     section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).

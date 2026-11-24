@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 
 /** 思考强度's words, shared by 设置 › 模型服务 and the per-task chooser. */
 export const MODEL_DEFAULT_EFFORT_LABEL = '模型默认';
@@ -24,15 +24,16 @@ export function staleEffortLabel(level: string): string {
   return `${known ? effortLevelLabel(level) : technicalWords(level, '之前选的强度')}（现在不可用）`;
 }
 
+const RECORDED_LEVEL = new RegExp(`@(${Object.keys(LEVEL_WORDS).join('|')})(?![\\w.-])`, 'gu');
+
 /**
- * A frozen `名称@档位` label as a chooser's summary or a task card shows it: the level in the same word the list uses. The record
- * keeps the service's level name, and developer mode shows the record as it is.
+ * A recorded `名称@档位` as a surface shows it — a label on its own, or inside a sentence that names the model: the level in the
+ * same word the list uses (`名称@高`, `名称@思考上限 8192`). The record keeps the service's level name; developer mode
+ * (`technical`, by default the technical layer) shows the record as it is, and so does a level name with no word of its own.
  */
-export function modelEffortWords(label: string): string {
-  const at = label.lastIndexOf('@');
-  const level = at < 0 ? '' : label.slice(at + 1);
-  const word = LEVEL_WORDS[level] ?? (/^\d+$/u.test(level) ? `思考上限 ${level}` : undefined);
-  return word === undefined ? label : technicalWords(label, `${label.slice(0, at)}@${word}`);
+export function modelEffortWords(text: string, technical = technicalLayerVisible): string {
+  if (technical) return text;
+  return text.replace(RECORDED_LEVEL, (_match, level: string) => `@${LEVEL_WORDS[level]}`).replace(/@(\d+)$/u, '@思考上限 $1');
 }
 
 /** What a role or a record uses, in the same words as the list. */

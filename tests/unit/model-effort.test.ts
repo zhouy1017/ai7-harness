@@ -73,9 +73,14 @@ describe('the 思考强度 list of one model', () => {
     expect(modelEffortWords('模型甲@none')).toBe('模型甲@不启用思考');
     expect(modelEffortWords('模型甲@8192')).toBe('模型甲@思考上限 8192');
     // No level, a level with no word of its own, and a name that merely holds an @ are shown as recorded.
-    for (const label of ['模型甲', '模型甲@vendor-level', 'team@model', '']) expect(modelEffortWords(label)).toBe(label);
+    for (const label of ['模型甲', '模型甲@vendor-level', 'team@model', '模型甲@high-res', 'a@high.example', '']) expect(modelEffortWords(label)).toBe(label);
+    // Inside a sentence that names the model, wherever the recorded label stands; a number is a budget only at the end of a label.
+    expect(modelEffortWords('正文发往 渠道 · 模型甲@low；资料随稿件发往 模型乙@max。')).toBe('正文发往 渠道 · 模型甲@低；资料随稿件发往 模型乙@最高。');
+    expect(modelEffortWords('模型甲@8192 的结果')).toBe('模型甲@8192 的结果');
+    expect(modelEffortWords('模型甲@high', true)).toBe('模型甲@high');
     setTechnicalLayerVisible(true);
     for (const label of ['模型甲@high', '模型甲@8192', '模型甲']) expect(modelEffortWords(label)).toBe(label);
+    expect(modelEffortWords('模型甲@high', false)).toBe('模型甲@高');
   });
 
   it('paints the list, what is chosen and the note', () => {

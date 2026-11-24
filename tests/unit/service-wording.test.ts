@@ -289,6 +289,13 @@ describe('the fields that carry them, as the page shows them in ordinary mode (r
       edit: { ...taskPlanFixture().edit, lastEdit: { ordinal: 2, recordedAt: '2026-11-16T04:00:00.000Z', entries: [{ field: 'evidenceAssuranceLevel', label: '证据保证级别', prior: '标准', proposed: '严格' } as never] } },
     }));
     expect(plan.scope.process).toBe('《全社会动员》全书 · 120,000 字 · 8 个部分');
+    // 会发送 names the model in the list's word; developer mode keeps the record's level name.
+    const sending = { scope: { ...taskPlanFixture().scope, send: '所读范围内的稿件正文发往 OpenAI 官方 · 模型甲@high；资料库资料的提取文字随稿件一并发往' }, service: { ...taskPlanFixture().service, send: '所读范围内的稿件正文发往 OpenAI 官方 · 模型甲@xhigh' } };
+    expect(taskPlanWording(taskPlanFixture(sending)).scope.send).toBe('所读范围内的稿件正文发往 OpenAI 官方 · 模型甲@高；资料库资料的提取文字随稿件一并发往');
+    expect(taskPlanWording(taskPlanFixture(sending)).service.send).toBe('所读范围内的稿件正文发往 OpenAI 官方 · 模型甲@更高');
+    setTechnicalLayerVisible(true);
+    expect(taskPlanWording(taskPlanFixture(sending)).scope.send).toContain('模型甲@high；');
+    setTechnicalLayerVisible(false);
     expect(plan.redo?.summary).toEqual(['重新开始：沿用已读完的 2 个部分，接着读其余 6 个']);
     expect(taskPlanLastEdit(plan.edit.lastEdit!)).toContain('核查力度：标准 → 严格');
   });

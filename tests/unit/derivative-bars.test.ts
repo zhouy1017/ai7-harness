@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { mountManuscriptSwitcher, type ManuscriptSwitcher } from '../../src/renderer/manuscript-switcher.js';
 import { mountWritingTask, type WritingTaskSurface } from '../../src/renderer/writing-task.js';
 import type { ProductionDocumentProjection, ProductionDocumentsProjection, WritingTaskProjection } from '../../src/shared/protocol.js';
@@ -29,7 +30,7 @@ const writingPage = (state: WritingState | null = null, drafted = false, refusal
   types: [{ typeId: 'news-release', label: '新闻稿', prepare: { allowed: true, mode: 'writing-first' }, exemplars: { count: 0, statement: '' },
     drafted: drafted ? { revisionId: 'draft', createdAt: '2026-11-09T00:00:00Z' } : null, quickStart: { available: false, reason: null, rule: null } }],
   task: state === null ? null : { taskIntentId: 'task', typeId: 'news-release', typeLabel: '新闻稿', state, label: state === 'failed' ? '写作失败' : '写作状态',
-    modelLabel: '测试模型', refusal, planEnvelopeDigest: null },
+    modelLabel: '测试模型@high', refusal, planEnvelopeDigest: null },
 });
 const callbacks = () => ({ setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
   awaitServiceJob: vi.fn(), openLaunch: vi.fn(), openDocument: vi.fn(async () => {}) });
@@ -97,7 +98,11 @@ it.each(['prepared', 'authorized-blocked', 'waiting', 'admitted', 'executing', '
   expect(section.hidden).toBe(false);
   const row = section.querySelector<HTMLElement>('.writing-task-summary')!;
   expect(row.querySelector('h3')?.textContent).toBe('AI 写作');
-  expect(row.querySelector('.writing-task-line')?.textContent).toContain('测试模型');
+  // Developer mode shows the record's level name; ordinary mode says it in the list's word.
+  expect(row.querySelector('.writing-task-line')?.textContent).toContain('测试模型@high');
+  setTechnicalLayerVisible(false);
+  try { expect((await writing(writingPage(state))).section.querySelector('.writing-task-line')?.textContent).toContain('测试模型@高'); }
+  finally { setTechnicalLayerVisible(true); }
   expect(section.querySelector('.field-note')).toBeNull();
   row.querySelector<HTMLButtonElement>('[data-writing-action="open-task"]')!.click();
   expect(openPlan).toHaveBeenCalledWith('task');

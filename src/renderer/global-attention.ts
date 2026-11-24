@@ -1,5 +1,6 @@
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { showToast } from './components/toast.js';
 import { attentionPillLabel } from './notification-labels.js';
 import { taskNavigationCount } from './task-navigation-badge.js';
@@ -282,7 +283,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
     title.append(' · ', pill);
-    if (projection.modelLabel) title.append(' · ', el('span', 'global-attention-model', projection.modelLabel));
+    if (projection.modelLabel) title.append(' · ', el('span', 'global-attention-model', modelEffortWords(projection.modelLabel)));
     title.title = `${view.openName} · ${view.stateLabel}`;
     open.title = view.time;
     const reason = el('p', 'global-attention-reason', view.reason);

@@ -8,6 +8,7 @@ import type {
 import { localDayTimeLabel } from '../shared/report-wording.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 
 /** The 批注栏's words for working through what is pending (Issue #1523). */
@@ -53,7 +54,7 @@ export function pendingSearchStoppedLine(direction: 'next' | 'previous', places:
 export function markSourceMark(source: EditorialMarkCardProjection['source'], technical = false): string {
   if (source.kind === 'editor') return source.editorName?.trim() || '你';
   if (source.kind === 'imported-author') return source.label ?? '作者';
-  return (technical ? source.modelTechnicalLabel ?? source.modelLabel : source.modelLabel) ?? 'AI7';
+  return (technical ? source.modelTechnicalLabel ?? source.modelLabel : source.modelLabel === null || source.modelLabel === undefined ? undefined : modelEffortWords(source.modelLabel, false)) ?? 'AI7';
 }
 
 export function markIsHandled(mark: { status: string; disposition?: string | null; conflict?: EditorialMarkCardProjection['conflict'] | EditorialMarkAnchorProjection['conflict'] }): boolean {
@@ -158,7 +159,7 @@ export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' 
     ? source.editorName?.trim() || '你'
     : source.kind === 'imported-author'
       ? `${source.label ?? '作者'}（导入文件的作者）`
-      : `${(technical ? source.modelTechnicalLabel ?? source.modelLabel : source.modelLabel) ?? 'AI7'} · ${source.origin === 'analysis' ? source.label ?? '分析' : `${source.origin === 'review-category' ? '审阅' : '任务'}「${source.label ?? ''}」`}`;
+      : `${markSourceMark(source, technical)} · ${source.origin === 'analysis' ? source.label ?? '分析' : `${source.origin === 'review-category' ? '审阅' : '任务'}「${source.label ?? ''}」`}`;
   // A version saved from a conflict is no conversion: it says what it came from (Issue #57).
   if (card.resolvedFrom) return `${who} · ${card.resolvedFrom.conflictKind === 'reversal' ? '由撤销冲突生成的更正建议' : '由冲突解决生成的新版本'}`;
   if (card.convertedFrom === null) return who;

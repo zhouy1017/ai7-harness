@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { mountTaskDrawer, type TaskLaunchRequest } from '../../src/renderer/task-drawer.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
@@ -29,7 +30,7 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const before = JSON.stringify({ values, roles: settings.roles });
   const notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
   const launch = vi.fn(async (_input: unknown) => ({ taskIntentId: 'task', runRecordId: 'run', launchNotice: notice }));
-  const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取'], scope: '全书 · 1 个阅读范围', units: 1, reference: ['勾选的资料'], send: '所选资料发往模型服务', usage: '暂无可靠估计', adaptations: [] }));
+  const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取'], scope: '全书 · 1 个阅读范围', units: 1, reference: ['勾选的资料'], send: '所选资料发往模型服务 · 模型甲@high', usage: '暂无可靠估计', adaptations: [] }));
   const api = { previewTaskLaunch, [operation]: launch, getPreferences: async () => ({ version: 1, values, notice: null }), getModelServiceSettings: async () => settings,
     inspectEvaluation: async () => ({ bookId: 'book', materials: { items: [] }, market: { series: [] } }) };
   const root = document.createElement('aside'); document.body.append(root);
@@ -43,8 +44,14 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   drawer.openLaunch({ operation, bookId: 'book', title: kind, input } as TaskLaunchRequest, () => null);
   await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(false));
   expect(miniDocument.querySelector('.dispatch-chooser summary')?.textContent).toContain(channel.models[0]!.modelLabel);
-  miniDocument.querySelector('[data-task-drawer-control="preview-launch"]')!.click();
-  await vi.waitFor(() => expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('勾选的资料'));
+  // 会发送 names the model in the list's word in ordinary mode; the plan's own text keeps the level name.
+  setTechnicalLayerVisible(false);
+  try {
+    miniDocument.querySelector('[data-task-drawer-control="preview-launch"]')!.click();
+    await vi.waitFor(() => expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('勾选的资料'));
+    expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('模型甲@高');
+    expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('@high');
+  } finally { setTechnicalLayerVisible(true); }
   const retry=miniDocument.querySelector('[data-task-launch-option="retry"]')!;
   expect(Array.from(retry.querySelectorAll('option'),option=>option.value)).toEqual(operation==='launchBaselineAnalysis'?['auto','ask-first','never']:['auto','never']);
   retry.value='never';
