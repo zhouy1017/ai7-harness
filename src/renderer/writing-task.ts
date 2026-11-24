@@ -1,4 +1,5 @@
 import { serviceWords } from './service-wording.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { reportResult } from './notifications.js';
 import { createSheet, sheetContent } from './components/sheet.js';
@@ -211,7 +212,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     else if (task === null) summary.append(el('span', 'field-note', draftedCount > 0 ? `草稿已写好 ${draftedCount} 篇` : '参考资料起草衍生稿件'));
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
-      if (task.modelLabel) line.append(` · ${task.modelLabel}`);
+      if (task.modelLabel) line.append(` · ${modelEffortWords(task.modelLabel)}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
       if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', serviceWords(task.refusal)));
@@ -233,7 +234,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         item.dataset['writingTypeId'] = type.typeId;
         item.dataset['revisionId'] = type.drafted.revisionId;
         item.append(el('p', 'writing-drafted-line', writingDraftedLine(type.label, localInstantLabel(type.drafted.createdAt))));
-        if (type.drafted.modelLabel) item.append(el('p', 'writing-drafted-model', `模型 ${type.drafted.modelLabel}`));
+        if (type.drafted.modelLabel) item.append(el('p', 'writing-drafted-model', `模型 ${modelEffortWords(type.drafted.modelLabel)}`));
         const title = el('input');
         title.setAttribute('aria-label', '草稿题目');
         title.dataset['writingField'] = `draft-title-${type.drafted.revisionId}`;

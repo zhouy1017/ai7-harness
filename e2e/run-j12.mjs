@@ -2267,7 +2267,8 @@ async function main() {
       const hit=document.elementFromPoint(c.left+c.width/2,c.top+c.height/2), own=document.elementFromPoint(t.left+t.width/2,t.top+t.height/2);
       return inside && clear && control.contains(hit) && toast.contains(own);
     })()`, 'restart-entry-notice-leaves-edit-mode-reachable');
-    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
+    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode — the level in the
+    // list's word (0.7.9): the record holds gpt-6-luna@high, the cards say gpt-6-luna@高.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-author-settings-ready');
     await click(primary, '帮助', 'model-author-help');
@@ -2278,9 +2279,9 @@ async function main() {
     await clickBook(primary, bookA, 'model-author-book');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]')`, 'model-author-anchor');
     await assertRenderer(primary, `(() => { document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`, 'model-author-comments');
-    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent==='gpt-6-luna@high'`, 'model-author-comments-label');
+    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent===${JSON.stringify(`gpt-6-luna@${EFFORT_WORDS.high}`)}`, 'model-author-comments-label');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
-    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
+    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith(${JSON.stringify(`gpt-6-luna@${EFFORT_WORDS.high} · `)}) && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
     await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
     // #1401: the first factual review offers ranges before any whole-book result; no review is started here. This launch has
     // no model adapter, route or search source, so whether 事实核查 can start is the service's own verdict: it is read and

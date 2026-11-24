@@ -70,7 +70,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.children[1]).toBe(report);
   expect(report.querySelector('h3')!.textContent).toBe('评估报告');
   expect(report.querySelector('[data-evaluation-action="edit-report"]')!.textContent).toBe('修改评估报告');
-  expect(report.querySelector('.evaluation-report-model')!.textContent).toBe('模型 chosen-model@high');
+  expect(report.querySelector('.evaluation-report-model')!.textContent).toBe('模型 chosen-model@高');
   expect(report.querySelectorAll('.evaluation-report-comment')).toHaveLength(profile.items.length);
   expect(report.querySelector('.evaluation-report-comment')!.textContent).toBe('第 1 项的评语。');
   expect(report.querySelectorAll('.evaluation-item-ai7-evidence li')).toHaveLength(profile.items.length);
@@ -86,7 +86,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.querySelector('.evaluation-report')).toBeNull();
   expect(root.children[1]).toBe(root.querySelector('.evaluation-record'));
   expect(root.querySelector('.evaluation-record h3')!.textContent).toMatch(/^评估报告 · /u);
-  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('评估报告模型 chosen-model@high');
+  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('评估报告模型 chosen-model@高');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);
@@ -186,7 +186,7 @@ it('copies the report including its evidence and market section directly from th
   view.root.querySelector('[data-evaluation-action="copy-report"]')!.click();
   await vi.waitFor(() => expect(copyPlainText).toHaveBeenCalledOnce());
   const text = vi.mocked(copyPlainText).mock.calls[0]![1];
-  for (const line of ['公开合成书 · 评估报告', '模型 chosen-model@high', '第 1 项的评语。', '原文依据：第 1 项的依据。', '悬疑读者', '双线叙事', '线上书店']) expect(text).toContain(line);
+  for (const line of ['公开合成书 · 评估报告', '模型 chosen-model@高', '第 1 项的评语。', '原文依据：第 1 项的依据。', '悬疑读者', '双线叙事', '线上书店']) expect(text).toContain(line);
   expect(text).not.toContain('复制评估报告');
   expect(view.api.saveEvaluation).not.toHaveBeenCalled();
 });

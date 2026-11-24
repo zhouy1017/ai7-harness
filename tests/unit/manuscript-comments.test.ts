@@ -771,6 +771,8 @@ describe('comments command parity and refresh continuity', () => {
     const ui = mount(card, [ai('model-a', '模型甲@high'), ai('model-b', '模型乙')]); await paint();
     const paneScroll = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
     paneScroll.scrollTop = 400; (paneScroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    // The chip is keyed by the recorded label and says it as the cards do.
+    expect(ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型甲@high"]')!.textContent).toBe('模型甲@高');
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型甲@high"]')!.click(); await paint();
     expect(paneScroll.scrollTop).toBe(0);
     const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter(node => !node.hidden).map(node => node.dataset['commentCard']);

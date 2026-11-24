@@ -2,6 +2,7 @@ import { rendererApi } from './navigation-generation.js';
 import { reportResult } from './notifications.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { serviceWords } from './service-wording.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -308,7 +309,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportDigest'] = report.reportDigest;
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
-    if (report.modelLabel !== undefined) disclosure.append(element('p', 'task-model', `模型 ${report.modelLabel}`));
+    if (report.modelLabel !== undefined) disclosure.append(element('p', 'task-model', `模型 ${modelEffortWords(report.modelLabel)}`));
     disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? serviceWords(completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused)) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));

@@ -9,6 +9,7 @@ import { showToast } from './components/toast.js';
 import { shortcutHint } from './commands.js';
 import { inTextEntry, triageKeyAction } from './triage-keys.js';
 import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -1044,8 +1045,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     for (const source of new Set([...sources, ...markFilter.selectedModels])) {
       let button = modelButtons.get(source);
       if (!button) {
-        button = el('button', 'quiet', source);
-        button.type = 'button'; button.dataset['markModelFilter'] = source; button.title = source;
+        // The chip is keyed by the recorded label and says it as the cards do.
+        button = el('button', 'quiet', modelEffortWords(source));
+        button.type = 'button'; button.dataset['markModelFilter'] = source; button.title = modelEffortWords(source);
         button.addEventListener('click', () => {
           if (!markFilter.selectedModels.delete(source)) markFilter.selectedModels.add(source);
           filterChanged();

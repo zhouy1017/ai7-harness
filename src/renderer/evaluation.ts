@@ -3,6 +3,7 @@ import { serviceWords } from './service-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords, technicalWords } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { copyPlainText } from './clipboard-text.js';
 import type {
   EvaluationAdjustment,
@@ -380,7 +381,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         notRated: content.items[index]!.notRated !== null,
       })));
       const lines = [`${page.bookTitle} · 评估报告`, evaluationTotalLine(profile, total)];
-      if (initial?.modelLabel) lines.push(`模型 ${initial.modelLabel}`);
+      if (initial?.modelLabel) lines.push(`模型 ${modelEffortWords(initial.modelLabel)}`);
       const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
       if (unread !== null) lines.push(unread);
       if (record !== null && unsaved()) lines.push('包含尚未保存的修改');
@@ -448,7 +449,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const basis = readersReportBasisLine(report.basis);
     if (basis !== null) section.append(el('p', 'readers-report-basis', basis));
     const task = report.task;
-    if (task !== null) section.append(el('p', 'readers-report-task', `${readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])}${task.modelLabel ? ` · ${task.modelLabel}` : ''}`));
+    if (task !== null) section.append(el('p', 'readers-report-task', `${readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])}${task.modelLabel ? ` · ${modelEffortWords(task.modelLabel)}` : ''}`));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
     // The bar is bound to one named template that may start now (the first whose row offers 起草); a row's 起草 binds it to its own.
@@ -514,7 +515,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         template.append(' · ', el('span', 'readers-report-reason', serviceWords(entry.prepare.reason)));
       }
       const modelLabel = entry.draft?.modelLabel ?? entry.drafted?.modelLabel;
-      if (modelLabel) template.append(' · ', el('span', 'evaluation-report-model', modelLabel));
+      if (modelLabel) template.append(' · ', el('span', 'evaluation-report-model', modelEffortWords(modelLabel)));
       if (own && (task.state !== 'prepared' || reportBlocked)) {
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-task';
@@ -586,7 +587,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'attention-note', initial.task.historicalMarker));
     if (initial.task !== null) {
       const taskLine = el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task));
-      if (initial.task.modelLabel) taskLine.append(` · ${initial.task.modelLabel}`);
+      if (initial.task.modelLabel) taskLine.append(` · ${modelEffortWords(initial.task.modelLabel)}`);
       if (initial.task.historicalMarker !== undefined) taskLine.append(` · ${initial.task.historicalMarker}`);
       section.append(taskLine);
     }
@@ -655,7 +656,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, technicalWords(EVALUATION_REPORT_HEADING, '评估报告'));
     heading.tabIndex = -1;
     node.append(heading, el('p', 'evaluation-report-line', evaluationAi7LatestLine(profile, latest)));
-    if (latest.modelLabel) node.append(el('p', 'evaluation-report-model', `模型 ${latest.modelLabel}`));
+    if (latest.modelLabel) node.append(el('p', 'evaluation-report-model', `模型 ${modelEffortWords(latest.modelLabel)}`));
     const unread = evaluationAi7UnreadLine(latest);
     if (unread !== null) node.append(el('p', 'field-note evaluation-initial-unread', unread));
     node.append(el('p', 'evaluation-report-conclusion', evaluationAi7ConclusionLine(profile, latest.suggestedConclusion)));
@@ -791,11 +792,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(heading);
     const task = rewrite.task !== null && rewrite.task.recordId === record.recordId ? rewrite.task : null;
     if (task !== null) section.append(el('p', 'evaluation-rewrite-task', evaluationRewriteTaskLine(task)));
-    if (task?.modelLabel) section.append(el('p', 'evaluation-task-model', `模型 ${task.modelLabel}`));
+    if (task?.modelLabel) section.append(el('p', 'evaluation-task-model', `模型 ${modelEffortWords(task.modelLabel)}`));
     const proposal = rewrite.proposal;
     if (proposal !== null) {
       const card = el('div', 'evaluation-rewrite-proposal');
-      if (proposal.modelLabel) card.append(el('p', 'evaluation-report-model', `模型 ${proposal.modelLabel}`));
+      if (proposal.modelLabel) card.append(el('p', 'evaluation-report-model', `模型 ${modelEffortWords(proposal.modelLabel)}`));
       card.dataset['revisionId'] = proposal.revisionId;
       card.dataset['current'] = String(proposal.current);
       const line = el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal));
@@ -847,7 +848,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       section.append(card);
     } else if (rewrite.decided !== null) {
       heading.append(' · ', el('span', 'evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
-      if (rewrite.decided.modelLabel) section.append(el('p', 'evaluation-report-model', `模型 ${rewrite.decided.modelLabel}`));
+      if (rewrite.decided.modelLabel) section.append(el('p', 'evaluation-report-model', `模型 ${modelEffortWords(rewrite.decided.modelLabel)}`));
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
     if (rewrite.prepare.allowed || task?.state === 'prepared') {
@@ -1115,7 +1116,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
-    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `评估报告模型 ${record.initial.modelLabel}`));
+    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `评估报告模型 ${modelEffortWords(record.initial.modelLabel)}`));
     // Preserve the notices about attribution and damaged versions with the record they qualify.
     const skipped = evaluationSkippedRecordsLine(record);
     if (record.ai7WordsNotice !== null || skipped !== null) {

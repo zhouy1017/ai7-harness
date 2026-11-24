@@ -37,7 +37,7 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
     expect(panel.querySelector('[data-mark-region="content"]')?.className).toContain('editorial-mark-diff-inline');
     expect(panel.querySelector('ins')?.textContent).toBe('改后');
     expect(panel.querySelector('del')?.textContent).toBe('原文');
-    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('gpt-6-luna@high · 任务「校对」');
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('gpt-6-luna@高 · 任务「校对」');
     expect(panel.textContent).not.toContain('OpenAI 官方');
     expect(more.open).toBe(false);
   });
@@ -132,8 +132,8 @@ describe('pane compact and expanded cards (#1454)', () => {
     const preview = panel.querySelector<HTMLElement>('.editorial-mark-compact-preview')!;
     expect(content.hidden).toBe(true); expect(preview.hidden).toBe(false);
     expect(preview.textContent).toBe(kind === 'change-suggestion' ? '原文 → 改后' : '第一行公开合成正文');
-    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
-    expect(panel.querySelector('[data-mark-source]')?.getAttribute('title') ?? panel.querySelector<HTMLElement>('[data-mark-source]')?.title).toBe(value.source.modelLabel);
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe('gpt-6-luna@高');
+    expect(panel.querySelector('[data-mark-source]')?.getAttribute('title') ?? panel.querySelector<HTMLElement>('[data-mark-source]')?.title).toBe('gpt-6-luna@高');
     expect(panel.querySelector('header')?.textContent).not.toContain('修改建议');
     if (kind === 'change-suggestion') expect(panel.getAttribute('aria-label')).toContain('修改建议');
     expect(panel.querySelector('header button')).toBeNull();
@@ -142,8 +142,8 @@ describe('pane compact and expanded cards (#1454)', () => {
     expect(content.hidden).toBe(false); expect(preview.hidden).toBe(true);
     expect(panel.querySelector('.editorial-mark-expanded-content')).toBe(content);
     expect(content.contains(actions)).toBe(true);
-    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
-    expect(panel.querySelector('.editorial-mark-footer')?.textContent).toContain('gpt-6-luna@high · 任务「校对」');
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe('gpt-6-luna@高');
+    expect(panel.querySelector('.editorial-mark-footer')?.textContent).toContain('gpt-6-luna@高 · 任务「校对」');
     expect(panel.querySelector<HTMLElement>('.editorial-mark-footer')?.title).toBe(panel.querySelector('.editorial-mark-footer')?.textContent);
   });
 
@@ -153,7 +153,7 @@ describe('pane compact and expanded cards (#1454)', () => {
       const { panel } = renderEditorialMarkCard(value, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
       expect(panel.dataset['handled']).toBe(String(status !== 'open'));
       expect(panel.querySelector('[data-mark-state]')?.textContent).toMatch(status === 'open' ? /^○ /u : /^✓ /u);
-      expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(card.source.modelLabel);
+      expect(panel.querySelector('[data-mark-source]')?.textContent).toBe('gpt-6-luna@高');
       expect(panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')?.hidden).toBe(true);
       setEditorialMarkCardExpanded(panel, true);
       expect(panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')?.hidden).toBe(false);

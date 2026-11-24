@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { reviewSynthesisNode } from '../../src/renderer/review-synthesis.js';
 import { installMiniDom } from '../support/mini-dom.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { SAMPLE1_SYNTHESIS } from '../support/review-synthesis-projection.js';
 
 let restore: () => void;
-beforeEach(() => { restore = installMiniDom(); });
-afterEach(() => restore());
+beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(false); });
+afterEach(() => { setTechnicalLayerVisible(false); restore(); });
 
 it('keeps the compact summary native and makes every cited index an actionable evidence control', () => {
   const jump = vi.fn();
   const node = reviewSynthesisNode(SAMPLE1_SYNTHESIS, '编辑选择的模型@high', jump);
+  expect(node.querySelector('.review-synthesis-model')?.textContent).toBe('编辑选择的模型@高');
+  setTechnicalLayerVisible(true);
+  expect(reviewSynthesisNode(SAMPLE1_SYNTHESIS, '编辑选择的模型@high', jump).querySelector('.review-synthesis-model')?.textContent).toBe('编辑选择的模型@high');
+  setTechnicalLayerVisible(false);
   expect(node.tagName).toBe('DETAILS');
   expect(node.hasAttribute('open')).toBe(false);
   expect(node.querySelector('summary')?.textContent).toContain('1 组共性问题');
