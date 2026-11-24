@@ -4,7 +4,8 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import defaults from '../../config/runtime-execution-defaults.json' with { type: 'json' };
 import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRecommendedModels, modelServiceRouteRefusal, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
+import { CONFIGURED_MODEL_REASONING, CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
+import { DISCOVERED_EFFORT_LEVELS, type DiscoveredModel, type ModelServiceSupportedEfforts } from '../shared/protocol/model-service.js';
 import { modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
 import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
 import { GENERATED_MODEL_PROFILES } from './provider/provider-profiles.generated.js';
@@ -80,8 +81,33 @@ export function productionBindingRefusal(model: ProviderModelProfile, role: 'mai
   return providerPreflight(model, { stream: false, functionTools: false });
 }
 
+function supportedEffortsOf(entry: DiscoveredModel, runtimeRoute: string): ModelServiceSupportedEfforts | undefined {
+  const evidence = entry.reasoningEvidence;
+  if (evidence?.effort !== undefined) {
+    const { supported, levels = [] } = evidence.effort;
+    const provenance = { kind: 'discovered', observedAt: evidence.observedAt } as const;
+    if (evidence.completeness === 'complete' && levels.length === 0 && (supported === false || evidence.effort.levels !== undefined)) {
+      return { status: 'unsupported', levels: [], completeness: 'complete', provenance };
+    }
+    if (levels.length > 0 && supported !== false) {
+      return { status: 'supported', levels, completeness: evidence.completeness, provenance };
+    }
+    if (supported === false) return undefined; // The provider contradicted its own effort support flag.
+  }
+  const documented = CONFIGURED_MODEL_REASONING[`${runtimeRoute}/${entry.modelId}`];
+  if (documented === undefined) return undefined;
+  const denied = new Set<string>(evidence?.effort?.unsupportedLevels);
+  const levels = DISCOVERED_EFFORT_LEVELS.filter((level) => documented.efforts.includes(level) && !denied.has(level));
+  const budgets = documented.control === 'google-thinking-budget'
+    ? documented.efforts.filter((effort) => /^\d+$/u.test(effort))
+    : [];
+  if (levels.length === 0 && budgets.length === 0) return undefined;
+  return { status: 'supported', levels: [...levels, ...budgets], completeness: 'partial',
+    provenance: { kind: 'documented', source: documented.source, readOn: documented.readOn } };
+}
+
 /** Catalogue choices inherit protocol capabilities and are eligible on admitted channels, independent of model evidence. */
-export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly import('../shared/protocol.js').DiscoveredModel[]): ModelServiceChannelProjection[] {
+export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly DiscoveredModel[]): ModelServiceChannelProjection[] {
   const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
     const refused = productionBindingRefusal(model, role);
     if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'channel-not-admitted-by-selected-policy'>;
@@ -89,7 +115,7 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
   };
   return MODEL_SERVICE_CHANNELS.map((channelId) => {
     const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
-    const entries = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
+    const entries: readonly DiscoveredModel[] = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
       .filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`))
       .map((model) => ({ modelId: model.model, modelLabel: model.displayName }));
     return {
@@ -99,11 +125,13 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
       models: entries.map((entry) => {
         const runtime = modelServiceRuntimeBinding(channelId, entry.modelId, 'main');
         const model = modelProfileFor(runtime?.route ?? channelId, entry.modelId)!;
+        const supportedEfforts = supportedEffortsOf(entry, model.route);
         return {
           modelId: model.model,
           modelLabel: entry.modelLabel,
           family: model.capabilities.requestShape,
           capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
+          ...(supportedEfforts === undefined ? {} : { supportedEfforts }),
           main: modelServiceRouteRefusal(channelId, entry.modelId, 'main') === null ? disposition(model, 'main') : 'route-not-served',
           fast: modelServiceRouteRefusal(channelId, entry.modelId, 'fast') === null ? disposition(model, 'fast') : 'route-not-served',
         };

@@ -62,6 +62,18 @@ export const CONFIGURED_ROUTE_REASONING = {
 
 export interface ConfiguredReasoningDeclaration { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string }
 export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReasoningDeclaration>> = {
+  'deepseek-open-platform/deepseek-v4-pro': {
+    control: 'deepseek-thinking',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+    readOn: '2026-11-14',
+  },
+  'deepseek-open-platform/deepseek-flash': {
+    control: 'deepseek-thinking',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+    readOn: '2026-11-14',
+  },
   'google-gemini/gemini-3.8-flash': {
     control: 'google-generate-content',
     efforts: ['low', 'medium', 'high'],

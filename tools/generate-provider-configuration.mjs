@@ -575,7 +575,9 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         refuse(model.context.tokens === null || contextEvidence.kind === 'vendor-documentation',
           `PROVIDER_CONFIGURATION/context-evidence: ${modelWhere} (a context size names the vendor page that states it)`);
         if (model.reasoning !== undefined) {
-          refuse(model.reasoning.control === route.requestShape || route.requestShape === 'google-generate-content' && model.reasoning.control === 'google-thinking-budget', `PROVIDER_CONFIGURATION/model-reasoning-family: ${modelWhere}`);
+          refuse(model.reasoning.control === route.requestShape || model.reasoning.control === route.reasoning?.control ||
+            route.requestShape === 'google-generate-content' && model.reasoning.control === 'google-thinking-budget',
+          `PROVIDER_CONFIGURATION/model-reasoning-family: ${modelWhere}`);
           refuse(isCalendarDay(model.reasoning.readOn), `PROVIDER_CONFIGURATION/model-reasoning-day: ${modelWhere}`);
         }
         refuse(model.pre114ReasoningEffort === undefined || capabilities.reasoningControl === 'deepseek-thinking', `PROVIDER_CONFIGURATION/pre114-reasoning: ${modelWhere}`);

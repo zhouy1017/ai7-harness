@@ -63,6 +63,12 @@
           "modelId": "deepseek-v4-pro",
           "pre114ReasoningEffort": "high",
           "displayName": "DeepSeek V4 Pro High",
+          "reasoning": {
+            "control": "deepseek-thinking",
+            "efforts": ["low", "high", "max"],
+            "source": "https://api-docs.deepseek.com/guides/thinking_mode/",
+            "readOn": "2026-11-14"
+          },
           "capabilities": {
             "reasoningControl": { "value": "deepseek-thinking", "evidence": "production-baseline" },
             "answerChannel": { "value": "message-content-string", "evidence": "production-baseline" },
@@ -74,6 +80,12 @@
         {
           "modelId": "deepseek-flash",
           "displayName": "DeepSeek V4.1 Flash",
+          "reasoning": {
+            "control": "deepseek-thinking",
+            "efforts": ["low", "high", "max"],
+            "source": "https://api-docs.deepseek.com/guides/thinking_mode/",
+            "readOn": "2026-11-14"
+          },
           "capabilities": {
             "requestShape": { "value": "openai-chat-completions", "evidence": "models-and-pricing" },
             "answerChannel": { "value": "message-content-string", "evidence": "chat-completions-reference" },
