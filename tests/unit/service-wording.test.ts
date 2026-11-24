@@ -9,7 +9,8 @@ import {
   groupedCount, positionLabel, readRange, redoGoalSentence, resendDisclosure, withResumeBlockers, writingMaterialReferenceLine, writingReferenceLines,
   RESUME_BLOCKED_CONNECTION, RESUME_BLOCKED_OFFLINE,
 } from '../../src/service/task-plan.js';
-import { activeRunReason } from '../../src/service/analysis/run-state.js';
+import { activeRunReason, changedModeUnavailableReason } from '../../src/service/analysis/run-state.js';
+import { completedWithGapsLabel } from '../../src/shared/analysis-run-summary.js';
 import {
   backgroundCeilingTooLowReason, backgroundDriftReason, backgroundRunReportLines, backgroundScopeLabel, backgroundScopeMemberActiveReason,
   backgroundScopeMemberUnreadableReason,
@@ -113,6 +114,11 @@ const PRODUCED: Readonly<Record<string, () => ReadonlyArray<string>>> = {
     return [refusal.refusal!.message, taskMaterialReferenceLine(refusal)];
   }),
   'analysis/execution.ts#composed': () => ['模型服务暂时出错（TEMPORARY_FAILURE）；本社审阅偏好已停止使用，没有再试一次'],
+  // Stage-4/5 rework R6: the finished Run's count, the update mode's reason, and the plan preview's composed lines.
+  '../shared/analysis-run-summary.ts#rework-r6': () => [completedWithGapsLabel(1, 8)],
+  'analysis/run-state.ts#rework-r6': () => [changedModeUnavailableReason('同步到当前稿件')],
+  'analysis/execution.ts#rework-r6': () => ['未完成：没有单元读成 · 没有收到可用的模型回答。'],
+  'task-launch-preview.ts#rework-r6': () => (['允许', '先问我', '不允许'] as const).map((choice) => `模型服务暂时出错时，同一个阅读范围安全地再试一次：${choice}`),
   'task-plan.ts#1': () => [resendDisclosure([2, 3]), resendDisclosure([4])],
   'task-plan.ts#2': () => [categoryResendDisclosure([{ category: '事实核查', units: [4] }, { category: '体例与格式', units: [1, 2] }])],
   'task-plan.ts#3': () => [budgetCeilingLabel({ kind: 'tokens', maxTotalTokens: 80000 }), `任务运行预算上限：${groupedCount(240000)} tokens（2 类合计）`,
@@ -405,6 +411,16 @@ describe('the expanded display boundaries (#1616)', () => {
     ['series.impact.changes', '《资金缺口》有 3 项学习材料，其中 2 项已决定学习准入。', '《资金缺口》有 3 项学习材料，其中 2 项已决定是否可用于学习。'],
     ['seriesExclusion.impact.unchanged', '图书、稿件和来源版本不会被删除或隐藏；书系成员和学习准入都不变。', '图书、稿件和来源版本不会被删除或隐藏；书系成员和是否可用于学习的决定都不变。'],
     ['fact.recommendation.rationale', '已核对来源与原文不符；接受后可以准备更正提案。', '已核对来源与原文不符；接受后可以准备更正建议。'],
+    // Stage-4/5 rework R6 (acceptance at 41e76afa): each sentence the editor met, as its page now shows it.
+    ['analysis.stateLabel', '已形成结果集修订版', '已形成分析结果'],
+    ['analysis.taskOutcome.label', completedWithGapsLabel(1, 8), '已完成 · 8 个部分中有 1 个没有读成'],
+    ['analysis.update.unavailableReason', changedModeUnavailableReason('同步到当前稿件'), '分析结果与当前稿件一致；稿件有了已保存的改动之后才可同步到当前稿件。'],
+    ['review.coverage.unavailableReason', '主编辑角色缺少固定的凭据引用元数据。', '主编辑模型缺少已保存的密钥信息。'],
+    ['review.run.stateLabel', '计划已冻结 · 待授权', '已准备好 · 还没有开始'],
+    ['launchPreview.scope', '《合成书》全书 · 8,289 字 · 8 个阅读范围', '《合成书》全书 · 8,289 字 · 8 个部分'],
+    ['launchPreview.adaptations', '模型服务暂时出错时，同一个阅读范围安全地再试一次：允许', '模型服务暂时出错时，同一部分安全地再试一次：允许'],
+    ['applyReceipt.reason', '权威稿件与应用凭据已确认。', '稿件与修改记录已确认。'],
+    ['applyReceipt.reason unresolved', '权威记录尚不能证明结果；禁止重试或重复应用。可以重新核对权威记录。', '还不能确认这次修改是否已写入稿件；请不要重试或重复写入，可以重新核对。'],
     ['fact.correction.completionLabel', '已保存为更正提案：它是普通的修改建议，不会自动应用，是否接受由你决定。', '已保存为更正建议：它是普通的修改建议，不会自动写入稿件，是否接受由你决定。'],
   ])('renders %s from service text without mutating the record', (_field, stored, expected) => {
     const record = { sentence: stored };

@@ -2,6 +2,7 @@ import { reportResult } from './notifications.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import type { BookRecordPresentation, BookSummaryPageProjection, BookWorkOverviewProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ResolvedBookWorkbenchRoute, SourceImportCommitProjection, StagedImportProjection, TaskAuthorizationProjection, TaskPlanKind } from '../shared/protocol.js';
 import { mountBookPeople } from './book-people.js';
@@ -223,9 +224,9 @@ function renderBookOverview(
         }, () => undefined);
         analysisState.replaceChildren(
           element('p', undefined, projection.resultSetRevision === null
-            ? `${technicalWords('基线分析', '稿件分析')} · ${projection.stateLabel}`
+            ? `${technicalWords('基线分析', '稿件分析')} · ${serviceWords(projection.stateLabel)}`
             : technicalWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`,
-              `稿件分析 · ${projection.stateLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
+              `稿件分析 · ${serviceWords(projection.stateLabel)} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
         );
       },
       (error) => {

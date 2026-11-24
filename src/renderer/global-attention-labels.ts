@@ -1,6 +1,7 @@
 import { completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import type { TaskOverviewItemProjection } from '../shared/protocol.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import {
   BASELINE_ANALYSIS_MODE_LABELS,
   GLOBAL_ATTENTION_COUNTED_GROUPS,
@@ -209,7 +210,7 @@ export function globalAttentionStateLabel(item: Pick<GlobalAttentionItemProjecti
     return `任务已中断 · ${RESUMABLE_STOP_REASON_LABELS[item.facts.stopReason]}`;
   }
   if (item.state === 'analysis-completed-with-gaps' && item.facts.completion !== undefined) {
-    return completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total);
+    return serviceWords(completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total));
   }
   return item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0
     ? technicalWords('该单元结果未知', '部分任务结果待确认') : GLOBAL_ATTENTION_STATE_LABELS[item.state];

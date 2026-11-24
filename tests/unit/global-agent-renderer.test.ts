@@ -63,6 +63,17 @@ function harness(initial = dialogue(), open = false, initialProjection = project
   return { root, api, find, choose, submit, openModelService, setProjection: (next: GlobalAgentProjection) => { state = next; } };
 }
 
+it.each([false, true])('names a preinstalled procedure in ordinary words and keeps its stage chain to developer mode (%s)', async (developer) => {
+  setTechnicalLayerVisible(developer);
+  const procedures = [{ ...PROCEDURE, procedureId: 'evaluation', title: 'AI7 初评', stages: [{ stageType: 'cross-unit-reduction' as const, label: '跨单元归并与跨章一致性' }] },
+    { ...PROCEDURE, procedureId: 'rewrite', title: '按我的评分重写评语' }, PROCEDURE];
+  const { root } = harness(dialogue(), false, { ...projection, procedures }); await settle();
+  const names = root.querySelectorAll('.global-agent-procedure summary').map((summary) => summary.textContent);
+  expect(names).toEqual(developer ? ['工序 · AI7 初评 · 第 1 版', '工序 · 按我的评分重写评语 · 第 1 版', '工序 · 审阅工序 · 第 1 版']
+    : ['工序 · 评估报告', '工序 · 按我的评分重新生成评语', '工序 · 审阅工序']);
+  expect(root.textContent.includes('阶段：跨单元归并与跨章一致性')).toBe(developer);
+});
+
 it('sends directly once, omits empty tool scope, and leaves the composer ready for another question', async () => {
   const { api, find, submit } = harness(); await settle();
   submit('第一个问题'); submit('重复点击'); await settle();
