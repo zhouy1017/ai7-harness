@@ -326,8 +326,9 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
   it('takes exactly a production slot, a production reference and a file', async () => {
     // @ts-expect-error tools/*.mjs carry no declarations; the helper is exercised as the plain module it is.
     const helper = (await import('../../tools/enroll-dev-credential.mjs')) as Helper;
-    // The helper enrolls only the two routes with recorded live evidence; the documentary channels are entered in 设置 (#1225).
-    expect(helper.PRODUCTION_CONNECTION_SLOTS).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.filter((binding) => binding.route === 'opencode-go' || binding.route === 'deepseek-open-platform').map((binding) => binding.credentialSlot));
+    const admitted = ['opencode-go', 'deepseek-api-key', 'google-gemini', 'openai-platform', 'anthropic-claude'];
+    expect(helper.PRODUCTION_CONNECTION_SLOTS).toEqual(admitted);
+    expect(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.credentialSlot)).toEqual(expect.arrayContaining(admitted));
     const reference = randomUUID();
     for (const slot of helper.PRODUCTION_CONNECTION_SLOTS) {
       expect(helper.parseEnrollmentArguments(['--slot', slot, '--credential-reference', reference, '--from-file', KEY_PATH]))
@@ -344,7 +345,7 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
     for (const argv of [
       ...Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES).map((development) => ['--slot', 'opencode-go', '--credential-reference', development, '--from-file', KEY_PATH]),
       ['--slot', 'opencode-go', '--credential-reference', CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'].toUpperCase(), '--from-file', KEY_PATH],
-      ['--slot', 'openai-platform', '--credential-reference', reference, '--from-file', KEY_PATH],
+      ['--slot', 'moonshot-kimi', '--credential-reference', reference, '--from-file', KEY_PATH],
       ['--slot', 'unconfigured', '--credential-reference', reference, '--from-file', KEY_PATH],
       ['--slot', 'deepseek-api-key', '--credential-reference', reference, '--check'],
       ['--slot', 'deepseek-api-key', '--credential-reference', reference, '--from-file', KEY_PATH, '--check'],

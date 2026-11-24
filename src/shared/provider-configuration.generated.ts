@@ -640,8 +640,7 @@ export type ConfiguredDevelopmentSlot = (typeof CONFIGURED_DEVELOPMENT_SLOTS)[nu
 /**
  * The fixed development Credential Reference of each such slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the
  * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret, and it is a
- * place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067; ADR 0073 §5
- * authorizes no credential).
+ * place for a key. Enrollment requires separate authorization, as in ADR 0067 and ADR 0108.
  */
 export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredDevelopmentSlot, string>> = {
   'alibaba-model-studio': '41bfff73-4c97-44b2-a88c-ef51b208d589',

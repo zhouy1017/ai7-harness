@@ -18,6 +18,8 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  * development Credential Reference for, because ADR 0073 §4 makes its slot list generated from the documents; but such
  * a slot is a place for a key, not a permission to enrol one. ADR 0073 §5 authorizes no credential and ADR 0080 §5
  * defers keys (「先支持后添加key」): no other slot is enrolled until a record names it.
+ * ADR 0108 admits `google-gemini`, `opencode-go`, `openai-platform` and `anthropic-claude` for the
+ * Owner-authorized 0.8.0 recording, live test and local human-test preset.
  *
  * It is the only thing that ever reads the Owner's key file, and it exists so that no agent, prompt,
  * log, or repository file has to. It writes the value straight into the OS Protected Secret Store
@@ -27,6 +29,7 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --from-file <path>   (silent; exit 0)
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present`, `absent`, or `unavailable`)
  *   node tools/enroll-dev-credential.mjs --slot <slot> --credential-reference <uuid> --from-file <path>   (silent; exit 0)
+ *   Add --label <name> to either --from-file form to select one label: value or label=value line in place.
  *
  * #1290 additionally permits --to-guest ai7-testbed-0[12]-nat on the named form: SSH stdin alone
  * carries the value to this same helper's --from-stdin receiver. --delete clears only the named
@@ -35,7 +38,7 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  * The third form (Issue #811 brief item 5, an ADR 0067 extension recorded there) writes one Owner-supplied development key
  * under a production connection's own Credential Reference — the one the product minted when its 模型服务 connection was
  * configured on a throwaway data root — so one live evidence Task can run through the ordinary-production path. It accepts
- * the admitted model/search slots for #1290, a well-formed reference, and never a reference any provider
+ * the admitted model/search slots for #1290 and the four model slots in ADR 0108, a well-formed reference, and never a reference any provider
  * document fixes for development; it refuses CI and a native-carrier override exactly as the other two forms do, and it is
  * silent exactly as the store form is. The product never invokes this helper.
  *
@@ -63,10 +66,10 @@ const SLOTS = new Map(DEVELOPMENT_CREDENTIAL_SLOTS);
 /** Every development Credential Reference a document fixes: the named-reference form never writes under one of these. */
 const DEVELOPMENT_REFERENCES = new Set([...SLOTS.values()].map((reference) => reference.toLowerCase()));
 /**
- * The slots an ordinary-production binding configures (Issue #811): Go and DeepSeek 开放平台（官方）. Duplicated from the
- * service's allowed bindings because this file runs before any build; `tests/unit/enroll-dev-credential.test.ts` pins them equal.
+ * Ordinary-production enrollment slots admitted by Issue #811 and ADR 0108.
+ * `tests/unit/ordinary-production-launch.test.ts` checks them against the service's allowed bindings.
  */
-export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);
+export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key', 'google-gemini', 'openai-platform', 'anthropic-claude']);
 // #1290: the already-authorized search evaluation keys may also populate a disposable
 // ordinary-production connection, through this helper alone, for the Beta walkthrough.
 const PRODUCTION_SEARCH_CONNECTION_SLOTS = ['search-bochaai', 'search-brave', 'search-tinyfish', 'search-parallel', 'search-deepseek'];
@@ -99,7 +102,7 @@ export function parseEnrollmentArguments(argv) {
       else remove = true;
       continue;
     }
-    requireEnrollment(['--slot', '--from-file', '--credential-reference', '--to-guest', '--guest-session'].includes(key));
+    requireEnrollment(['--slot', '--from-file', '--label', '--credential-reference', '--to-guest', '--guest-session'].includes(key));
     const value = argv[index + 1];
     requireEnrollment(typeof value === 'string' && value.length > 0 && !values.has(key));
     values.set(key, value);
@@ -107,30 +110,33 @@ export function parseEnrollmentArguments(argv) {
   }
   const slot = values.get('--slot');
   const named = values.get('--credential-reference');
+  const fromFile = values.get('--from-file');
+  const label = values.get('--label');
   const guest = values.get('--to-guest');
   const guestSession = values.get('--guest-session');
+  requireEnrollment(label === undefined || (fromFile !== undefined && /^[a-z][a-z0-9_-]*$/iu.test(label)));
   requireEnrollment(guestSession === undefined || (typeof named === 'string' && CREDENTIAL_REFERENCE_PATTERN.test(guestSession) && !check && !remove && (guest !== undefined || fromStdin)));
   requireEnrollment(guest === undefined || ['ai7-testbed-01-nat', 'ai7-testbed-02-nat'].includes(guest));
   if (named !== undefined) {
     // The named-reference form: a production connection's own reference, never a development one, and only a store.
-    const fromFile = values.get('--from-file');
     requireEnrollment(!check && Number(fromFile !== undefined) + Number(fromStdin) + Number(remove) === 1 &&
       !(guest !== undefined && fromStdin) && typeof slot === 'string' &&
       [...PRODUCTION_CONNECTION_SLOTS, ...PRODUCTION_SEARCH_CONNECTION_SLOTS].includes(slot) &&
       CREDENTIAL_REFERENCE_PATTERN.test(named) && !DEVELOPMENT_REFERENCES.has(named.toLowerCase()));
     return { mode: remove ? 'delete-named' : fromStdin ? 'store-stdin' : 'store-named', slot,
       credentialReference: named.toLowerCase(), fromFile: fromFile === undefined ? null : resolve(fromFile),
+      ...(label === undefined ? {} : { label }),
       ...(guest === undefined ? {} : { guest }), ...(guestSession === undefined ? {} : { guestSession }) };
   }
   requireEnrollment(!fromStdin && !remove && guest === undefined);
   requireEnrollment(typeof slot === 'string' && SLOTS.has(slot));
-  const fromFile = values.get('--from-file');
   requireEnrollment(check ? fromFile === undefined : typeof fromFile === 'string');
   return {
     mode: check ? 'check' : 'store',
     slot,
     credentialReference: SLOTS.get(slot),
     fromFile: fromFile === undefined ? null : resolve(fromFile),
+    ...(label === undefined ? {} : { label }),
   };
 }
 
@@ -178,14 +184,25 @@ export async function resolveCheckReading(credentialReference, deps = {}) {
 }
 
 /**
- * Read one credential value from a file the Owner names. The file is read as UTF-8 and trimmed of
- * surrounding whitespace only, so a trailing newline from an editor cannot corrupt the value; the
- * value itself is never inspected, measured aloud, or returned to any caller but the store.
+ * Read one credential value from a UTF-8 file the Owner names. A labelled file must contain
+ * exactly one line with the requested label. Only the surrounding whitespace is trimmed.
  */
-async function readSecret(path) {
+async function readSecret(path, label) {
   requireEnrollment(isAbsolute(path));
   const raw = await readFile(path, 'utf8');
-  const secret = raw.trim();
+  let value = raw;
+  if (label !== undefined) {
+    const matchingValues = [];
+    for (const line of raw.split(/\r?\n/u)) {
+      const separator = line.search(/[:=]/u);
+      if (separator !== -1 && line.slice(0, separator).trim() === label) {
+        matchingValues.push(line.slice(separator + 1));
+      }
+    }
+    requireEnrollment(matchingValues.length === 1);
+    [value] = matchingValues;
+  }
+  const secret = value.trim();
   requireEnrollment(secret.length > 0 && secret.length <= MAX_SECRET_BYTES && secret.isWellFormed());
   return secret;
 }
@@ -209,7 +226,7 @@ async function enrollGuest(request, read = readSecret, start = spawn) {
     'C:/ai7/harness/tools/enroll-dev-credential.mjs', '--slot', request.slot,
     '--credential-reference', request.credentialReference, request.mode === 'delete-named' ? '--delete' : '--from-stdin'];
   if(request.guestSession!==undefined)args.push('--guest-session',request.guestSession);
-  const secret = request.mode === 'delete-named' ? null : await read(request.fromFile);
+  const secret = request.mode === 'delete-named' ? null : await read(request.fromFile, request.label);
   const child = start('ssh.exe', args, { windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
   await new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -232,7 +249,7 @@ export async function storeEnrollment(argv, deps = {}) {
   }
   const entry = await openEntry(request.credentialReference, deps);
   if (request.mode === 'delete-named') await entry.deleteCredential();
-  else await entry.setPassword(await (request.mode === 'store-stdin' ? (deps.readStdinSecret ?? readStdinSecret)() : (deps.readSecret ?? readSecret)(request.fromFile)));
+  else await entry.setPassword(await (request.mode === 'store-stdin' ? (deps.readStdinSecret ?? readStdinSecret)() : (deps.readSecret ?? readSecret)(request.fromFile, request.label)));
 }
 
 
