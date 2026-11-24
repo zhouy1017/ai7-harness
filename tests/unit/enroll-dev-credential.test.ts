@@ -218,15 +218,15 @@ describe('parseEnrollmentArguments', () => {
 
 describe('labelled credential files', () => {
   it.each([
-    ['google-gemini', 'gemini'],
-    ['opencode-go', 'opencodego'],
-    ['openai-platform', 'openai'],
-    ['anthropic-claude', 'claude'],
-  ])('selects one labelled line for either %s reference form', async (slot, label) => {
+    ['google-gemini', 'gemini', '='],
+    ['opencode-go', 'opencodego', ':'],
+    ['openai-platform', 'openai', '='],
+    ['anthropic-claude', 'claude', ':'],
+  ])('selects one labelled line for either %s reference form', async (slot, label, separator) => {
     const directory = await mkdtemp(join(tmpdir(), 'ai7-enrollment-'));
     try {
       const input = join(directory, 'synthetic-input.txt');
-      await writeFile(input, `other: wrong-value\r\n \t${label} \t: synthetic:value \t\r\n`);
+      await writeFile(input, `other: wrong-value\r\n \t${label} \t${separator} synthetic:value=tail \t\r\n`);
       const setPassword = vi.fn(async (_value: string) => undefined);
       const args = ['--slot', slot, '--from-file', input, '--label', label];
       const deps = { env: {}, ...SUPPORTED_HOST, importKeyring: async () => ({ AsyncEntry: class {
@@ -234,13 +234,13 @@ describe('labelled credential files', () => {
       } }) };
       await expect(helper.storeEnrollment(args, deps)).resolves.toBeUndefined();
       await expect(helper.storeEnrollment([...args, '--credential-reference', randomUUID()], deps)).resolves.toBeUndefined();
-      expect(setPassword.mock.calls).toEqual([['synthetic:value'], ['synthetic:value']]);
+      expect(setPassword.mock.calls).toEqual([['synthetic:value=tail'], ['synthetic:value=tail']]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it.each(['other: synthetic\n', 'gemini: synthetic\n gemini : repeated\n'])(
+  it.each(['other: synthetic\n', 'gemini=synthetic\n gemini : repeated\n'])(
     'silently refuses a missing or duplicate label', async (contents) => {
       const directory = await mkdtemp(join(tmpdir(), 'ai7-enrollment-'));
       try {

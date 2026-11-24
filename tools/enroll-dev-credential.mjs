@@ -29,7 +29,7 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --from-file <path>   (silent; exit 0)
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present`, `absent`, or `unavailable`)
  *   node tools/enroll-dev-credential.mjs --slot <slot> --credential-reference <uuid> --from-file <path>   (silent; exit 0)
- *   Add --label <name> to either --from-file form to select a single label: value line in place.
+ *   Add --label <name> to either --from-file form to select one label: value or label=value line in place.
  *
  * #1290 additionally permits --to-guest ai7-testbed-0[12]-nat on the named form: SSH stdin alone
  * carries the value to this same helper's --from-stdin receiver. --delete clears only the named
@@ -194,7 +194,7 @@ async function readSecret(path, label) {
   if (label !== undefined) {
     const matchingValues = [];
     for (const line of raw.split(/\r?\n/u)) {
-      const separator = line.indexOf(':');
+      const separator = line.search(/[:=]/u);
       if (separator !== -1 && line.slice(0, separator).trim() === label) {
         matchingValues.push(line.slice(separator + 1));
       }
