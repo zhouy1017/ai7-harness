@@ -11,6 +11,8 @@ import { PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-ada
 import { recordingProviderFor, type RecordingProvider } from '../../src/service/recording-launch.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
 import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../src/shared/public-samplebooks.js';
+import { isModelCallLine, ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
+import { transmitOnce } from '../../src/service/provider/live-transmission.js';
 import { parseValidationCase } from '../../src/shared/protocol.js';
 import { liveNonWebReviewAllowed } from '../../src/service/analysis/live-kind-admission.js';
 
@@ -35,6 +37,9 @@ it.each(Object.keys(providers) as RecordingProvider[])('freezes %s by the produc
   expect(model('standards-table-formatting')).toBe(providers[id].flash.model);
   expect(model('retrieval-query-expansion')).toBeUndefined();
   expect(developerLiveBindingFor(launch, 'learning-curation').model).toBe(providers[id].pro.model);
+  const effort = id === 'openai-platform' || id === 'anthropic-claude' ? 'high' : undefined;
+  expect(developerLiveBindingFor(launch, 'learning-curation').reasoningEffort).toBe(effort);
+  expect(developerLiveBindingFor(launch, 'standards-table-formatting').reasoningEffort).toBe(effort);
   expect(PROVIDER_ROUTE_PROFILES[providers[id].pro.route].credentialSlot).toBe(providers[id].pro.credentialSlot);
 });
 
@@ -100,6 +105,37 @@ it('keeps a recording-only Flash request on the once-only cache and refuses unap
       expect((await owner.execute(standardsTable, source, 'preview')).state).toBe('checked');
       expect((await owner.execute(standardsTable, source, 'preview')).state).toBe('checked');
       expect(nativeFetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(nativeFetch.mock.calls[0]?.[1]?.body))).toMatchObject({ thinking: { type: 'adaptive' }, output_config: { effort: 'high' } });
     } finally { owner.dispose(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+it('pauses a second recording call before its durable claim and keeps exact cache replay available', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'ai7-probe-limit-'));
+  const observer = Symbol.for('ai7.manual-recording.send-observer');
+  try {
+    const launch = launchOf('openai-platform', 'publication-risk', directory);
+    const model = providers['openai-platform'].pro.model;
+    const profile = PROVIDER_ROUTE_PROFILES['openai-platform'];
+    const cache = new ProviderResultCache(directory);
+    await cache.open();
+    const settled = vi.fn();
+    const enter = vi.fn().mockResolvedValueOnce(settled).mockResolvedValue(null);
+    Object.defineProperty(globalThis, observer, { value: { enter, refuse: vi.fn() }, configurable: true });
+    const nativeFetch = vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', role: 'assistant',
+      content: [{ type: 'output_text', text: '合成答复。' }] }], usage: { input_tokens: 20, output_tokens: 5 } })));
+    const send = (step: string) => transmitOnce(cache, nativeFetch, { purpose: 'review-first', promptContractDigest: 'a'.repeat(64) },
+      { intent: launch.validation!, step, requestShape: 'openai-responses' }, profile, model, profile.endpoint,
+      { method: 'POST', headers: {}, body: JSON.stringify({ model, reasoning: { effort: 'high' }, input: [{ role: 'user', content: step }] }) });
+    await expect(send('unit-1')).resolves.toMatchObject({ status: 200 });
+    await expect(send('unit-1')).resolves.toMatchObject({ replayed: true });
+    await expect(send('unit-2')).rejects.toMatchObject({ code: 'RECORDING_RUNBOOK_PAUSED' });
+    expect(enter.mock.calls.map(([facts]) => [facts.step, facts.effort])).toEqual([['unit-1', 'high'], ['unit-2', 'high']]);
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    expect(settled).toHaveBeenCalledExactlyOnceWith('answered', 'OK');
+    expect(cache.lines.filter(isModelCallLine).map(line => line.outcome)).toEqual(['transmitted', 'replayed']);
+  } finally {
+    Reflect.deleteProperty(globalThis, observer);
+    await rm(directory, { recursive: true, force: true });
+  }
 });

@@ -23,19 +23,21 @@ The Owner authorized the Commander on 2026-11-24 to use four Owner-supplied test
 2. **One full live test.** Run the reduced matrix across the four providers and the actual task roles from [ADR 0107](0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), using the model choices below. Foreground Pro covers whole-book analysis and one review. Foreground Flash covers editorial dialogue and every other call point assigned to that role. Underlying Pro covers learning curation, and Underlying Flash covers its registered call points. Skip each call point in a provider and role cell already exercised by the recording. Widen the matrix where a problem is found. Live results stay in a local report and are ineligible as Gate evidence.
 3. **Local human-test preset.** After 0.8.0 reaches `dev`, the human-test folder is refreshed, and the Owner has opened 0.8.0 and completed the in-app upgrade, preset the four connections and model choices below in the local human-test data root. Store credential values only in this Windows user's Protected Secret Store and retain them there after the live test for human testing.
 
-| Provider | Pro | Flash |
-| --- | --- | --- |
-| Google Gemini | `gemini-4-argon` | `gemini-4-hydrogen` |
-| OpenCode Go | `gemini-4-argon` (catalogue ID `opencode-go/gemini-4-argon`) | `deepseek-v4.1-flash` |
-| OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
-| Anthropic Claude | `claude-opus-5` | `claude-haiku-4-5` |
+| Provider | Pro | Flash | Reasoning effort |
+| --- | --- | --- | --- |
+| Google Gemini | `gemini-4-argon` | `gemini-4-hydrogen` | Provider default pending the Owner's selection |
+| OpenCode Go | `gemini-4-argon` (catalogue ID `opencode-go/gemini-4-argon`) | `deepseek-v4.1-flash` | Provider default pending the Owner's selection |
+| OpenAI | `gpt-6.2-sol` | `gpt-6.1-terra` | `high` |
+| Anthropic Claude | `claude-opus-5-5` | `claude-sonnet-5-5` | `high` |
 
-The Owner confirmed the Argon and Hydrogen choices on 2026-11-24. One authorized query through the product's Gemini model discovery confirmed the two Google Gemini IDs for the test account. These choices apply to the stated 0.8.0 uses. The provider records add catalogue entries and keep their existing recommended model lists.
+The Owner confirmed the model choices on 2026-11-24. One authorized query through the product's discovery path for each of Google Gemini, OpenAI and Anthropic confirmed the listed IDs for the test accounts. The provider records add catalogue entries and keep their existing recommended model lists. The Owner selected `high` for the three stated 0.8.0 uses where route evidence supports it. OpenAI sends `reasoning.effort` and Claude sends `output_config.effort` with adaptive thinking. The Gemini 4 and OpenCode Go profiles lack evidence for `high`. The pending effort decision leaves their request fields absent. Product role defaults still use the provider default.
 
 The provider records specify Responses for OpenAI, Messages for Claude, generateContent for Gemini, and Chat Completions for OpenCode Go Flash. The OpenCode Go catalogue places Argon on Chat Completions. Its serving protocol remains unverified.
 
 ## Credential and automation boundary
 
 Only `tools/enroll-dev-credential.mjs` reads the Owner-local labelled file. It selects one `label=value` or `label: value` line in place and writes the value directly to the Protected Secret Store. Connection records carry references. Credential values stay out of packages, installers, repositories and logs.
+
+The Owner also released the two model-backed search slots `search-openai` and `search-anthropic` for the separate final search step of the recording. The Commander enrolls each using its provider's labelled value under the search slot's own development reference. Search queries and connection tests remain subject to their own product admission and the Commander's go-ahead.
 
 Automated tests, Journeys, the hosted Gate, the nightly queue and CI remain provider-free. They never carry these credentials or make live model calls. This authorization extends [ADR 0067](0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the stated 0.8.0 uses.

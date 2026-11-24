@@ -717,8 +717,13 @@ function resolveRuntimeBindings(input, providers) {
     const provider = providers.find((entry) => entry.providerId === id);
     refuse(provider?.credential.developmentCredentialReference != null, `PROVIDER_CONFIGURATION/recording-credential: ${id}`);
     return [id, Object.fromEntries(Object.entries(tiers).map(([tier, binding]) => {
-      refuse(provider.routes.some((route) => route.profile.route === binding.route), `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
-      return [tier, resolveBinding(binding, false)];
+      const route = provider.routes.find((route) => route.profile.route === binding.route);
+      refuse(route !== undefined, `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
+      const { reasoningEffort } = binding;
+      const reasoning = route.models.find(model => model.model === binding.model)?.reasoning ?? route.profile.reasoning;
+      refuse(reasoningEffort === undefined || reasoning?.efforts.includes(reasoningEffort) === true,
+        `PROVIDER_CONFIGURATION/recording-effort: ${id}/${tier}`);
+      return [tier, { ...resolveBinding(binding, false), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }];
     }))];
   }));
   const result = {

@@ -191,7 +191,8 @@ export function internalFactualRecheckCandidate(host: FactualVerificationOperati
   const { pin } = resolveProcedureDefinition(host.authority, 'ai7-procedure/factual-claim-check', 1);
   return { enrollmentId: enrollment.enrollmentId, enrollmentVersionId: enrollment.version.enrollmentVersionId,
     onceKey: canonicalRecord({ enrollmentId: enrollment.enrollmentId, ledgerDigest: ledger.digest, claimId: selection.claimId, decisionId }).digest,
-    selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+    selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot,
+      credentialReference: live.credentialReference, ...(recording && live.reasoningEffort !== undefined ? { reasoningEffort: live.reasoningEffort } : {}) },
     search: { backendId: search.backendId, host: backend.declaration.host!, selectedAt: search.selectedAt,
       configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: searchReference },
     procedure: pin, maximumTokens: enrollment.version.share.maxTotalTokens, message: message.message,

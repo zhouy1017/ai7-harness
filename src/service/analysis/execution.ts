@@ -1832,8 +1832,8 @@ export class BaselineAnalysisExecutionOwner {
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
-    const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live, definition.kind);
-    const effortConfig = facts.productionBinding?.reasoningEffort === undefined ? {} : { reasoningEffort: facts.productionBinding.reasoningEffort };
+    const { route, model, credentialSlot, credentialReference, runBudgetCeiling, reasoningEffort } = routeFactsOf(facts, live, definition.kind);
+    const effortConfig = reasoningEffort === undefined ? {} : { reasoningEffort };
     // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
     const routeProfile: ProviderRouteProfile = live === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
     let liveModelProfile: ProviderModelProfile = live === null || (!isOrdinaryProductionRuntime(live) && live.launch.recordingProvider === undefined)
@@ -4147,6 +4147,7 @@ function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null, kind:
   credentialSlot: CredentialSlotBinding['slot'];
   credentialReference: string;
   runBudgetCeiling: RunBudgetCeiling;
+  reasoningEffort?: string;
 } {
   // Ordinary production (Issue #811): the binding the plan froze, on the connection's own Credential Reference it named.
   if (isOrdinaryProductionRuntime(live)) {
@@ -4157,6 +4158,7 @@ function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null, kind:
       model: binding.model,
       credentialSlot: binding.credentialSlot,
       credentialReference: facts.credentialReference,
+      ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
       runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
     };
   }

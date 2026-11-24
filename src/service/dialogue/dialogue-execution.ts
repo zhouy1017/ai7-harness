@@ -116,12 +116,14 @@ export interface DialogueExecutionDeps {
  * with a broker of its own over the launch's Protected Secret Store and the development slot's Credential Reference.
  */
 export function dialogueLiveRoute(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): DialogueLiveRoute {
+  const binding = developerLiveBindingFor(runtime.launch, DIALOGUE_TASK_KIND);
+  const admitted = admittedDialogueRoute(policy);
   return {
     runtime,
     transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
-    route: admittedDialogueRoute(policy),
-    credentialReference: developerLiveBindingFor(runtime.launch, DIALOGUE_TASK_KIND).credentialReference,
+    route: admitted === null || binding.reasoningEffort === undefined ? admitted : { ...admitted, reasoningEffort: binding.reasoningEffort },
+    credentialReference: binding.credentialReference,
   };
 }
 
@@ -258,7 +260,7 @@ export class DialogueExecutionOwner {
     if (route === null || this.#deps.live === null || this.#disposed || !this.#deps.live.credentialReference ||
         bound?.profile.route !== route.profile.route || bound.modelProfile.model !== route.modelProfile.model)
       throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
-    return route;
+    return route.operationalScope === 'developer-live' && bound.reasoningEffort !== undefined ? { ...route, reasoningEffort: bound.reasoningEffort } : route;
   }
 
   globalDisclosureReference(): string { return this.#deps.live?.credentialReference ?? ''; }

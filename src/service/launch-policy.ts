@@ -197,7 +197,7 @@ export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot
 }
 
 export function developerLiveBindingFor(launch: DeveloperLiveLaunch, taskKind: string = BASELINE_ANALYSIS_KIND) {
-  const binding = launch.recordingProvider === undefined
+  const binding: ReturnType<typeof recordingBindingFor> = launch.recordingProvider === undefined
     ? { ...CONFIGURED_RUNTIME_MODEL_TABLE.developerLive, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE }
     : recordingBindingFor(launch.recordingProvider, taskKind);
   return { ...binding, runBudgetCeiling: launch.runBudgetCeiling };

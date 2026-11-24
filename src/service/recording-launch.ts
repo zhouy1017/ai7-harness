@@ -21,7 +21,9 @@ export function recordingProviderFor(validation: DevelopmentValidationIntent, en
 
 export function recordingBindingFor(provider: RecordingProvider, taskKind: string) {
   const binding = providers[provider][modelTierOf(modelRoleOfTaskKind(taskKind))];
-  return { ...binding, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[binding.credentialSlot] };
+  const reasoningEffort = 'reasoningEffort' in binding ? binding.reasoningEffort : undefined;
+  return { route: binding.route, endpoint: binding.endpoint, model: binding.model, credentialSlot: binding.credentialSlot,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }), credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[binding.credentialSlot] };
 }
 
 export function recordingHostAllowances(provider: RecordingProvider) {

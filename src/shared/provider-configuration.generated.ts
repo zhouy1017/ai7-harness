@@ -96,28 +96,32 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
       pro: {
         route: 'openai-platform',
         endpoint: 'https://api.openai.com/v1/responses',
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.2-sol',
         credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
       },
       flash: {
         route: 'openai-platform',
         endpoint: 'https://api.openai.com/v1/responses',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6.1-terra',
         credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
       },
     },
     'anthropic-claude': {
       pro: {
         route: 'anthropic-claude',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        model: 'claude-opus-5',
+        model: 'claude-opus-5-5',
         credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
       },
       flash: {
         route: 'anthropic-claude',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-5-5',
         credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
       },
     },
     'google-gemini': {

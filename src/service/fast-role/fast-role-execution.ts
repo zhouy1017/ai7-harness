@@ -133,7 +133,11 @@ export interface FastRoleLiveRoutes {
 
 /** The fast-role routes of a developer-live launch: each kind's route as the verified projection's policy admits it, or none. */
 export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): FastRoleLiveRoutes {
-  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
+    const admitted = admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+    const { reasoningEffort } = developerLiveBindingFor(runtime.launch, kind.kindId);
+    return admitted === null || reasoningEffort === undefined ? admitted : { ...admitted, reasoningEffort };
+  };
   return {
     runtime,
     transportSettings: policy.providerProcessing.transport,
@@ -588,7 +592,7 @@ export async function recordModelConnectionTest(
 ): Promise<ModelConnectionTestStatus> {
   const selected = developerLiveBindingFor(runtime.launch, CONNECTION_TEST_KIND);
   if (runtime.launch.recordingProvider === undefined || input.route !== selected.route || input.modelId !== selected.model ||
-      input.reasoningEffort !== undefined && input.reasoningEffort !== null) {
+      input.reasoningEffort != null && input.reasoningEffort !== selected.reasoningEffort) {
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '连接测试需要本次录制指定的底层 Flash 模型。');
   }
   const owner = new UnderlyingFlashService({ requestGovernor: execution.requestGovernor,

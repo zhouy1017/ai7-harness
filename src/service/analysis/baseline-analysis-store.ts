@@ -4765,8 +4765,10 @@ export class BaselineAnalysisStore {
       productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot,
         ...('reasoningEffort' in route && typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}) };
     } else if (live !== null && live.scope !== 'ordinary-production') {
-      requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
-        providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
+      const route = providerPlan.executionRoute;
+      requireAnalysis(route.kind === live.route && route.model === live.model && route.endpoint === live.endpoint &&
+        ('reasoningEffort' in route ? route.reasoningEffort ?? null : null) ===
+          effectiveModelReasoningEffort(modelProfileFor(live.route, live.model), live.reasoningEffort), 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
         canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, 'unset', intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');

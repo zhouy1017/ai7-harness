@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
-import { dialogueSseEvents, familyStreamEvents, isProviderAccountLimit, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { dialogueSseEvents, familyStreamEvents, isProviderAccountLimit, parseProviderResponse, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { observedRecordingEffort, recordingSendObserver, type RecordingSendResult } from './recording-send-observer.js';
 import { modelProfileFor } from './model-profile.js';
 import {
   NO_INCURRED_USAGE,
@@ -69,6 +70,7 @@ export interface LiveModelResponse {
 
 type RequestIdentity = Pick<Required<ProviderLedgerLine>, 'route' | 'endpoint' | 'requestShape' | 'cacheKey' | 'claimKey' | 'semanticDigest' | 'generation' | 'evidencePosition'>;
 type ClaimFacts = Omit<ProviderClaim, 'schema' | 'state'>;
+type ObserveRecording = (result: RecordingSendResult, code: string) => void;
 
 const CONFIGURATION_FIELDS = ['route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest'] as const;
 
@@ -100,6 +102,7 @@ export async function transmitOnce(
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ): Promise<LiveModelResponse> {
   const { intent } = validation;
+  const observer = recordingSendObserver(intent);
   const step = validationStep(validation.step, init.body);
   const namespace: ProviderRequestNamespace = { route: profile.route, endpoint: url, requestShape: validation.requestShape, model };
   const requestDigest = providerRequestDigest(init.body);
@@ -117,6 +120,7 @@ export async function transmitOnce(
   // A refusal sends nothing; its line says why and which items it rests on, so the report can tell a call the evidence
   // answered from one that was captured or replayed. The error carries the same reason to the turn.
   const refusal = async (code: string, message: string, evidence: ReadonlyArray<string>): Promise<ProviderResultCacheError> => {
+    observer?.refuse(code);
     await cache.record({
       itemId: await cache.reserveItemId(item.purpose, item.slice), purpose: item.purpose, model, promptContractDigest: item.promptContractDigest,
       ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
@@ -242,21 +246,30 @@ export async function transmitOnce(
         record = decided('first-capture', []);
       }
     }
-    const itemId = await cache.reserveItemId(item.purpose, item.slice);
-    cache.claimItem(itemId);
-    const claimFacts: ClaimFacts = {
-      cacheKey: cache.successorKey(claim), itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step,
-      processId: process.pid, generation, semanticDigest: identity.semanticDigest,
-      evidencePosition: identity.evidencePosition,
-      retryRationales: [
-        ...('claim' in claim ? claim.claim.retryRationales ?? [] : []),
-        ...(record.decision === 'retry-unknown' ? [intent.delta!.rationale] : []),
-      ],
-    };
-    if (!(await cache.claim(claimFacts))) {
-      throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
+    const observe = observer === null ? undefined : await observer.enter({ family: intent.family, case: intent.case, step, model, route: profile.route,
+      shape: validation.requestShape, effort: observedRecordingEffort(init.body) });
+    if (observe === null) throw new ProviderResultCacheError('RECORDING_RUNBOOK_PAUSED', '录制暂停，未发送这次请求。');
+    try {
+      const itemId = await cache.reserveItemId(item.purpose, item.slice);
+      cache.claimItem(itemId);
+      const claimFacts: ClaimFacts = {
+        cacheKey: cache.successorKey(claim), itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step,
+        processId: process.pid, generation, semanticDigest: identity.semanticDigest,
+        evidencePosition: identity.evidencePosition,
+        retryRationales: [
+          ...('claim' in claim ? claim.claim.retryRationales ?? [] : []),
+          ...(record.decision === 'retry-unknown' ? [intent.delta!.rationale] : []),
+        ],
+      };
+      if (!(await cache.claim(claimFacts))) {
+        throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
+      }
+      return await send(cache, nativeFetch, item, profile, model, url, init,
+        { itemId, requestDigest, identity, record, claimFacts, stream: validation.stream === true }, observe);
+    } catch (error) {
+      observe?.('refused', 'RECORDING_CALL_FAILED');
+      throw error;
     }
-    return send(cache, nativeFetch, item, profile, model, url, init, { itemId, requestDigest, identity, record, claimFacts, stream: validation.stream === true });
   });
 }
 
@@ -302,6 +315,7 @@ async function send(
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
   facts: { readonly itemId: string; readonly requestDigest: string; readonly identity: RequestIdentity; readonly record: ProviderValidationRecord; readonly claimFacts: ClaimFacts; readonly stream: boolean },
+  observe?: ObserveRecording,
 ): Promise<LiveModelResponse> {
   const { itemId, requestDigest, identity, record, claimFacts } = facts;
   const line = (settled: Pick<ProviderLedgerLine, 'outcome' | 'status' | 'usage' | 'incurredUsage' | 'classification' | 'resetWindow'>): ProviderLedgerLine => ({
@@ -314,6 +328,7 @@ async function send(
   try {
     response = await nativeFetch(url, init);
   } catch (error) {
+    observe?.('sent', 'TRANSPORT_OUTCOME_UNKNOWN');
     // Fetch rejection/abort does not prove that the server received or billed nothing.
     await cache.holdUnknown(claimFacts);
     await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
@@ -362,6 +377,9 @@ async function send(
         await cache.record(line({ outcome: complete ? 'transmitted' : 'failed', status: response.status, usage, incurredUsage: usage,
           ...(!complete || !kept ? { classification: 'outcome-unknown' as const } : {}) }));
         if (complete && kept) await cache.settle(claimFacts, 'completed');
+        if (!complete) observe?.('protocol-error', 'INCOMPLETE_PROVIDER_STREAM');
+        else if (!kept) observe?.('refused', 'CAPTURE_NOT_DURABLE');
+        else observe?.('answered', 'OK');
       }
       // A complete event reaches the adapter only after its protected capture and ledger are durable.
       if (streamError !== null) yield streamError;
@@ -377,6 +395,7 @@ async function send(
     if ((response.status >= 200 && response.status < 300)) {
       await cache.holdUnknown(claimFacts);
       await cache.record(line({ outcome: 'failed', status: response.status, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
+      observe?.('protocol-error', 'INVALID_PROVIDER_JSON');
       return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')) };
     }
     body = null;
@@ -414,6 +433,19 @@ async function send(
     ...(resetWindow === null ? {} : { resetWindow }),
   }));
   if (kept) await cache.settle(claimFacts, (response.status >= 200 && response.status < 300) ? 'completed' : 'failed');
+  if (observe !== undefined) {
+    const configuredModel = modelProfileFor(profile.route, model);
+    if (response.status < 200 || response.status >= 300) observe('refused', `HTTP_${response.status}`);
+    else if (!kept) observe('refused', 'CAPTURE_NOT_DURABLE');
+    else if (configuredModel === null) observe('protocol-error', 'UNRECOGNIZED_PROVIDER_MODEL');
+    else {
+      const answer = parseProviderResponse(response.status, body,
+        { INVALID_CREDENTIAL_CODE: 'INVALID_CREDENTIAL', QUOTA_EXCEEDED_CODE: 'QUOTA_EXCEEDED', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT_WINDOW_EXCEEDED' }, profile, configuredModel);
+      if (answer.kind === 'answer' || answer.kind === 'tool-calls') observe('answered', 'OK');
+      else if (answer.kind === 'failure') observe('refused', answer.code);
+      else observe('protocol-error', 'INVALID_PROVIDER_ANSWER');
+    }
+  }
   return { status: response.status, json: () => Promise.resolve(body) };
 }
 
