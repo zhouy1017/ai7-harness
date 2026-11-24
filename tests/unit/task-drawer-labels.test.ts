@@ -1,5 +1,6 @@
 import { unconfirmedLine } from '../../src/renderer/task-drawer-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
@@ -46,6 +47,7 @@ import {
   TASK_PLAN_DEFAULT_RULE,
   TASK_PLAN_DEFAULT_RULE_FAILED,
   TASK_PLAN_DEFAULT_RULE_HEADING,
+  taskPlanDefaultRuleHeading,
   TASK_PLAN_DEFAULT_RULE_LEAD,
   TASK_PLAN_VIEW_RULES,
   TASK_PLAN_DRIFT_COLUMNS,
@@ -172,6 +174,8 @@ describe('the drawer', () => {
     expect(TASK_DRAWER_BACK).toBe('← 任务');
     expect(TASK_DRAWER_BACK_TITLE).toBe('回到这本书的任务');
     expect(TASK_DRAWER_FOOTER).toBe('计划说明，不是运行授权');
+    // 0.7.9 wording follow-up: the line is developer-mode text; the stylesheet keeps it from an ordinary editor whatever the drawer last painted.
+    expect(readFileSync('src/renderer/styles.css', 'utf8')).toContain(':root[data-technical-layer-visible="false"] .task-drawer-footer { display: none; }');
     expect(TASK_PLAN_OPEN).toBe('查看计划');
   });
 
@@ -337,7 +341,10 @@ describe('精简 and 完整 (D6)', () => {
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'deactivated', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（已停用）');
     setTechnicalLayerVisible(false);
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认规则：开始同步 · 第 2 版 · 使用中 · 由这份计划设定');
+    // 0.7.9 wording follow-up: the disclosure under 设为快速开始默认 in ordinary words; developer mode keeps the original.
+    expect(taskPlanDefaultRuleHeading()).toBe('设为默认后会沿用哪些设置');
     setTechnicalLayerVisible(true);
+    expect(taskPlanDefaultRuleHeading()).toBe(TASK_PLAN_DEFAULT_RULE_HEADING);
     expect(taskPlanQuickStarted('开始同步 · 第 2 版')).toBe('已按默认执行规则「开始同步 · 第 2 版」快速开始');
     expect(TASK_PLAN_VIEW_RULES).toBe('查看规则');
     expect(taskPlanQuickStartFellBack(['离线：这台设备现在没有网络。'])).toBe('快速开始没有开始这项任务：离线：这台设备现在没有网络。');

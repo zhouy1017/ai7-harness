@@ -100,7 +100,7 @@ import {
   TASK_PLAN_CEILING_NOTE,
   TASK_PLAN_DEFAULT_RULE,
   TASK_PLAN_DEFAULT_RULE_FAILED,
-  TASK_PLAN_DEFAULT_RULE_HEADING,
+  taskPlanDefaultRuleHeading,
   taskPlanDefaultRuleLead,
   TASK_PLAN_VIEW_RULES,
   taskPlanDefaultRuleCurrent,
@@ -1418,7 +1418,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       binds.append(el('dt', undefined, row.label), value);
     }
     const detail = el('details', 'task-plan-default-rule-detail');
-    detail.append(el('summary', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', 'field-note', taskPlanDefaultRuleLead(next.kind)), binds);
+    detail.append(el('summary', undefined, taskPlanDefaultRuleHeading()), el('p', 'field-note', taskPlanDefaultRuleLead(next.kind)), binds);
     open.addEventListener('click', () => void setDefaultRule());
     if (working) open.disabled = true;
     row.append(open);

@@ -15,6 +15,7 @@ import type {
 } from '../shared/protocol.js';
 import { procedureCategoryOpen, type ProcedureChoiceRequests, type ProcedureRecommendationSelection } from './procedure-choice.js';
 import { reviewBasisWords } from './review-basis.js';
+import { serviceGoalWords } from './service-wording.js';
 import {
   estimateReviewCalls, REVIEW_CATEGORY_LEGEND, REVIEW_CHAPTERS_REVERSED, REVIEW_LEVEL_LEGEND, REVIEW_LOCAL_ONLY_LINE, REVIEW_LOCAL_SWITCH_NAME,
   REVIEW_LOCAL_SWITCH_SENTENCE, REVIEW_NEEDS_MANUSCRIPT, REVIEW_PICK_CATEGORY, REVIEW_PICK_CHAPTERS, REVIEW_PICK_SCOPE,
@@ -258,7 +259,7 @@ export function createReviewChoices(input: {
     description.id = input.nextId('category-description');
     description.title = description.textContent ?? '';
     name.title = `${entry.label}：${description.title}`;
-    const basis = node('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => document.title), entry.procedure.title].join(' · '));
+    const basis = node('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => serviceGoalWords(document.title)), entry.procedure.title].join(' · '));
     basis.href = '#'; basis.title = basis.textContent ?? '';
     basis.id = input.nextId('category-basis');
     // The description sentence the row face used to carry sits beside the basis words; the switch shows it on its face.

@@ -758,6 +758,9 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
    scroll inside it while its actions stay pinned at its foot, so 开始任务 is always one step away. */
 .task-drawer-foot { flex: none; display: grid; gap: .4rem; max-height: 55%; padding: .6rem 1rem .7rem; overflow-x: hidden; overflow-y: auto; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .task-drawer-footer { margin: 0; color: var(--text-subdued); font-size: .86rem; font-weight: 800; }
+/* PLAN-007's line is developer-mode text (the drawer hides it when it paints a plan in ordinary mode). A drawer painted in
+   developer mode and left open across the switch, or one that has not painted yet, never shows it to an ordinary editor. */
+:root[data-technical-layer-visible="false"] .task-drawer-footer { display: none; }
 .task-drawer-bar { display: grid; gap: .35rem; min-width: 0; }
 .task-drawer-bar[hidden] { display: none; }
 .task-bar-summary { margin: 0; font-size: .9rem; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }

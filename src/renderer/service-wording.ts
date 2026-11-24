@@ -55,6 +55,16 @@ function phrased(text: string): string {
 const exact = (file: string, from: string, words: string): ExactRule => ({ file, exact: from, words });
 const family = (file: string, shape: RegExp, words: (...parts: string[]) => string = (sentence) => phrased(sentence)): FamilyRule => ({ file, family: shape, words });
 
+/**
+ * A 资料库 reference line (0.7.9 wording follow-up): 「计划冻结的索引版本」 is, to the editor, the material as it was when the plan was
+ * made. The material's title, before 「》：已提取」, is kept exactly as it is.
+ */
+function materialLineWords(line: string): string {
+  const at = line.lastIndexOf('》：已提取');
+  const words = (text: string): string => text.replaceAll('计划冻结的索引版本', '做计划时的资料内容');
+  return at < 0 ? words(line) : line.slice(0, at) + words(line.slice(at));
+}
+
 const SAFE_RETRY = exact('analysis/plan-edits.ts', '模型服务暂时出错时，同一个阅读范围安全地再试一次', '模型服务暂时出错时，同一部分安全地再试一次');
 
 const EXACT: ReadonlyArray<ExactRule> = [
@@ -276,6 +286,8 @@ const EXACT: ReadonlyArray<ExactRule> = [
   exact('analysis/baseline-analysis-store.ts', '计划已冻结 · 待授权', '已准备好 · 还没有开始'),
   exact('review/review-run-state.ts', '计划已冻结 · 待授权', '已准备好 · 还没有开始'),
   exact('procedures/preinstalled.ts', '按我的评分重写评语', '按我的评分重新生成评语'),
+  // 0.7.9 wording follow-up: AI7's fixed fact-check document, by its stored title (an editor's own document title has no rule).
+  exact('review/category-configuration.ts', '事实核查契约', '事实核查规则'),
   exact('review/review-runs.ts', '本地检查未能完成；请重新准备。', '本地检查未能完成；请另做一份计划。'),
   exact('review/review-runs.ts', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请重新准备并开始。', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请另做一份计划再开始。'),
   exact('review/review-runs.ts', '无法读取的本社审阅偏好记录', '无法读取的审阅偏好记录'),
@@ -290,7 +302,7 @@ const EXACT: ReadonlyArray<ExactRule> = [
   exact('store.ts', '本社与本书编辑偏好已变化，请重新准备任务。', '本社与本书编辑偏好已变化，请另做一份任务计划。'),
   exact('store.ts', '补充核查的决定、断言或来源已变化；请重新准备并批准。', '补充核查的决定、断言或来源已变化；请另做一份计划并确认。'),
   exact('task-authorization.ts', '主编辑角色缺少固定的未就绪凭据引用元数据。', '主编辑模型缺少未就绪密钥的引用信息。'),
-  exact('task-material-references.ts', '这份资料计划冻结的索引版本已不在本机；重新准备计划（会按资料现在的索引版本冻结）并授权，或在新计划里去掉这份资料；已完成的单元保留。', '这份资料计划冻结的索引版本已不在本机；另做一份计划（会使用资料现在的索引版本）再开始，或在新计划里去掉这份资料；已完成的部分保留。'),
+  exact('task-material-references.ts', '这份资料计划冻结的索引版本已不在本机；重新准备计划（会按资料现在的索引版本冻结）并授权，或在新计划里去掉这份资料；已完成的单元保留。', '这份资料做计划时的内容已不在本机；另做一份计划（会使用资料现在的内容）再开始，或在新计划里去掉这份资料；已完成的部分保留。'),
   exact('task-material-references.ts', '这份资料已撤回允许参考；在资料库重新准入后重新准备计划并授权，或在新计划里去掉这份资料；已完成的单元保留。', '这份资料已撤回允许参考；在资料库重新允许参考后另做一份计划再开始，或在新计划里去掉这份资料；已完成的部分保留。'),
   exact('task-material-references.ts', '这份资料的索引记录已损坏；先在资料库处理这份资料，再重新准备计划并授权，或在新计划里去掉它；已完成的单元保留。', '这份资料的索引记录已损坏；先在资料库处理这份资料，再另做一份计划再开始，或在新计划里去掉它；已完成的部分保留。'),
   exact('task-material-references.ts', '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。', '资料库里还没有这本书可以参考的资料：资料定了给谁用（这本书或本社）与是否可用于学习、建好索引以后，才能在这里勾选，列进「允许参考」。'),
@@ -505,7 +517,7 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
   family('writing-task-operations.ts', /^第 (\d+) 版定稿评估的结论(「.*」)、主要优点（这一版没有 AI7 初评的市场部分）$/u,
     (_, version, conclusion) => `第 ${version} 版定稿评估的结论${conclusion}、主要优点（这一版没有评估报告的市场部分）`),
   family('writing-tasks.ts', /^这次起草参考的资料(《.*》)(，计划冻结的索引版本已不在本机|现在不能列进这本书任务的「允许参考」|的索引记录已损坏)，不能再开始；可以用「新建文档…」重新准备。$/u,
-    (_, title, why) => `这次起草参考的资料${title}${why}，不能再开始；可以用「新建衍生稿件…」另做一份计划。`),
+    (_, title, why) => `这次起草参考的资料${title}${why.replace('计划冻结的索引版本', '做计划时的资料内容')}，不能再开始；可以用「新建衍生稿件…」另做一份计划。`),
   family('../shared/protocol/series.ts', /^所参考的本社审阅偏好已停止使用 · 需要重新确认计划：它参考的偏好版本中有学习材料已停止今后使用，运行在下一个阅读范围前停下；已读完的结果保留，已经发给模型服务的内容无法收回。$/u,
     (sentence) => phrased(sentence)),
   family('task-plan.ts', /^第 ([\d、]+) 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。$/u,
@@ -532,7 +544,7 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
   family('task-plan.ts', /^定稿评估的结论(「.*」)与主要优点 (\d+) 条（这一版没有 AI7 初评的市场部分）$/u,
     (_, conclusion, strengths) => `定稿评估的结论${conclusion}与主要优点 ${strengths} 条（这一版没有评估报告的市场部分）`),
   family('task-plan.ts', /^(资料库资料《[^》]*》：已提取 [\d,]+ 字，按计划冻结的索引版本读取（只参照，不照抄）——[^《》「」]*)再次起草需用「新建文档…」重新准备$/u,
-    (_, head) => `${head}再次起草需用「新建衍生稿件…」另做一份计划`),
+    (_, head) => `${materialLineWords(head)}再次起草需用「新建衍生稿件…」另做一份计划`),
   // The safe retry's question and why it is asked: the step is named by its own rule (review S9).
   family('task-plan.ts', /^你把「([^」]+)」改成了「先问你」，所以 AI7 先停下这一步来问你。$/u,
     (_, step) => `你把「${ordinaryServiceWords(step)}」改成了「先问你」，所以 AI7 先停下这一步来问你。`),
@@ -564,7 +576,8 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
   family('task-material-references.ts', /^(资料《.*》.*，这份计划不能再开始；)(可以用「新建文档…」重新准备。|可以在「(?:审阅|评估)」重新准备计划。)$/u,
     (_, reference, next) => reference + ordinaryServiceWords(next)),
   family('task-material-references.ts', /^(资料库资料《.*》：已提取 [\d,]+ 字，按计划冻结的索引版本读取（只参照，不照抄）)——(.+)$/u,
-    (_, reference, why) => reference + '——' + ordinaryServiceWords(why)),
+    (_, reference, why) => materialLineWords(reference + '——' + ordinaryServiceWords(why))),
+  family('task-material-references.ts', /^资料库资料《.*》：已提取 [\d,]+ 字，按计划冻结的索引版本读取（只参照，不照抄）$/u, (line) => materialLineWords(line)),
   family('analysis/execution.ts', /^(.+)（([^（）]+)）；本社审阅偏好已停止使用，没有再试一次$/u,
     (_, reason, code) => ordinaryServiceWords(reason) + '（' + code + '）；审阅偏好已停止使用，没有再试一次'),
   // Stage-4/5 rework R6: a finished Run's count, why an update cannot be asked yet, and the plan preview's own composed lines.
@@ -573,6 +586,11 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
   family('analysis/run-state.ts', /^结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可(.+)。$/u,
     (_, action) => `分析结果与当前稿件一致；稿件有了已保存的改动之后才可${action}。`),
   family('task-launch-preview.ts', /^(.+)：(允许|先问我|不允许)$/u, (_, step, choice) => `${ordinaryServiceWords(step)}：${choice}`),
+  // 0.7.9 wording follow-up: AI7's fixed fact-check document in a plan's reference row, a Task of the same kind under way, and
+  // what a ticked 资料库 item is read as.
+  family('review/category-configuration.ts', /^([^：]+：)事实核查契约( · .+)$/u, (_, category, procedure) => `${category}事实核查规则${procedure}`),
+  family('analysis/run-state.ts', /^当前已有(.+)在调度或执行中；在其结束前不能准备(.+)。$/u, (_, task, next) => `已有一项${task}正在进行；等它结束后才能准备${next}。`),
+  family('writing-tasks.ts', /^勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：(.+)$/u, (_, bounds) => `勾选的资料列进这次计划的「允许参考」，按做计划时的资料内容读取：${bounds}`),
 ];
 
 /**

@@ -3742,6 +3742,8 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('factual-card-source-open');
+    // 0.7.9 wording follow-up (#1616): in ordinary mode the open fact card names what it goes by as 事实核查规则, never 契约.
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="book-review"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('依据：事实核查规则 · 断言列举与引文定位') && !text.includes('依据：事实核查契约'); })()`, 'factual-card-basis-words');
     // Issue #1683 item 12.1: 在浏览器中打开 on the web source's row by a real pointer press hands exactly the recorded address to the
     // opener — the record file stands in for the system browser — once per press sequence, even for two presses before the answer;
     // 复制链接 puts exactly that address on the clipboard. The label's host is the address's own.
@@ -4487,6 +4489,8 @@ async function main() {
             await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
             // #1616 (stage-4/5 rework R6): the review plan's 统合 step reads in the editor's words — 部分, 未完成的部分, 审阅偏好.
             await assertRenderer(renderer,`(() => {const text=document.querySelector('#task-drawer').innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('若覆盖多个部分') && text.includes('并说明未完成的部分、缩短与省略数量') && !/阅读范围|缺口|本社审阅偏好/u.test(text);})()`,`task-status-finished-plan-words-${planWidth}`);
+            // 0.7.9 wording follow-up: the disclosure under 设为快速开始默认 says what it lists in the editor's words.
+            await assertRenderer(renderer,`(() => {const summary=document.querySelector('#task-drawer .task-plan-default-rule-detail > summary');return summary instanceof HTMLElement && summary.getClientRects().length>0 && summary.innerText.trim()==='设为默认后会沿用哪些设置';})()`,`task-status-finished-default-rule-words-${planWidth}`);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
             await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
