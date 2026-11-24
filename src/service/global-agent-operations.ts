@@ -1,6 +1,7 @@
 import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
 import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../shared/public-samplebooks.js';
 import type { ResolvedModelRole } from './model-search-settings.js';
+import { MODEL_EFFORT_STALE_REASON } from './provider/model-efforts.js';
 import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
@@ -198,6 +199,7 @@ export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperations
 
 export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
   const resolved = host.resolveModelRole('foreground-flash');
+  requireStore(resolved.refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
   const binding = host.getConfiguredModelRoleBinding('foreground-flash');
   const used = resolved.usedChoice;
   const connection = resolved.connection;

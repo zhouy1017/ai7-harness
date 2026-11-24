@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
 import { createUpgradeSample1 } from '../support/upgrade-sample1.js';
 import { beginUpgrade, resumeUpgrade } from '../../src/service/in-app-upgrade.js';
@@ -385,6 +386,7 @@ it.each([0, 1])('keeps the pre-dispatch ceiling rule with %i tokens remaining an
 
 it('waits offline and reconnects the final synthesis on the launched ordinary model exactly once (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
+    seedModelEfforts(session.store, 'opencode-go', { 'frozen-offline-model': ['high'] });
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, executionConfig: { modelId: 'frozen-offline-model', reasoningEffort: 'high' } };
     const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');

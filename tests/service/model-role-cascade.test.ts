@@ -9,6 +9,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { EditorialStore } from '../../src/service/store.js';
 import { MODEL_ROUTE_NOT_SERVED_REASON, modelRoleIdOf } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 
 // Issue #1620: the four roles of ADR 0107 §1 resolve on the real store from the two stored column groups — Pro required, Flash
 // optional and falling back to 前台 Pro — and a model declared on a route no runtime record serves is refused before sending
@@ -26,6 +27,13 @@ afterEach(async () => { store.close(); requestGovernor.close(); await requestGov
 const roles = () => store.getModelRoles().map((role) => [role.roleId, role.binding?.modelId ?? null, role.binding?.reasoningEffort ?? null, role.source]);
 const binding = (role: 'main-editorial' | 'fast-interaction') => store.getConfiguredModelRoleBinding(role);
 
+function discoverClaude(): void {
+  seedModelEfforts(store, 'anthropic-claude', {
+    'claude-opus-5': ['high'], 'claude-haiku-4-5': ['low', 'high'],
+    'claude-sonnet-5': ['medium'], 'claude-fable-5-1': ['high', 'xhigh'],
+  });
+}
+
 // These M1/R5-F1a cases exercise the retained fallback when a channel offers no recommendation.
 beforeEach(() => { vi.spyOn(modelService, 'modelServiceRecommendedModels').mockReturnValue(undefined); });
 afterEach(() => vi.restoreAllMocks());
@@ -34,6 +42,8 @@ it('uses the primary channel recommendation before a different foreground choice
   vi.restoreAllMocks();
   store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
   store.saveModelServiceConnection('Synthetic other', null, 'ready', 'openai-platform');
+  seedModelEfforts(store, 'opencode-go', { 'deepseek-v4-pro': ['high'] });
+  seedModelEfforts(store, 'openai-platform', { 'sample-foreground': ['low'], explicit: ['high'] });
   store.selectMainRoleModel('opencode-go', 'deepseek-v4-pro', 'high');
   store.selectForegroundFlashModel('openai-platform', 'sample-foreground', 'low');
   expect(store.getModelRoles().find(role => role.roleId === 'underlying-flash')).toMatchObject({
@@ -53,6 +63,7 @@ describe('the four Model Roles (Issue #1620)', () => {
   it('runs every role on the Pro model when only a Pro model is chosen, with its 思考强度', () => {
     const connection = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
     expect(connection.fastSelected).toBe(false);
+    discoverClaude();
     store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
     expect(roles()).toEqual([
       ['foreground-pro', 'claude-opus-5', 'high', 'pro-tier'],
@@ -70,6 +81,7 @@ describe('the four Model Roles (Issue #1620)', () => {
 
   it('keeps each tier its own model and 思考强度 when both are chosen, and follows Pro again once Flash is cleared', () => {
     store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+    discoverClaude();
     store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
     store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5', 'low');
     expect(roles()).toEqual([
@@ -112,6 +124,7 @@ describe('the four Model Roles (Issue #1620)', () => {
 
   it('reads a per-Task choice naming a connection from its Flash model only while that connection holds the Flash choice', () => {
     const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+    discoverClaude();
     store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
     store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5', 'low');
     const perTask = () => store.getConfiguredModelRoleBinding('fast-interaction', { modelConnectionId: claude.connectionId });
@@ -123,6 +136,7 @@ describe('the four Model Roles (Issue #1620)', () => {
   it.each([['no Flash model is chosen', null], ['the Flash model is another model of the same channel', 'gpt-5.6-luna']] as const)(
     'admits every Flash task kind of the launch policy on the model the Flash roles resolve to when %s', async (_case, flashModel) => {
     store.saveModelServiceConnection('Synthetic OpenAI', null, 'ready', 'openai-platform');
+    seedModelEfforts(store, 'openai-platform', { 'gpt-5.6-sol': ['medium'] });
     store.selectMainRoleModel('openai-platform', 'gpt-5.6-sol', 'medium');
     if (flashModel !== null) store.selectFastRoleModel('openai-platform', flashModel);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding('main-editorial'), binding('fast-interaction'));
@@ -228,6 +242,7 @@ function choose(role: import('../../src/shared/protocol.js').ModelRoleId, modelI
 
 it('stores four independent choices and efforts without changing channel defaults (#1650)', () => {
   const saved = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  discoverClaude();
   const models = ['claude-opus-5', 'claude-haiku-4-5', 'claude-sonnet-5', 'claude-fable-5-1'];
   const efforts = ['high', 'low', 'medium', 'xhigh'];
   for (const [i, role] of ['foreground-pro', 'foreground-flash', 'underlying-pro', 'underlying-flash'].entries())
@@ -240,6 +255,7 @@ it('stores four independent choices and efforts without changing channel default
 
 it('moves every following role with Pro, and underlying Flash follows foreground Flash first (#1650)', () => {
   store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  discoverClaude();
   store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
   expect(storedRoles()).toEqual(['foreground-pro']);
   expect(store.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('claude-opus-5'));
@@ -262,11 +278,13 @@ it('keeps an unavailable underlying Flash choice while following foreground Flas
   store.setModelServiceCredentialState(go.credentialReference, 'missing');
   expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
   store.setModelServiceCredentialState(go.credentialReference, 'ready');
+  seedModelEfforts(store, 'opencode-go', { 'glm-5.3-flash': ['high'] });
   expect(binding('fast-interaction')?.model).toBe('glm-5.3-flash');
 });
 
 it('keeps the advanced underlying Flash choice across changes to foreground Flash', () => {
   store.saveModelServiceConnection('Synthetic test', null, 'ready', 'opencode-go');
+  seedModelEfforts(store, 'opencode-go', { 'glm-5.3-flash': ['low'] });
   store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'glm-5.3-flash', reasoningEffort: 'low' });
   store.selectForegroundFlashModel('opencode-go', 'deepseek-v4.1-flash');
   store.selectFastRoleModel('opencode-go', 'deepseek-v4.1-flash');

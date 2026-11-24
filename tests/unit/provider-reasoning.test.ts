@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { assembleProviderRequest, parseProviderResponse, PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-adapter.js';
 import { classifyModelFailure, AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
 import { modelProfileFor } from '../../src/service/provider/model-profile.js';
+import { modelEffortRefusal, supportedEffortsOf } from '../../src/service/provider/model-efforts.js';
+import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
 import type { AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter } from '../../src/service/provider/deepseek-adapter.js';
@@ -27,6 +29,45 @@ installNodeNetworkDenial();
 // Protocol request metadata, not manuscript content. No network or provider credentials.
 const ROUTES = ['opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini'] as const;
 describe('per-family effort encoding (#1453)', () => {
+  const recordingRoutes = Object.values(CONFIGURED_RUNTIME_MODEL_TABLE.recordingProviders).flatMap(pair => [pair.pro, pair.flash]);
+  it.each(recordingRoutes)('uses exact effort evidence on $route/$model', binding => {
+    const model = modelProfileFor(binding.route, binding.model)!;
+    const route = PROVIDER_ROUTE_PROFILES[binding.route];
+    const entry = { modelId: model.model, modelLabel: model.displayName };
+    const expected = {
+      'openai-platform/gpt-6.2-sol': ['low', 'medium', 'high', 'xhigh', 'max'],
+      'openai-platform/gpt-6.1-terra': ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+      'anthropic-claude/claude-opus-5-5': ['low', 'medium', 'high', 'xhigh', 'max'],
+      'anthropic-claude/claude-sonnet-5-5': ['low', 'medium', 'high', 'xhigh', 'max'],
+      'google-gemini/gemini-4-argon': ['low', 'medium', 'high'],
+      'google-gemini/gemini-4-hydrogen': ['low', 'medium', 'high', 'xhigh'],
+      'opencode-go-gemini/gemini-4-argon': ['low', 'medium', 'high'],
+      'opencode-go/deepseek-v4.1-flash': ['low', 'high', 'max'],
+    };
+    const supported = expected[model.key as keyof typeof expected];
+    expect(supported).toBeDefined();
+    expect(supportedEffortsOf(entry, model)).toMatchObject({ status: 'supported', levels: supported,
+      provenance: { kind: 'documented', source: expect.stringContaining('https://'), readOn: '2026-11-24' } });
+    expect(modelEffortRefusal(entry, model, 'none') === null).toBe(supported!.includes('none'));
+    expect(modelEffortRefusal(entry, model, 'off')).toBeNull();
+    expect(modelEffortRefusal(entry, model, undefined)).toBeNull();
+    expect(modelEffortRefusal(entry, model, binding.reasoningEffort)).toBeNull();
+    const assembly = assembleProviderRequest(route, model, { provider: binding.route, model: binding.model, reasoningEffort: binding.reasoningEffort,
+      messages: [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Public protocol request.' }] }] },
+    { attribution: {}, promptContractDigest: 'a'.repeat(64), sessionId: 'recording-wire' });
+    const body = JSON.parse(assembly.body);
+    const family = model.capabilities.requestShape;
+    expect(body).toMatchObject(family === 'openai-responses' ? { reasoning: { effort: 'high' } }
+      : family === 'anthropic-messages' ? { output_config: { effort: 'high' }, thinking: { type: 'adaptive' } }
+      : family === 'google-generate-content' ? { generationConfig: { thinkingConfig: { thinkingLevel: 'high' } } }
+      : { reasoning_effort: 'high' });
+    if (binding.route === 'opencode-go-gemini') {
+      expect(assembly.url).toBe('https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:generateContent');
+      expect(route.credentialHeader).toBe('authorization-bearer');
+      expect(body.model).toBeUndefined();
+    }
+  });
+
   it.each(['gemini-2.5-pro', 'gemini-3.8-flash', 'gemini-3.1-pro-preview'])('encodes every advertised Gemini suggestion through its model-declared control: %s', (id) => {
     const model = modelProfileFor('google-gemini', id)!;
     const declaration = CONFIGURED_MODEL_REASONING[model.key]!;
@@ -62,7 +103,7 @@ describe('per-family effort encoding (#1453)', () => {
     expect(classifyModelFailure(response, codes)).toMatchObject({ reason: '模型服务没有接受所选思考强度；请换一个强度后再试。', retrySafe: false });
     expect(response.message).not.toContain('Raw vendor');
   });
-  it.each(ROUTES)('sends selected and custom efforts on %s, omitting off/unset', (route) => {
+  it.each(ROUTES)('keeps the original effort of a frozen request on %s and omits off/unset', (route) => {
     const model = modelProfileFor(route, 'custom-account-model')!;
     for (const effort of [undefined, 'off', 'low', 'high', 'vendor-future-level']) {
       const payload: AssembledModelPayload = { provider: route, model: model.model, system: 'Protocol test.',
@@ -77,6 +118,17 @@ describe('per-family effort encoding (#1453)', () => {
       if (route === 'anthropic-claude') expect(body.thinking).toEqual(sent === undefined ? undefined : { type: 'adaptive' });
       if (route === 'opencode-go') expect(body.thinking).toBeUndefined();
     }
+  });
+
+  it('sends Terra explicit none while omission keeps the provider default', () => {
+    const route = PROVIDER_ROUTE_PROFILES['openai-platform'];
+    const model = modelProfileFor(route.route, 'gpt-6.1-terra')!;
+    const payload: AssembledModelPayload = { provider: model.route, model: model.model,
+      messages: [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Public protocol request.' }] }] };
+    const wire = (reasoningEffort: string) => JSON.parse(assembleProviderRequest(route, model, { ...payload, reasoningEffort },
+      { attribution: {}, promptContractDigest: 'a'.repeat(64) }).body);
+    expect(wire('none').reasoning).toEqual({ effort: 'none' });
+    expect(wire('off').reasoning).toBeUndefined();
   });
 });
 

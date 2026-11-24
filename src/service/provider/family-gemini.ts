@@ -1,4 +1,3 @@
-import { CONFIGURED_MODEL_REASONING } from '../../shared/provider-configuration.generated.js';
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent, ProviderRouteProfile } from './deepseek-adapter.js';
 import { conversationMessages, strictFunctionTools, systemPromptOf } from './family-payload.js';
@@ -38,7 +37,7 @@ export function googleGenerateContentBody(profile: ProviderRouteProfile, model: 
   if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const tools = strictFunctionTools(payload, 64);
   const systemInstruction = systemPromptOf(payload);
-  const budget = CONFIGURED_MODEL_REASONING[model.key]?.control === 'google-thinking-budget';
+  const budget = model.reasoning?.control === 'google-thinking-budget';
   const thinkingConfig = effort === null ? null : budget
     ? { thinkingBudget: /^\d+$/u.test(effort) ? Number(effort) : effort } : { thinkingLevel: effort };
   return canonicalJson({

@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { randomUUID } from 'node:crypto';
 import { cp } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -96,6 +97,7 @@ it('sends the stage’s own request once under the model chosen now, keeps every
     expect(before.synthesis?.canGenerate).toBe(true);
     expect(before.findings.length).toBeGreaterThan(0);
     const command = randomUUID();
+    seedModelEfforts(session.store, 'opencode-go', { 'synthesis-only-model': ['high'] });
     const launched = generate(session, book.bookId, runId, { clientCommandId: command, executionConfig: { modelId: 'synthesis-only-model', reasoningEffort: 'high' } });
     expect(launched.repeated).toBe(false);
     await session.driver.drive(runId);
@@ -270,6 +272,7 @@ it('waits offline, starts once on reconnect under the chosen model, and a waitin
   try {
     const book = await importBook(session, 'sample1 联网后统合');
     const runId = await settledReview(session, book);
+    seedModelEfforts(session.store, 'opencode-go', { 'offline-synthesis-model': ['high'] });
     const command = { clientCommandId: randomUUID(), executionConfig: { modelId: 'offline-synthesis-model', reasoningEffort: 'high' } };
     const launched = generate(session, book.bookId, runId, command, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');

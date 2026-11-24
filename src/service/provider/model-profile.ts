@@ -21,9 +21,8 @@ import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
  * shapes are named here so a profile can state its shape honestly, and all three are assembled as of
  * S54c. What a profile declares is still what it gets: the adapter reads this field and nothing else.
  *
- * `google-generate-content` is the fourth and the first that no route of this gateway serves: Gemini
- * is on no OpenCode Go path, and the route its own endpoint needs is the `google-gemini` provider
- * document's (Issue #435), declared and inert until the shape review that document records.
+ * The Gemini family addresses the model in the URL. Google and OpenCode Go declare their
+ * respective endpoints and credentials in their provider records.
  */
 export type RequestShape =
   | 'openai-chat-completions'
@@ -39,7 +38,7 @@ export function modelReasoningControl(profile: ProviderModelProfile): ReasoningC
   return CONFIGURED_ROUTE_REASONING[profile.route]?.control ?? profile.capabilities.reasoningControl;
 }
 
-/** Capture at execution binding time; never infer an old record's effort from today's profile. */
+/** Serialize the effort captured at admission. Frozen plans never consult today's supported set. */
 export function effectiveModelReasoningEffort(_profile: ProviderModelProfile | null, requested?: string | null): string | null {
   return sentReasoningEffort(requested);
 }
@@ -209,6 +208,7 @@ export function modelProfileFor(route: RemoteExecutionRoute, model: string): Pro
       toolCalling: declared?.capabilities.toolCalling === 'function' ? declared.evidence.toolCalling : evidence,
       streaming: declared?.capabilities.streaming === streaming[family] ? declared.evidence.streaming ?? evidence : evidence },
     context: declared?.context ?? { tokens: null, evidence: unverified },
+    ...(declared?.reasoning === undefined ? {} : { reasoning: declared.reasoning }),
   };
 }
 

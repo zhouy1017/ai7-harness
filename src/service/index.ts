@@ -188,6 +188,24 @@ async function dispatch(
   if (store.replacementWaiting() && !takenWhileReplacementWaits(request.op)) {
     throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
   }
+  // These operations create new plans or turns with a current default. Starts and resumes that
+  // already name an immutable plan keep its binding and effort.
+  if (launchPolicy.operationalScope === 'ordinary-production') {
+    switch (request.op) {
+      case 'prepareBaselineAnalysis': case 'prepareCustomAnalysis': case 'prepareInitialEvaluation':
+      case 'prepareReadersReport': case 'prepareEvaluationRewrite': case 'prepareWritingTask': case 'prepareReviewRun':
+      case 'startQuickTasks': case 'promoteTaskIntentDraft':
+        store.requireCurrentModelRoleEffort('foreground-pro');
+        break;
+      case 'askAboutSelection': case 'continueDialogueAnswer': case 'regenerateDialogueAnswer':
+      case 'prepareGlobalAgentTurn': case 'regenerateProposalConflictUnit': case 'polishSelection':
+        store.requireCurrentModelRoleEffort('foreground-flash');
+        break;
+      case 'requestMaterialTranslation':
+        store.requireCurrentModelRoleEffort('underlying-flash');
+        break;
+    }
+  }
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
@@ -243,8 +261,11 @@ async function dispatch(
       store.clearFlashModel();
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
-    case 'refreshModelServiceModels':
-      return { id: request.id, ok: true, op: request.op, result: await refreshModels(request.input.route) };
+    case 'refreshModelServiceModels': {
+      const result = await refreshModels(request.input.route);
+      if (result.status === 'success') await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'getModelServiceStoredState':
       return {
         id: request.id,
