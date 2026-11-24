@@ -2173,6 +2173,17 @@ async function main() {
       const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
+    // Stage re-check (0.7.9): while that notice is on show, right after the manuscript opens, 改稿方式 stays the control a press reaches.
+    // No scripted scroll: its rectangle is inside the window, the topmost element at its centre is the control itself, the notice
+    // takes no pointer (computed style), and whatever lies at the notice's own centre is not the notice.
+    await assertRenderer(primary, `(() => {
+      const toast=document.querySelector('[data-toast]:not([hidden])'), control=document.querySelector('[data-editor-input-mode-toggle="true"]');
+      if(!(toast instanceof HTMLElement)||!(control instanceof HTMLElement))return false;
+      const c=control.getBoundingClientRect(), t=toast.getBoundingClientRect();
+      const inside=c.width>0&&c.height>0&&c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight;
+      const hit=document.elementFromPoint(c.left+c.width/2,c.top+c.height/2), under=document.elementFromPoint(t.left+t.width/2,t.top+t.height/2);
+      return inside && control.contains(hit) && getComputedStyle(toast).pointerEvents==='none' && !toast.contains(under);
+    })()`, 'restart-entry-notice-leaves-edit-mode-reachable');
     // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-author-settings-ready');

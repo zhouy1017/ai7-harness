@@ -56,12 +56,13 @@ const exact = (file: string, from: string, words: string): ExactRule => ({ file,
 const family = (file: string, shape: RegExp, words: (...parts: string[]) => string = (sentence) => phrased(sentence)): FamilyRule => ({ file, family: shape, words });
 
 /**
- * A 资料库 reference line (0.7.9 wording follow-up): 「计划冻结的索引版本」 is, to the editor, the material as it was when the plan was
- * made. The material's title, before 「》：已提取」, is kept exactly as it is.
+ * A 资料库 reference line (0.7.9 wording follow-up): 「按计划冻结的索引版本读取」 is, to the editor, reading the material as it stands when
+ * the Task starts; a 「计划冻结的索引版本」 that has gone is the material as it was when the plan was made. The material's title, before
+ * 「》：已提取」, is kept exactly as it is.
  */
 function materialLineWords(line: string): string {
   const at = line.lastIndexOf('》：已提取');
-  const words = (text: string): string => text.replaceAll('计划冻结的索引版本', '做计划时的资料内容');
+  const words = (text: string): string => text.replaceAll('按计划冻结的索引版本读取', '按任务开始时的资料内容读取').replaceAll('计划冻结的索引版本', '做计划时的资料内容');
   return at < 0 ? words(line) : line.slice(0, at) + words(line.slice(at));
 }
 
@@ -288,6 +289,8 @@ const EXACT: ReadonlyArray<ExactRule> = [
   exact('procedures/preinstalled.ts', '按我的评分重写评语', '按我的评分重新生成评语'),
   // 0.7.9 wording follow-up: AI7's fixed fact-check document, by its stored title (an editor's own document title has no rule).
   exact('review/category-configuration.ts', '事实核查契约', '事实核查规则'),
+  // The fallback when a part failed with no classified reason (stage re-check).
+  exact('analysis/execution.ts', '适配器失败。', '模型服务没有给出可用的回答。'),
   exact('review/review-runs.ts', '本地检查未能完成；请重新准备。', '本地检查未能完成；请另做一份计划。'),
   exact('review/review-runs.ts', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请重新准备并开始。', 'AI7 上次关闭时这项任务还在等待空闲，没有开始；请另做一份计划再开始。'),
   exact('review/review-runs.ts', '无法读取的本社审阅偏好记录', '无法读取的审阅偏好记录'),
@@ -590,7 +593,10 @@ const FAMILIES: ReadonlyArray<FamilyRule> = [
   // what a ticked 资料库 item is read as.
   family('review/category-configuration.ts', /^([^：]+：)事实核查契约( · .+)$/u, (_, category, procedure) => `${category}事实核查规则${procedure}`),
   family('analysis/run-state.ts', /^当前已有(.+)在调度或执行中；在其结束前不能准备(.+)。$/u, (_, task, next) => `已有一项${task}正在进行；等它结束后才能准备${next}。`),
-  family('writing-tasks.ts', /^勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：(.+)$/u, (_, bounds) => `勾选的资料列进这次计划的「允许参考」，按做计划时的资料内容读取：${bounds}`),
+  // A failed part's reason without its code (stage re-check): the code stays in developer mode and in the record.
+  family('analysis/execution.ts', /^(.+)（[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+）$/u, (_, reason) => ordinaryServiceWords(reason)),
+  family('provider/classification.ts', /^适配器失败（[^（）]+）。$/u, () => '模型服务出错，没有给出可用的回答。'),
+  family('writing-tasks.ts', /^勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：(.+)$/u, (_, bounds) => `勾选的资料列进这次计划的「允许参考」，按任务开始时的资料内容读取：${bounds}`),
 ];
 
 /**

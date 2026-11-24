@@ -37,6 +37,7 @@ import {
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_TITLE,
   TASK_DRAWER_FOOTER,
+  taskDrawerFooter,
   TASK_DRAWER_MODE_KEY,
   TASK_DRAWER_MODES,
   TASK_DRAWER_SCREENS,
@@ -174,8 +175,18 @@ describe('the drawer', () => {
     expect(TASK_DRAWER_BACK).toBe('← 任务');
     expect(TASK_DRAWER_BACK_TITLE).toBe('回到这本书的任务');
     expect(TASK_DRAWER_FOOTER).toBe('计划说明，不是运行授权');
-    // 0.7.9 wording follow-up: the line is developer-mode text; the stylesheet keeps it from an ordinary editor whatever the drawer last painted.
-    expect(readFileSync('src/renderer/styles.css', 'utf8')).toContain(':root[data-technical-layer-visible="false"] .task-drawer-footer { display: none; }');
+    // Stage re-check (0.7.9): developer mode keeps the sentence; an ordinary editor reads what a plan is until the Task starts, then nothing;
+    // and the stylesheet never draws a line still marked as developer mode's, whatever the drawer painted last.
+    setTechnicalLayerVisible(true);
+    expect([taskDrawerFooter(false), taskDrawerFooter(true)]).toEqual([TASK_DRAWER_FOOTER, TASK_DRAWER_FOOTER]);
+    setTechnicalLayerVisible(false);
+    expect([taskDrawerFooter(false), taskDrawerFooter(true)]).toEqual(['这里只是计划；开始任务之后才会运行。', null]);
+    setTechnicalLayerVisible(true);
+    const css = readFileSync('src/renderer/styles.css', 'utf8');
+    expect(css).toContain(':root[data-technical-layer-visible="false"] .task-drawer-footer[data-developer-line] { display: none; }');
+    // The toast takes no press meant for the control under it; only its own action is pressed.
+    expect(css).toContain('.toast { pointer-events: none; }');
+    expect(css).toContain('.toast .btn { color: inherit; pointer-events: auto; }');
     expect(TASK_PLAN_OPEN).toBe('查看计划');
   });
 

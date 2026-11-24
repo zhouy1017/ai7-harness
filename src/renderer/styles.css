@@ -758,9 +758,10 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
    scroll inside it while its actions stay pinned at its foot, so 开始任务 is always one step away. */
 .task-drawer-foot { flex: none; display: grid; gap: .4rem; max-height: 55%; padding: .6rem 1rem .7rem; overflow-x: hidden; overflow-y: auto; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .task-drawer-footer { margin: 0; color: var(--text-subdued); font-size: .86rem; font-weight: 800; }
-/* PLAN-007's line is developer-mode text (the drawer hides it when it paints a plan in ordinary mode). A drawer painted in
-   developer mode and left open across the switch, or one that has not painted yet, never shows it to an ordinary editor. */
-:root[data-technical-layer-visible="false"] .task-drawer-footer { display: none; }
+/* The line marked as developer mode's sentence (PLAN-007) is never drawn to an ordinary editor: a drawer painted in developer mode
+   and left open across the switch, or one that has not painted yet, would otherwise keep it. The ordinary line and the queue's
+   position carry no mark. */
+:root[data-technical-layer-visible="false"] .task-drawer-footer[data-developer-line] { display: none; }
 .task-drawer-bar { display: grid; gap: .35rem; min-width: 0; }
 .task-drawer-bar[hidden] { display: none; }
 .task-bar-summary { margin: 0; font-size: .9rem; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
@@ -2775,7 +2776,10 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .sheet-foot { position: sticky; bottom: 0; z-index: 2; margin: 0; padding: .75rem 1.2rem; border-top: 1px solid var(--boundary); background: var(--surface); }
 .sheet .sheet-foot { margin-top: 0; }
 .toast { position: fixed; z-index: 100; left: 50%; top: 3.4rem; transform: translateX(-50%); display: flex; align-items: center; gap: .65rem; max-width: min(42rem, calc(100vw - 2rem)); padding: .6rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 999px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
-.toast .btn { color: inherit; }
+/* A notice never takes a press meant for the control under it (改稿方式 beside the title), and a pointer resting where it appears
+   does not hold it open: only its own action is pressed. */
+.toast { pointer-events: none; }
+.toast .btn { color: inherit; pointer-events: auto; }
 .toast[hidden], .status-bar[hidden] { display: none; }
 /* A task that needs the editor (#1528): its own notice, not the transient capsule; it stays until closed and never takes focus. */
 /* Below the drawer, the menus and the sheets, so none of their controls is covered; one line below the quiet toast, which shares the top edge. */

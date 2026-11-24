@@ -88,6 +88,7 @@ import {
   TASK_DRAWER_BACK_TITLE,
   TASK_DRAWER_CLOSE,
   TASK_DRAWER_FOOTER,
+  taskDrawerFooter,
   TASK_DRAWER_LOADING,
   TASK_DRAWER_MODE_GROUP,
   TASK_DRAWER_MODE_KEY,
@@ -563,6 +564,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   // The footer region never scrolls with the plan (LAYER-005): PLAN-007's line, then the authorization bar.
   const foot = el('div', 'task-drawer-foot');
   const footer = el('p', 'task-drawer-footer', TASK_DRAWER_FOOTER);
+  // Marked while it carries developer mode's sentence: the stylesheet never draws that to an ordinary editor, whatever was painted last.
+  footer.dataset['developerLine'] = 'true';
   const bar = el('section', 'task-drawer-bar');
   bar.setAttribute('aria-label', '开始任务');
   bar.hidden = true;
@@ -901,12 +904,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     paintBar(next);
     restoreInteraction();
     if (redoOnOpen) { redoOnOpen = false; if (next.relaunch) bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
-    footer.textContent = TASK_DRAWER_FOOTER;
-    footer.hidden = !technicalLayerVisible;
+    const footerLine = taskDrawerFooter(next.start.readiness === 'started');
+    footer.textContent = footerLine ?? '';
+    footer.hidden = footerLine === null;
+    if (technicalLayerVisible) footer.dataset['developerLine'] = 'true'; else delete footer.dataset['developerLine'];
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
       if (plan !== next || root.hidden || view !== 'plan') return;
       const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref);
       footer.hidden = false;
+      delete footer.dataset['developerLine'];
       footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '排队中' : `排在第 ${item.queuePosition} 位`} · `));
       if (item?.runRecordId && item.queuePosition !== null) {
         const { runRecordId, queuePosition } = item;

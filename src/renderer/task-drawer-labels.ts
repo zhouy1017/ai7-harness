@@ -43,6 +43,13 @@ export const TASK_DRAWER_LOADING = '正在读取任务计划…';
 export const TASK_DRAWER_UNAVAILABLE = '无法读取这项任务的计划。';
 /** V2-UX-PLAN-007: the plan surface says, whatever else it shows, that the plan itself authorizes nothing. */
 export const TASK_DRAWER_FOOTER = '计划说明，不是运行授权';
+/**
+ * PLAN-007's line as the mode on show reads it (stage re-check, 0.7.9): developer mode keeps the sentence; an ordinary editor is told
+ * what a plan is while the Task has not started, and nothing once it has. `null` draws no line.
+ */
+export function taskDrawerFooter(started: boolean): string | null {
+  return technicalLayerVisible ? TASK_DRAWER_FOOTER : started ? null : '这里只是计划；开始任务之后才会运行。';
+}
 /** The entry each surface that raises a Task offers beside its one-line summary (S72 D4). */
 export const TASK_PLAN_OPEN = '查看计划';
 /**
