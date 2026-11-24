@@ -130,12 +130,22 @@ export type ModelServiceModelDisposition =
   /** Declared on a further route of the channel that this version cannot call (Issue #1582). */
   | 'route-not-served';
 
+export type ModelServiceEffortProvenance =
+  | { kind: 'discovered'; observedAt: string }
+  | { kind: 'documented'; source: string; readOn: string };
+
+export type ModelServiceSupportedEfforts =
+  | { status: 'supported'; levels: readonly string[]; completeness: 'complete' | 'partial'; provenance: ModelServiceEffortProvenance }
+  | { status: 'unsupported'; levels: readonly []; completeness: 'complete'; provenance: ModelServiceEffortProvenance };
+
 export interface ModelServiceChannelModelProjection {
   modelId: string;
   modelLabel: string;
   /** The protocol family of the route that declares it. */
   family: string;
   capabilities: { text: ModelServiceCapabilityDisposition; stream: ModelServiceCapabilityDisposition; functionTools: ModelServiceCapabilityDisposition };
+  /** Omitted when there is no evidence for selectable levels or a conclusive denial. */
+  supportedEfforts?: ModelServiceSupportedEfforts;
   main: ModelServiceModelDisposition;
   fast: ModelServiceModelDisposition;
 }
