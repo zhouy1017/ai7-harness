@@ -184,8 +184,8 @@ describe('the drawer', () => {
     setTechnicalLayerVisible(true);
     const css = readFileSync('src/renderer/styles.css', 'utf8');
     expect(css).toContain(':root[data-technical-layer-visible="false"] .task-drawer-footer[data-developer-line] { display: none; }');
-    // On the manuscript a notice sits in the header band, clear of the toolbar's controls (改稿方式).
-    expect(css).toContain('body:has(#screen[data-screen="editor"]) .toast { top: .4rem; }');
+    // On the manuscript a notice sits in the header band, clear of the toolbar's controls (改稿方式) and under the Task Drawer.
+    expect(css).toContain('body:has(#screen[data-screen="editor"]) .toast { top: .4rem; z-index: 20; }');
     expect(TASK_PLAN_OPEN).toBe('查看计划');
   });
 

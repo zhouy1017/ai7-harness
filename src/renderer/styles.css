@@ -2781,8 +2781,9 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .toast { position: fixed; z-index: 100; left: 50%; top: 3.4rem; transform: translateX(-50%); display: flex; align-items: center; gap: .65rem; max-width: min(42rem, calc(100vw - 2rem)); padding: .6rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 999px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
 .toast .btn { color: inherit; }
 /* On the manuscript the row under the header is all controls (保存, 导出, 改稿方式): there the notice sits in the header band, over the
-   title area, so it never lies on a control an editor reaches for right after the manuscript opens. */
-body:has(#screen[data-screen="editor"]) .toast { top: .4rem; }
+   title area, and below the sidebar, the Task Drawer, the menus and the sheets (as the attention notice does), so it never lies on a
+   control an editor reaches for right after the manuscript opens. */
+body:has(#screen[data-screen="editor"]) .toast { top: .4rem; z-index: 20; }
 .toast[hidden], .status-bar[hidden] { display: none; }
 /* A task that needs the editor (#1528): its own notice, not the transient capsule; it stays until closed and never takes focus. */
 /* Below the drawer, the menus and the sheets, so none of their controls is covered; one line below the quiet toast, which shares the top edge. */
