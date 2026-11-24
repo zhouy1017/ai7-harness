@@ -341,7 +341,7 @@ it('INSERT OR REPLACE deletes old connection choices through the FK cascade (#16
 it('an internal role choice does not expand the legacy channel model catalogue (#1650)', () => {
   store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
   const before = store.getModelServiceModels('anthropic-claude');
-  choose('underlying-pro', 'synthetic-role-only-model');
+  choose('underlying-pro', 'synthetic-role-only-model', 'anthropic-claude', 'off');
   expect(store.getModelServiceModels('anthropic-claude')).toEqual(before);
   expect(store.getConfiguredModelRoleBinding('underlying-pro')?.model).toBe('synthetic-role-only-model');
 });

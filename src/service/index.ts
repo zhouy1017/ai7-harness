@@ -158,6 +158,19 @@ interface FastRoleContext {
   readonly connectionTesting?: () => boolean;
 }
 
+/** New plans and turns resolve a current default, while starts and resumes of frozen plans keep their original effort. */
+function taskEffortRole(operation: ServiceRequest['op']): 'foreground-pro' | 'foreground-flash' | 'underlying-flash' | null {
+  switch (operation) {
+    case 'prepareBaselineAnalysis': case 'prepareCustomAnalysis': case 'prepareInitialEvaluation':
+    case 'prepareReadersReport': case 'prepareEvaluationRewrite': case 'prepareWritingTask': case 'prepareReviewRun':
+    case 'startQuickTasks': case 'promoteTaskIntentDraft': case 'redoTaskPlan': return 'foreground-pro';
+    case 'askAboutSelection': case 'continueDialogueAnswer': case 'regenerateDialogueAnswer':
+    case 'prepareGlobalAgentTurn': case 'regenerateProposalConflictUnit': case 'polishSelection': return 'foreground-flash';
+    case 'requestMaterialTranslation': return 'underlying-flash';
+    default: return null;
+  }
+}
+
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
@@ -188,24 +201,8 @@ async function dispatch(
   if (store.replacementWaiting() && !takenWhileReplacementWaits(request.op)) {
     throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
   }
-  // These operations create new plans or turns with a current default. Starts and resumes that
-  // already name an immutable plan keep its binding and effort.
-  if (launchPolicy.operationalScope === 'ordinary-production') {
-    switch (request.op) {
-      case 'prepareBaselineAnalysis': case 'prepareCustomAnalysis': case 'prepareInitialEvaluation':
-      case 'prepareReadersReport': case 'prepareEvaluationRewrite': case 'prepareWritingTask': case 'prepareReviewRun':
-      case 'startQuickTasks': case 'promoteTaskIntentDraft': case 'redoTaskPlan':
-        store.requireCurrentModelRoleEffort('foreground-pro');
-        break;
-      case 'askAboutSelection': case 'continueDialogueAnswer': case 'regenerateDialogueAnswer':
-      case 'prepareGlobalAgentTurn': case 'regenerateProposalConflictUnit': case 'polishSelection':
-        store.requireCurrentModelRoleEffort('foreground-flash');
-        break;
-      case 'requestMaterialTranslation':
-        store.requireCurrentModelRoleEffort('underlying-flash');
-        break;
-    }
-  }
+  const role = taskEffortRole(request.op);
+  if (role !== null && launchPolicy.operationalScope === 'ordinary-production') store.requireCurrentModelRoleEffort(role);
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
