@@ -2300,9 +2300,12 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    // 0.7.9 wording follow-up (#1616): the drawer left open by the report Task was painted in development mode; in ordinary mode its
-    // PLAN-007 line (「计划说明，不是运行授权」) is not drawn — the engine's own computed style, whatever the drawer last painted.
-    await assertRenderer(renderer, `(() => { const footer=document.querySelector('#task-drawer .task-drawer-footer'); return document.documentElement.dataset.technicalLayerVisible==='false' && footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !(document.querySelector('#task-drawer')?.innerText??'').includes('不是运行授权'); })()`, 'evaluation-rewrite-drawer-footer-hidden');
+    // 0.7.9 wording follow-up (#1616): the report Task's drawer was painted in development mode; in ordinary mode its PLAN-007 line
+    // (「计划说明，不是运行授权」) is not drawn — the engine's own computed style of the line, whatever the drawer last painted — and
+    // the words are nowhere in what the window shows. The drawer is open beside the page at a wide window and closed at the Gate's
+    // (overlay form), so the text is read from the page, which is always rendered: `innerText` of a closed drawer is its whole text
+    // content, hidden lines included (hosted Gate 45394156356, where reduced motion closes the drawer without a transition).
+    await assertRenderer(renderer, `(() => { const footer=document.querySelector('#task-drawer .task-drawer-footer'); return document.documentElement.dataset.technicalLayerVisible==='false' && footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !document.body.innerText.includes('不是运行授权'); })()`, 'evaluation-rewrite-drawer-footer-hidden');
     requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改评估报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');

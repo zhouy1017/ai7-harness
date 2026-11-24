@@ -55,7 +55,16 @@ export async function wheelIntoView(renderer, waitFor, selector, name) {
 /** Bring the named control into view by the wheel, assert it reachable, then press it with the real pointer. */
 export async function pressReachable(renderer, waitFor, check, selector, name) {
   await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)}) !== null`, `${name}-present`);
-  await wheelIntoView(renderer, waitFor, selector, name);
+  // A page still settling can move the control after it was in view: on 任务 a card gains a line as its facts arrive, and at
+  // 1008×681 that pushed a button resting 5 px above the window's edge below it (hosted Gate, J-09 `isolation-b-result`). An
+  // editor keeps the wheel going until the control rests in view: wheel, let it rest, and wheel again while it has moved out
+  // — a bounded number of times. The assertion after it is unchanged and still made before the press.
+  for (let round = 0; round < 6; round += 1) {
+    await wheelIntoView(renderer, waitFor, selector, name);
+    await waitFor(renderer, `new Promise(resolve => { const before = JSON.stringify(${facts(selector)}); requestAnimationFrame(() => requestAnimationFrame(() => resolve(before !== 'null' && before === JSON.stringify(${facts(selector)})))); })`, `${name}-settle-${round}`);
+    const settled = await renderer.evaluate(facts(selector));
+    if (settled === null || settled.delta === 0) break;
+  }
   const { rect } = await assertReachable(renderer, waitFor, check, selector, name);
   const point = { x: (rect[0] + rect[2]) / 2, y: (rect[1] + rect[3]) / 2, button: 'left', clickCount: 1 };
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1 });
