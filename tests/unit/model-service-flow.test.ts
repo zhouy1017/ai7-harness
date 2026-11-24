@@ -781,7 +781,7 @@ it('keeps a task choice the model no longer offers until the editor chooses agai
   expect(effort.value).toBe('medium');
   expect(effort.querySelectorAll('option').map(option => option.textContent)).toEqual(['模型默认', '低', '高', '最高', '中（现在不可用）']);
   expect(root.querySelector('.dispatch-chooser-effort-note')!.textContent).toBe('之前选的强度现在不可用，请重新选择。');
-  expect(root.querySelector('summary')!.textContent).toContain('@medium');
+  expect(root.querySelector('summary')!.textContent).toContain('@中');
   // Painting never changes what the Task would use: only the editor's own choice does.
   expect(changed).not.toHaveBeenCalled();
   effort.value = 'high'; effort.dispatchEvent({ type: 'change' });
