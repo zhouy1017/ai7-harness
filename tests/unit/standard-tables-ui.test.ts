@@ -1,6 +1,6 @@
 import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mountStandardTables } from '../../src/renderer/standard-tables.js';
+import { mountStandardTables, tableDeleteQuestion, tableSourceLabel } from '../../src/renderer/standard-tables.js';
 import type { StandardTableInspection, StandardTablePreview, StandardTableRendererApi, StandardTableRow, StandardTablesProjection } from '../../src/shared/protocol/standard-tables.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
@@ -49,10 +49,14 @@ function field(root: HTMLElement, name: string, value: string, type = 'input') {
 it('lists the four kinds with their file, conversion and application status', async () => {
   const api = makeApi(); api.inspectStandardTables.mockResolvedValue({ missingPreinstalledKeys: [], tables:
     (['standard-characters', 'character-forms', 'word-forms', 'common-words'] as const).map((kind, index) => ({ ...table, kind, tableId: String(index),
-      sourceFileName: index === 0 ? null : '词表.tsv', recentChecksCount: index === 0 ? 0 : 3 })) });
+      sourceFileName: index === 0 ? null : '词表.tsv', recentChecksCount: index === 0 ? 0 : 3, ...(index === 3 ? { origin: 'imported' as const, preinstalledKey: null } : {}) })) });
   const { root } = await setup(api);
   expect(root.querySelectorAll('[data-standard-table-id]')).toHaveLength(4);
-  for (const text of ['本社自建', '规范字', '字形对照', '词形', '常用词', '词表.tsv', '修订版', '已识别 1 · 待确认 1 · 未识别 0', '近期核查未用过', '最近 3 次核查用过']) expect(root.textContent).toContain(text);
+  // A preinstalled table says 预装 whether or not it has a source file; only a house table without one says 本社自建.
+  expect(Array.from(root.querySelectorAll('[data-standard-table-id] .field-note')).map(note => note.textContent!.split(' · ').slice(0, 2).join(' · ')))
+    .toEqual(['预装 · 规范字', '预装 · 词表.tsv', '预装 · 词表.tsv', '词表.tsv · 常用词']);
+  expect(tableSourceLabel({ origin: 'imported', sourceFileName: null })).toBe('本社自建'); expect(root.textContent).not.toContain('本社自建');
+  for (const text of ['规范字', '字形对照', '词形', '常用词', '词表.tsv', '修订版', '已识别 1 · 待确认 1 · 未识别 0', '近期核查未用过', '最近 3 次核查用过']) expect(root.textContent).toContain(text);
   expect(root.querySelector('[data-standard-table-action="restore-preinstalled"]')).toBeNull();
 });
 
@@ -134,11 +138,23 @@ it('creates an empty house table and adds an editable row to a new version', asy
   expect(api.saveStandardTable).toHaveBeenLastCalledWith(expect.objectContaining({ edits: [{ position: null, row: expect.objectContaining({ recommended: '本社词', strength: 'house' }) }] }));
 });
 
-it('toggles a table, deletes its card, and restores the missing preinstalled table', async () => {
+it('toggles a table, deletes its card only after the question is confirmed, and restores the missing preinstalled table', async () => {
   const { root, api, status } = await setup(); await click(root, 'toggle-enabled');
   expect(api.setStandardTableEnabled).toHaveBeenLastCalledWith({ tableId: 'table', enabled: false }); expect(root.textContent).toContain('停用 · 最近 3 次核查用过');
   await click(root, 'toggle-enabled'); expect(api.setStandardTableEnabled).toHaveBeenLastCalledWith({ tableId: 'table', enabled: true });
-  await click(root, 'delete'); expect(api.deleteStandardTable).toHaveBeenCalledWith({ tableId: 'table' }); expect(root.querySelector('[data-standard-table-id]')).toBeNull();
+  // 删除 asks first, naming the table and what goes; 取消 keeps it and returns to 删除; only 确认删除 removes it.
+  await click(root, 'delete'); expect(api.deleteStandardTable).not.toHaveBeenCalled();
+  const strip = root.querySelector<HTMLElement>('[data-standard-table-id="table"] [data-standard-table-confirm="table"]')!;
+  expect([strip.getAttribute('role'), strip.querySelector('p')?.textContent]).toEqual(['group', tableDeleteQuestion(table)]);
+  expect(tableDeleteQuestion(table)).toBe('删除「合成预装表」？它的全部版本、条目和导入的原件会一起删除。之后可按「恢复预装字表」找回预装的内容，本社改过的内容不能找回。');
+  expect(tableDeleteQuestion({ name: '本社新表', origin: 'imported' })).toBe('删除「本社新表」？它的全部版本、条目和导入的原件会一起删除。删除后不能找回。');
+  expect((document.activeElement as HTMLElement | null)?.dataset['standardTableAction']).toBe('cancel-delete');
+  await click(root, 'cancel-delete'); expect(root.querySelector('[data-standard-table-confirm]')).toBeNull(); expect(api.deleteStandardTable).not.toHaveBeenCalled();
+  expect(root.querySelectorAll('[data-standard-table-id]')).toHaveLength(1); expect((document.activeElement as HTMLElement | null)?.dataset['standardTableAction']).toBe('delete');
+  await click(root, 'delete'); api.deleteStandardTable.mockRejectedValueOnce(new Error('字表正被核查使用')); await click(root, 'confirm-delete');
+  expect(status).toHaveBeenLastCalledWith('字表正被核查使用', 'error'); expect(root.querySelector('[data-standard-table-confirm]')).not.toBeNull();
+  await click(root, 'confirm-delete'); expect(api.deleteStandardTable).toHaveBeenLastCalledWith({ tableId: 'table' }); expect(root.querySelector('[data-standard-table-id]')).toBeNull();
+  expect(status).toHaveBeenLastCalledWith('已删除字表及其原件。', 'success');
   await click(root, 'restore-preinstalled'); expect(api.restorePreinstalledStandardTables).toHaveBeenCalledWith({});
   expect(root.querySelectorAll('[data-standard-table-id]')).toHaveLength(1); expect(status).toHaveBeenLastCalledWith('已恢复预装字表。', 'success');
 });

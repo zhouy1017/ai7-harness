@@ -1717,14 +1717,24 @@ async function main() {
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
-    // I-1b: three explained AI entries; 审阅选中内容 keeps the existing selection task composer and its saved-procedure route.
+    // I-1b: three explained AI entries; 就这段发起任务 keeps the existing selection task composer and its saved-procedure route.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('审阅选中内容') && polish === null && window.__j16.item('scoped-ai-edit')?.disabled === false && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().querySelectorAll('[aria-label="AI7 任务"] .menu-caption small').length === 3; })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务') && polish === null && window.__j16.item('scoped-ai-edit')?.disabled === false && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().querySelectorAll('[aria-label="AI7 任务"] .menu-caption small').length === 3; })()`, 'selection-task-menu-items');
     await waitFor(renderer, `window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
-    await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
+    // Stage 4/5 rework R5: the three AI entries are in view as the menu opens. The menu keeps its own height (the window less
+    // 16 px, not the shared 320 px cap), nothing was scrolled, and each entry lies inside the window and the menu's visible box,
+    // topmost at its centre.
+    const aiEntry = (action) => `.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="${action}"]`;
+    await assertRenderer(renderer, `(() => { const menu = window.__j16.menu(); return menu.scrollTop === 0 && Math.abs(Number.parseFloat(getComputedStyle(menu).maxHeight) - (innerHeight - 16)) < 1; })()`, 'selection-task-menu-own-height');
+    for (const action of ['scoped-ai-edit', 'task-on-selection', 'ask-on-selection']) await assertReachable(renderer, waitFor, requireJourney, aiEntry(action), `selection-task-menu-${action}`);
+    // R4: pressed with the pointer, the entry opens the draft that carries the entry's own words as its title, with 审阅 chosen.
+    const entryWords = await renderer.evaluate(`window.__j16.item('task-on-selection')?.querySelector('.menu-caption > span')?.textContent ?? null`);
+    await pressReachable(renderer, waitFor, requireJourney, aiEntry('task-on-selection'), 'selection-task-choose');
     // Synchronized delta (Issue #423, slice 7a): 就这段发起任务… hands the words to the Context-bound Task Composer in the side slot;
     // its 按现成工序准备… closes it and opens the composer below the paragraph that prepares one of the house's 工序 at once.
     await waitFor(renderer, PROCEDURES_ROUTE, 'selection-task-composer-slot', 30_000);
+    const entryDraft = await renderer.evaluate(`(() => { const composer = document.querySelector('#task-drawer .task-composer'); return { title: composer?.querySelector('.task-composer-title')?.textContent ?? null, review: composer?.querySelector('[data-task-composer-field="outcome-review"]')?.checked ?? null }; })()`);
+    requireJourney(entryWords === '就这段发起任务' && entryDraft.title === entryWords && entryDraft.review === true, 'selection-task-entry-names-draft', { entryWords, ...entryDraft });
     await clickSelector(renderer, '#task-drawer .task-composer [data-task-composer-action="procedures"]', 'selection-task-procedures');
 
     at('selection-task-composer');
