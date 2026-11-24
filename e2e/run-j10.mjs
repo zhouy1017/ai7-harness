@@ -2055,11 +2055,16 @@ async function main() {
     await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, 'review-interrupted-reopen-settled');
     await wheelIntoView(renderer, waitFor, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     await assertReachable(renderer, waitFor, requireJourney, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
+    let alternateSeen = null;
     const chosenReviewModel = (await chooseDispatch(renderer, waitFor, '#task-drawer .dispatch-chooser', 'review-interrupted-model', {
-      model: alternateReviewModel, excludeModel: sourceModel.split('@')[0],
+      model: alternateReviewModel, excludeModel: sourceModel.split('@')[0], seen: (facts) => { alternateSeen = facts; },
       press: (surface, wait, selector, name) => pressReachable(surface, wait, requireJourney, selector, name),
     })).replace(/^模型 /u, '').replace(/ ▾$/u, '');
     requireJourney(chosenReviewModel.split('@')[0] === alternateReviewModel && chosenReviewModel.split('@')[0] !== sourceModel.split('@')[0], 'review-interrupted-changed-model');
+    // 0.8.0 stage one: nothing is on record for the hand-typed model, so it offers 模型默认 alone, with its sentence in view, and the
+    // interrupted review's own 思考强度 does not move to it.
+    requireJourney(chosenReviewModel === alternateReviewModel && JSON.stringify(alternateSeen.values) === '["off"]' && alternateSeen.selected === 'off' &&
+      alternateSeen.noteKind === 'reason' && alternateSeen.noteInside === true, 'review-interrupted-level-not-carried', alternateSeen);
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="launch"]', 'review-interrupted-start');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind==='review-run' && drawer.dataset.taskPlanStart==='started' && !!drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef!==${JSON.stringify(secondReviewRef)}; })()`, 'review-interrupted-started', 60_000);
     const thirdReviewRef = await renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);

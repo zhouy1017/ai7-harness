@@ -39,9 +39,9 @@ import {
 import {
   type CompositionOptions,
   describeComposition,
-  STOCK_TYPOS_FANOUT,
-  STOCK_TYPOS_LEAF,
+  STOCK_TYPOS_FANOUT, STOCK_TYPOS_LEAF,
 } from '../harness/primary-agent-harness.js';
+import { toolSchemaPinForNewPlan } from '../provider/platform-tools.js';
 import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration, liveKindAdmission, liveKindRule, kindLocalTools } from './live-kind-admission.js';
 import {
@@ -3743,12 +3743,15 @@ export class BaselineAnalysisStore {
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
     const { webToolsBackend, searchCredentialReference, webToolsFallback } = this.#currentSearchPlan(definition, intent.preparedByEnrollmentVersionId, input.policy);
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
-    const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
+    const planComposition = this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected);
+    const localTools = live === null ? planComposition.localTools ?? false
+      : intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false;
+    const toolSchemaPin = toolSchemaPinForNewPlan(localTools);
+    const composition = describeComposition(live?.route ?? LOCAL_DETERMINISTIC_ROUTE, live?.model ?? LOCAL_DETERMINISTIC_MODEL, promptContractDigest,
+      { ...planComposition, ...toolSchemaPin, localTools, ...(live === null ? {} : {
+        platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
         researchDeclaration: definition.factualClaims === undefined ? researchDeclaration : { webSearch: false, searchEngine: null },
-        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected),
-        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
+      }) });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }), ...(webToolsFallback === undefined ? {} : { webToolsFallback }),
@@ -3886,10 +3889,7 @@ export class BaselineAnalysisStore {
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
-      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: composition.version === 4 ? STOCK_TYPOS_FANOUT : STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
-        ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
-        ...(composition.stages === undefined ? {} : { stages: composition.stages }),
-        ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
+      compositionOptions: { ...planComposition, ...toolSchemaPin },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
       boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], true,

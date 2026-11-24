@@ -21,7 +21,7 @@
     "docs:check": "node tools/check-docs.mjs",
     "words:report": "node tools/words-report.mjs",
     "test": "vitest run tests/unit",
-    "test:service": "vitest run tests/service",
+    "test:service": "vitest run tests/service --maxWorkers=3",
     "test:service:weights": "node tools/refresh-service-weights.mjs",
     "build": "node tools/build-controller.mjs",
     "version:identity": "node tools/build-identity.mjs",

@@ -11,7 +11,8 @@ import { prepareRetrievalResult, markRetrievalResult, notExactFetched, dialogueR
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
-import { LEGACY_LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, ruleNamedToolSchemas, toolSetEqualsPlatformSchemas, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
+import { LEGACY_LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, ruleNamedToolSchemas, toolSchemaPinForNewPlan, type PlatformToolsRule, type ToolSchemaVersion } from '../../src/service/provider/platform-tools.js';
+import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, assistantToolCallDigest, evaluateEgress, toolResultKey, type EgressAttemptScope, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import type { AssembledContentBlock, AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { localRetrievalRule } from '../support/policy-rules.js';
@@ -301,11 +302,6 @@ describe('registered local tools without egress', () => {
     const cut = (canonicalToolArguments('retrieve', { query: 'alpha', queries: ['x'.repeat(999) + '𠮷'] }) as unknown as { queries: string[] }).queries[0]!;
     expect([cut.length, cut.isWellFormed()]).toEqual([999, true]);
     expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
-    // No declaration offers them: a frozen plan pins the declared tools' bytes, so they wait for per-plan tool schemas (ADR 0107 §4).
-    const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false };
-    expect(JSON.stringify(ruleNamedToolSchemas(false, declaredRule))).not.toContain('queries');
-    expect(JSON.stringify(LEGACY_LOCAL_TOOL_SCHEMAS)).not.toContain('queries');
-    expect(toolSetEqualsPlatformSchemas(LEGACY_LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
     const facts = binding();
     const payload = { provider: facts.route, model: facts.model, system: facts.systemPrompt, tools: LEGACY_LOCAL_TOOL_SCHEMAS,
       messages: [{ role: 'user' as const, source: { kind: 'user' as const }, content: [{ type: 'text', text: 'synthetic' }] }] };
@@ -338,11 +334,37 @@ describe('registered local tools without egress', () => {
   });
 });
 
+describe('versioned retrieve declarations (ADR 0107 §4.3)', () => {
+  it('adds only the optional bounded variants field to the original declaration', () => {
+    const v1 = ruleNamedToolSchemas(false, true, 1);
+    expect(v1).toEqual(LEGACY_LOCAL_TOOL_SCHEMAS);
+    const [exact, retrieve] = ruleNamedToolSchemas(false, true, 2);
+    expect(exact).toEqual(v1[0]);
+    const { properties, ...parameters } = retrieve!.parameters as { properties: Record<string, unknown> };
+    const { queries, ...originalProperties } = properties;
+    expect({ ...retrieve, parameters: { ...parameters, properties: originalProperties } }).toEqual(v1[1]);
+    expect(queries).toMatchObject({ type: 'array', maxItems: 4, items: { type: 'string', minLength: 1, maxLength: 1000 } });
+    expect(parameters).toHaveProperty('required', ['query']);
+  });
+
+  it('gives plans without retrieve the original composition digest', () => {
+    const onlyExactFetch = { ...localTools, declarations: [{ name: 'exact_fetch' as const, readOnly: true as const, concurrencySafe: true as const }] };
+    const compose = (local: typeof onlyExactFetch | boolean, toolSchemaVersion: ToolSchemaVersion) =>
+      describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, 'a'.repeat(64), { version: 2, localTools: local, toolSchemaVersion }).digest;
+    for (const local of [false, onlyExactFetch] as const) {
+      expect(toolSchemaPinForNewPlan(local)).toEqual({});
+      expect(compose(local, 2)).toBe(compose(local, 1));
+    }
+    expect(toolSchemaPinForNewPlan(true)).toEqual({ toolSchemaVersion: 2 });
+    expect(compose(true, 2)).not.toBe(compose(true, 1));
+  });
+});
+
 describe('a retrieve call with further phrasings (#1623)', () => {
   const corpus = () => words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气');
-  const sessionUnder = (rule: NonNullable<EgressBindingFacts['localTools']>) => {
+  const sessionUnder = (rule: NonNullable<EgressBindingFacts['localTools']>, toolSchemaVersion: ToolSchemaVersion = 1) => {
     const facts: EgressBindingFacts = { bindingDigest: 'b'.repeat(64), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
-      systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools: rule,
+      systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools: rule, toolSchemaVersion,
       policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 } };
     const session = new PlatformToolSession({ binding: facts, scope: { currentBindingDigest: () => facts.bindingDigest, acceptedOutputDigests: new Set() },
       retrieval: new RetrievalIndex(corpus()), purpose: 'synthetic',
@@ -352,8 +374,8 @@ describe('a retrieve call with further phrasings (#1623)', () => {
       dispatch: { token: Symbol(), active: () => !signal.aborted } })).text) as unknown;
     return { session, call };
   };
-  it('answers five phrasings from the first four and a junk-laden call from what remains, as one call', async () => {
-    const { session, call } = sessionUnder({ ...localTools, declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false });
+  it.each([1, 2] as const)('fuses the first four usable variants in version %s', async (version) => {
+    const { session, call } = sessionUnder(version === 1 ? { ...localTools, declarations: [{ name: 'retrieve', readOnly: true, concurrencySafe: true }] } : localTools, version);
     const expected = await new RetrievalIndex(corpus()).retrieve('修订', 8, undefined, ['首印', '违约', '天气', '初印']);
     expect(expected).not.toEqual(await new RetrievalIndex(corpus()).retrieve('修订'));
     expect(await call('1', { query: '修订', queries: ['首印', '违约', '天气', '初印', '毁约'] })).toEqual(expected);

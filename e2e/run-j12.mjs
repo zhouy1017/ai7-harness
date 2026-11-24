@@ -1,6 +1,8 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { chooseDispatch, pointerClick, EFFORT_WORDS, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
+import { chooseEffort, effortKey, effortListFacts, openEffortList, pressEffortRow, reachPress, wheelClear } from './effort-list.mjs';
+import { assertReachable } from './task-card-reach.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -481,16 +483,14 @@ async function assertOrdinaryModelReachability(renderer) {
     })()`);
     if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-reachability ${JSON.stringify(geometry)}`);
     requireJourney(geometry.ok, 'ordinary-model-controls-reachable', geometry);
-    if ((await renderer.evaluate(`document.querySelector('select[aria-label="思考强度"]')?.disabled===false`)) === true) {
-      await pointerClick(renderer, waitFor, 'select[aria-label="思考强度"] + .ui-select-trigger', 'model-other-open');
-      const other = await renderer.evaluate(`Array.from(document.querySelector('select[aria-label="思考强度"]').options).findIndex(option=>option.value==='__other')`);
-      await pointerClick(renderer, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${other}"]`, 'model-other-option');
-      await pointerClick(renderer, waitFor, 'input[data-reasoning-effort="main"]', 'model-other-input');
-      await renderer.send('Input.insertText', {text:'low'});
-      requireJourney((await renderer.evaluate(`(() => {const input=document.querySelector('input[data-reasoning-effort="main"]'),b=input.getBoundingClientRect();return !input.hidden&&getComputedStyle(input).display!=='none'&&b.width>0&&b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight&&b.left>=0&&b.right<=innerWidth&&document.querySelector('select[aria-label="思考强度"]').value==='__other';})()`)) === true, 'model-other-field-visible');
-      await pointerClick(renderer, waitFor, 'select[aria-label="思考强度"] + .ui-select-trigger', 'model-other-close-open');
-      await pointerClick(renderer, waitFor, '.ui-select-popover:not([hidden]) [role="option"][data-index="0"]', 'model-other-default');
-      requireJourney((await renderer.evaluate(`document.querySelector('input[data-reasoning-effort="main"]').getClientRects().length===0`)) === true, 'model-other-field-hidden');
+    // 0.8.0 stage one: at every supported size the list opens on the chosen model's own levels, 模型默认 first; no typed value exists.
+    if ((await renderer.evaluate(`document.querySelector(${JSON.stringify(MAIN_EFFORT)})?.disabled===false`)) === true) {
+      const list = await openEffortList(renderer, waitFor, requireJourney, MAIN_EFFORT, 'model-effort-list');
+      requireJourney(list.rows.length === list.values.length && list.rows.every((row, index) => row.inside && row.value === list.values[index]) &&
+        list.rows[0].value === 'off' && list.rows[0].words === EFFORT_WORDS.off && list.rows.filter(row => row.chosen).length === 1 && !list.typed &&
+        list.rows.every(row => Object.values(EFFORT_WORDS).includes(row.words)), 'model-effort-list-own-levels', list);
+      await effortKey(renderer, 'Escape');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.open===false`, 'model-effort-list-closed');
     }
 
   }
@@ -503,37 +503,103 @@ async function dispatchTab(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
 }
 
-/** #1453: role defaults are saved by the visible action, then survive leaving and reopening settings. */
+const MAIN_EFFORT = 'select[data-reasoning-effort="main"]', FAST_EFFORT = 'select[data-reasoning-effort="fast"]', LIGHT_MODEL = 'select[data-flash-model]';
+
+/**
+ * #1453 and 0.8.0 stage one, at both window sizes and by real pointer and key: a role's 思考强度 lists what its model supports
+ * and nothing else (deepseek-flash: its documented levels; the hand-typed lighter model: 模型默认 alone, with the sentence and
+ * the refresh action); another model re-reads the list and takes no level along; each role's default is saved by its own
+ * visible action, leaves the other role's alone, and is there again after 设置 is left and reopened.
+ */
 async function assertModelEffortDefaults(renderer) {
-  const original = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(settings.roles.filter(role => ['main-editorial','fast-interaction'].includes(role.roleId)).map(role => [role.roleId,role.binding?.reasoningEffort ?? 'off'])))`);
-  const save = async (role, effort) => {
-    const label = role === 'main' ? '思考强度' : '较轻模型的思考强度';
-    await pointerClick(renderer, waitFor, `select[aria-label="${label}"] + .ui-select-trigger`, 'model-effort-open');
-    const index = await renderer.evaluate(`Array.from(document.querySelector('select[aria-label="${label}"]').options).findIndex(option=>option.value===${JSON.stringify(effort === 'off' ? '' : effort)})`);
-    await pointerClick(renderer, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-effort-option');
-    await pointerClick(renderer, waitFor, role === 'main' ? '[data-action="use-model-for-both-roles"]' : '[data-action="select-fast-role-model"]', 'model-effort-save');
-    const roleId = role === 'main' ? 'foreground-pro' : 'foreground-flash';
-    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => (settings.modelRoles.find(role => role.roleId===${JSON.stringify(roleId)})?.binding?.reasoningEffort ?? 'off')===${JSON.stringify(effort)})`, 'model-effort-saved');
-    await waitFor(renderer, `document.querySelector('select[aria-label="${label}"] + .ui-select-trigger')?.textContent.includes(${JSON.stringify(effort === 'off' ? '服务默认' : effort)})`, 'model-effort-role-label');
+  const bindings = () => renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(['foreground-pro','foreground-flash'].map(id => { const binding=settings.modelRoles.find(role=>role.roleId===id)?.binding; return [id, binding==null ? null : {route:binding.providerId,modelId:binding.modelId,effort:binding.reasoningEffort ?? 'off'}]; })))`);
+  const original = await bindings();
+  requireJourney(original['foreground-pro']?.modelId === 'deepseek-flash' && original['foreground-flash'] != null && original['foreground-flash'].modelId !== 'deepseek-flash', 'model-effort-starting-models', original);
+  const typedModel = original['foreground-flash'].modelId;
+  const levels = ['off', 'low', 'high', 'max'];
+  const rowsOf = (list) => JSON.stringify(list.rows.map(row => [row.value, row.words]));
+  const ownLevels = JSON.stringify(levels.map(level => [level, EFFORT_WORDS[level]]));
+  const closed = async (select, condition, name) => {
+    await waitFor(renderer, `(() => { const list=${effortListFacts(select)}; return list!==null && !list.open && (${condition}); })()`, name);
+    return renderer.evaluate(effortListFacts(select));
   };
+  // 设置 opens on 模型服务, which this page already is: the old page is marked so the wait is for the page painted afresh.
+  const reenter = async (name) => {
+    await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, `${name}-mark-old-page`);
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, name, { scroll: false });
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, `${name}-ready`);
+    await assertRenderer(renderer, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-heading-inside-window');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(MAIN_EFFORT + ' + .ui-select-trigger')}) && document.querySelector(${JSON.stringify(FAST_EFFORT + ' + .ui-select-trigger')})`, `${name}-lists-ready`);
+  };
+  const saved = (roleId, modelId, effort) => `window.ai7.getModelServiceSettings().then(settings => { const binding=settings.modelRoles.find(role=>role.roleId===${JSON.stringify(roleId)})?.binding; return binding?.modelId===${JSON.stringify(modelId)} && (binding.reasoningEffort ?? 'off')===${JSON.stringify(effort)}; })`;
   try {
     for (const [width, height] of [[1280,800],[1008,681]]) {
       if (width === 1280) at('model-effort-defaults-wide');
       else at('model-effort-defaults-gate');
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, 'model-effort-viewport');
-      await save('main', 'high');
-      await save('fast', 'low');
-      // 设置 opens on 模型服务, which this page already is: the old page is marked so the wait is for the page painted afresh.
-      await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, 'model-effort-mark-old-page');
-      await pointerClick(renderer, waitFor, SIDEBAR.settings, 'model-effort-leave');
-      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, 'model-effort-settings-ready');
-      await assertRenderer(renderer, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-heading-inside-window');
-      await waitFor(renderer, `document.querySelector('select[aria-label="思考强度"] + .ui-select-trigger')?.textContent.includes('high') && document.querySelector('select[aria-label="较轻模型的思考强度"] + .ui-select-trigger')?.textContent.includes('low')`, 'model-effort-reopened-defaults');
-      await save('fast', 'low');
-      await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
-      await save('main', original['main-editorial']);
-      await save('fast', original['fast-interaction']);
+      await reenter('model-effort-enter');
+
+      // The main model has levels on record: exactly those are listed, in the editor's words, and 高 is saved by 使用这个模型.
+      const main = await openEffortList(renderer, waitFor, requireJourney, MAIN_EFFORT, 'model-effort-main');
+      requireJourney(rowsOf(main) === ownLevels && main.rows.every(row => row.inside) && !main.typed && main.selected === original['foreground-pro'].effort && main.note === '' && main.noteDisplay === 'none', 'model-effort-main-own-levels', main);
+      await pressEffortRow(renderer, waitFor, requireJourney, MAIN_EFFORT, 'high', 'model-effort-main-high');
+      requireJourney((await closed(MAIN_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.high)}`, 'model-effort-main-shown')).selected === 'high', 'model-effort-main-shown');
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="use-model-for-both-roles"]', 'model-effort-main-save');
+      await waitFor(renderer, saved('foreground-pro', 'deepseek-flash', 'high'), 'model-effort-saved');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS.high)} && (${effortListFacts(FAST_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS.off)}`, 'model-effort-role-label');
+
+      // Nothing is on record for the hand-typed lighter model: 模型默认 alone, the sentence in view, the refresh action usable.
+      const unknown = await openEffortList(renderer, waitFor, requireJourney, FAST_EFFORT, 'model-effort-unknown');
+      requireJourney(rowsOf(unknown) === JSON.stringify([['off', EFFORT_WORDS.off]]) && unknown.rows[0].inside && unknown.state === 'unknown' && unknown.note === EFFORT_UNKNOWN_SENTENCE && unknown.noteDisplay !== 'none' && !unknown.typed, 'model-effort-unknown-default-only', unknown);
+      await effortKey(renderer, 'Escape');
+      await closed(FAST_EFFORT, 'true', 'model-effort-unknown-closed');
+      await wheelClear(renderer, waitFor, '.model-service-optional [data-effort-note="reason"]', 'model-effort-unknown-sentence');
+      const sentence = await assertReachable(renderer, waitFor, requireJourney, '.model-service-optional [data-effort-note="reason"]', 'model-effort-unknown-sentence');
+      requireJourney(sentence.inWindow && (await renderer.evaluate(`document.querySelector('[data-action="retry-model-list"]')?.disabled===false`)) === true, 'model-effort-unknown-sentence-and-refresh', sentence);
+
+      // Another lighter model: its own list is read and 模型默认 is shown; the keyboard then takes its first level.
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, 'deepseek-flash', 'model-effort-switch');
+      let fast = await closed(FAST_EFFORT, `JSON.stringify(list.values)===${JSON.stringify(JSON.stringify(levels))}`, 'model-effort-switch-rereads');
+      requireJourney(fast.selected === 'off' && fast.shown === EFFORT_WORDS.off && fast.note === '' && !fast.typed, 'model-effort-switch-rereads', fast);
+      await effortKey(renderer, 'Tab');
+      await waitFor(renderer, `(${effortListFacts(FAST_EFFORT)})?.focused===true`, 'model-effort-keyboard-focus');
+      await wheelClear(renderer, waitFor, `${FAST_EFFORT} + .ui-select-trigger`, 'model-effort-keyboard-focus');
+      await assertReachable(renderer, waitFor, requireJourney, `${FAST_EFFORT} + .ui-select-trigger`, 'model-effort-keyboard-focus');
+      await effortKey(renderer, 'ArrowDown');
+      await waitFor(renderer, `(${effortListFacts(FAST_EFFORT)})?.open===true`, 'model-effort-keyboard-open');
+      const keyed = await renderer.evaluate(effortListFacts(FAST_EFFORT));
+      requireJourney(rowsOf(keyed) === ownLevels && keyed.rows.every(row => row.inside), 'model-effort-keyboard-list', keyed);
+      await effortKey(renderer, 'ArrowDown');
+      await effortKey(renderer, 'Enter');
+      fast = await closed(FAST_EFFORT, `list.selected==='low'`, 'model-effort-keyboard-chosen');
+      requireJourney(fast.shown === EFFORT_WORDS.low && fast.focused, 'model-effort-keyboard-chosen', fast);
+
+      // Back on the hand-typed model the level is not there; it is shown again with the model it was chosen for.
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, typedModel, 'model-effort-switch-back');
+      fast = await closed(FAST_EFFORT, `list.values.length===1`, 'model-effort-not-carried');
+      requireJourney(fast.selected === 'off' && fast.shown === EFFORT_WORDS.off && fast.note === EFFORT_UNKNOWN_SENTENCE, 'model-effort-not-carried', fast);
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, 'deepseek-flash', 'model-effort-switch-again');
+      fast = await closed(FAST_EFFORT, `list.values.length===${levels.length}`, 'model-effort-own-choice-returns');
+      requireJourney(fast.selected === 'low' && fast.shown === EFFORT_WORDS.low, 'model-effort-own-choice-returns', fast);
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="select-fast-role-model"]', 'model-effort-fast-save');
+      await waitFor(renderer, saved('foreground-flash', 'deepseek-flash', 'low'), 'model-effort-fast-saved');
+      requireJourney((await bindings())['foreground-pro'].effort === 'high', 'model-effort-other-role-kept');
+
+      // Leaving 设置 and opening it again keeps both defaults.
+      await reenter('model-effort-leave');
+      const reopened = [await closed(MAIN_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.high)}`, 'model-effort-reopened-defaults'), await closed(FAST_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.low)}`, 'model-effort-reopened-defaults')];
+      requireJourney(reopened[0].selected === 'high' && reopened[1].selected === 'low' && reopened.every(list => list.note === '' && !list.typed), 'model-effort-reopened-defaults', reopened);
+
+      // The main default goes back through its own list and action. The next stage needs the hand-typed lighter model, which left
+      // the list when no role used it: it is set again as the earlier stages set it, and the page is awaited until it shows it.
+      await chooseEffort(renderer, waitFor, requireJourney, MAIN_EFFORT, original['foreground-pro'].effort, 'model-effort-restore-main');
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="use-model-for-both-roles"]', 'model-effort-restore-main-save');
+      await waitFor(renderer, saved('foreground-pro', 'deepseek-flash', original['foreground-pro'].effort), 'model-effort-restored-main');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS[original['foreground-pro'].effort])}`, 'model-effort-restored-main-shown');
+      requireJourney(await renderer.evaluate(`window.ai7.selectFlashModel(${JSON.stringify({ route: original['foreground-flash'].route, modelId: typedModel, reasoningEffort: original['foreground-flash'].effort })}).then(()=>true)`), 'model-effort-restore-lighter');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(LIGHT_MODEL)})?.value===${JSON.stringify(typedModel)} && (${effortListFacts(FAST_EFFORT)})?.values.length===1`, 'model-effort-restore-lighter-shown');
+      requireJourney(JSON.stringify(await bindings()) === JSON.stringify(original), 'model-effort-restored', { original });
     }
   } finally {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -3233,9 +3299,16 @@ async function main() {
         requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
         const beforeChoice = await primary.evaluate(`document.querySelector('[data-task-launch-kind] .dispatch-chooser summary').textContent`);
         if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
-        const picked = await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer',
-          width === 1008 ? { model: 'next' } : { model: 'j12-ordinary-fast' });
-        requireJourney(picked.includes('@') && (width===1008 || picked.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        // 0.8.0 stage one: the hand-typed model offers 模型默认 alone, with the sentence in view; the model with levels on record lists its
+        // own, 模型默认 is what it shows after the change (no level moves with the model), and the chosen level is the Task's alone.
+        const flashLabel = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.modelId==='deepseek-flash').modelLabel)`);
+        let unknownSeen = null, levelSeen = null;
+        const unknownLabel = await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-unknown-pointer', { model: 'j12-ordinary-fast', seen: (facts) => { unknownSeen = facts; } });
+        requireJourney(unknownLabel.includes('j12-ordinary-fast') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values) === '["off"]' && unknownSeen.selected === 'off' &&
+          unknownSeen.shown === EFFORT_WORDS.off && unknownSeen.note === EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside === true, 'dispatch-unknown-model-default-only', unknownSeen);
+        const picked = width === 1008 ? unknownLabel : await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer', { model: flashLabel, effort: 'high', seen: (facts) => { levelSeen = facts; } });
+        if (width === 1280) requireJourney(picked.includes(`${flashLabel}@high`) && JSON.stringify(levelSeen.values) === '["off","low","high","max"]' && JSON.stringify(levelSeen.labels) === JSON.stringify(['off', 'low', 'high', 'max'].map(level => EFFORT_WORDS[level])) &&
+          levelSeen.selected === 'high' && levelSeen.shown === EFFORT_WORDS.high && levelSeen.note === '' && levelSeen.noteDisplay === 'none', 'dispatch-chosen-model-and-level', levelSeen);
         const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
         if (width === 1280) rememberedLabel = chosen.label;
         await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });

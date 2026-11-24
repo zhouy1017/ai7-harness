@@ -4,6 +4,7 @@ import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js
 import { technicalDisclosure, technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { modelServiceFlow } from './model-service-flow.js';
+import { effortValueLabel } from './model-effort-labels.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -108,9 +109,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
-  const effortOtherDrafts = new Map<string, boolean>();
   const flashModelChoices = new Map<ModelServiceChannelId, string>();
-  const effortDrafts = new Map<string, string>();
+  const effortDrafts = new Map<string, { modelId: string; effort: string }>();
   const modelFilters = new Map<ModelServiceChannelId, string>();
   let favourites: ModelFavourites = {};
   let stopFollow: (() => void) | undefined;
@@ -152,10 +152,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       get flashModelId() { return modelServiceChannel === null ? '' : flashModelChoices.get(modelServiceChannel) ?? ''; },
       chooseFlashModel: model => { if (modelServiceChannel !== null) flashModelChoices.set(modelServiceChannel, model); },
-      effortOtherDraft: (channel, role) => effortOtherDrafts.get(`${channel}/${role}`),
-      setEffortOtherDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortOtherDrafts.delete(key); else effortOtherDrafts.set(key, value); },
-      effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
-      setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
+      effortDraft: (channel, role, modelId) => { const draft = effortDrafts.get(`${channel}/${role}`); return draft?.modelId === modelId ? draft.effort : undefined; },
+      setEffortDraft: (channel, role, modelId, effort) => { const key = `${channel}/${role}`; if (effort === undefined) effortDrafts.delete(key); else effortDrafts.set(key, { modelId, effort }); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
       get modelId() { return modelServiceChannel === null ? '' : modelChoices.get(modelServiceChannel) ?? ''; },
       chooseModel: (modelId) => { if (modelServiceChannel !== null) modelChoices.set(modelServiceChannel, modelId); },
@@ -176,8 +174,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     for (const role of projection.modelRoles) {
       const reason = role.statusDetail?.split('。')[0];
       if (technicalLayerVisible) {
-        const effort = role.binding?.reasoningEffort;
-        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effort === undefined || effort === 'off' ? '服务默认' : effort} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。` : ''}`);
+        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effortValueLabel(role.binding?.reasoningEffort)} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。` : ''}`);
         line.dataset['modelRole'] = role.roleId === 'foreground-pro' ? 'main-editorial' : role.roleId === 'foreground-flash' ? 'fast-interaction' : role.roleId; line.dataset['modelRoleStatus'] = role.status;
         currentRoles.append(line);
       }
@@ -244,8 +241,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (entry && document.scrollingElement) document.scrollingElement.scrollTop = 0;
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
-    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
-    content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
+    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
+    // An unsaved 思考强度 is a draft like the fields above: a passive read does not repaint the page under it.
+    content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form, .model-service-effort')) draftEdited = true; });
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
     let changedCataloguePolls = 0;
@@ -281,7 +279,6 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     modelServiceChannel = null;
     modelChoices.clear();
     flashModelChoices.clear();
-    effortOtherDrafts.clear();
     effortDrafts.clear();
     modelFilters.clear();
     let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
