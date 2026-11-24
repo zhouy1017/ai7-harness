@@ -266,16 +266,21 @@ The endpoint is the models collection: the shape addresses the model in the path
 | `gemini-3.8-flash` | Gemini 3.8 Flash | 1,048,576 | `none` | `none` |
 | `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | 1,048,576 | `none` | `none` |
 | `gemini-2.5-pro` | Gemini 2.5 Pro | 1,048,576 | `none` | `none` |
+| `gemini-4-argon` | Gemini 4 Argon | none | `none` | `none` |
+| `gemini-4-hydrogen` | Gemini 4 Hydrogen | none | `none` | `none` |
 
-Dispositions (`google-generate-content`): text supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; stream supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; functionTools supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`.
+Dispositions (`google-generate-content`): text supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`, `gemini-4-argon`, `gemini-4-hydrogen`; stream supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`, `gemini-4-argon`, `gemini-4-hydrogen`; functionTools supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`, `gemini-4-argon`, `gemini-4-hydrogen`.
 
-Inert: 0 of 3 (no declared answer channel). Established:
+Inert: 2 of 5 (no declared answer channel). Established:
 
-- every model · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
-- every model · `answerChannel: candidate-parts-text` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31
-- every model · context 1,048,576 — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
+- `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
+- `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` · `answerChannel: candidate-parts-text` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31
+- `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` · context 1,048,576 — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
 - `gemini-3.8-flash`, `gemini-3.1-pro-preview` · reasoning control google-generate-content; suggestions low, medium, high — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
 - `gemini-2.5-pro` · reasoning control google-thinking-budget; suggestions 128, 1024, 8192, 32768 — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
+- `gemini-4-argon`, `gemini-4-hydrogen` · `requestShape: google-generate-content` — `vendor-documentation`, https://ai.google.dev/api/generate-content · googleapis/js-genai src/types.ts@3e1d923ef914812c1d209aa2e5461a717d03a081, read 2026-09-08
+- `gemini-4-argon`: Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108).
+- `gemini-4-hydrogen`: Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108).
 
 Readings:
 
@@ -464,6 +469,7 @@ The developer-live route of Provider Processing v18 (ADR 0065, ADR 0067), select
 | `deepseek-v4-pro` | DeepSeek V4 Pro（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3-flash` | GLM-5.3-Flash（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3` | GLM-5.3（OpenCode Go） | none | `none` | `none` |
+| `gemini-4-argon` | Gemini 4 Argon（OpenCode Go） | none | `none` | `none` |
 | `glm-5.2` | GLM-5.2（OpenCode Go） | none | `none` | `none` |
 | `glm-5.1` | GLM-5.1（OpenCode Go） | none | `none` | `none` |
 | `kimi-k3` | Kimi K3（OpenCode Go） | none | `none` | `none` |
@@ -471,9 +477,9 @@ The developer-live route of Provider Processing v18 (ADR 0065, ADR 0067), select
 | `kimi-k2.6` | Kimi K2.6（OpenCode Go） | none | `none` | `none` |
 | `deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision Exp（OpenCode Go） | none | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; stream supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; functionTools supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`.
+Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `gemini-4-argon`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; stream supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `gemini-4-argon`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; functionTools supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `gemini-4-argon`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`.
 
-Inert: 9 of 11 (no declared answer channel). Established:
+Inert: 10 of 12 (no declared answer channel). Established:
 
 - `deepseek-v4-flash`, `deepseek-v4-pro` · `requestShape: openai-chat-completions` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06
 - `deepseek-v4-flash` · `structuredOutput: json-object` — `live-test-item` `S40/reanalyze-range/1`, observed 2026-09-08
@@ -486,10 +492,11 @@ Inert: 9 of 11 (no declared answer channel). Established:
 - `deepseek-v4.1-flash` · `reasoningChannel: message-reasoning-content` — `live-test-item` `S40/first-baseline/9`, `S40/first-baseline/10`, `S40/first-baseline/11`, `S40/first-baseline/12`, `S40/first-baseline/13`, `S40/first-baseline/14`, `S40/first-baseline/15`, `S40/first-baseline/16`, `S40/first-baseline/17`, `S40/first-baseline/18`, `S40/first-baseline/19`, `S40/first-baseline/20`, observed 2026-10-12
 - `deepseek-v4.1-flash` · `toolCalling: function` — `live-test-item` `S40/whole-manuscript/1`, `S40/whole-manuscript/2`, observed 2026-10-15
 - `deepseek-v4.1-flash` · `streaming: chat-completions-sse` — `live-test-item` `S17c/editorial-dialogue/1`, `S17c/editorial-dialogue/3`, observed 2026-10-14
-- `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
+- `glm-5.3-flash`, `glm-5.3`, `gemini-4-argon`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
 - `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
 - `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v18 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v18. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
+- `gemini-4-argon`: OpenCode Go catalogue entry selected for the 0.8.0 uses in ADR 0108.
 
 ### `opencode-go-messages`
 

@@ -100,6 +100,18 @@
           "displayName": "Gemini 2.5 Pro",
           "capabilities": { "requestShape": { "value": "google-generate-content", "evidence": "gemini-models-page" }, "answerChannel": { "value": "candidate-parts-text", "evidence": "gemini-text-answer-docs" } },
           "context": { "tokens": 1048576, "evidence": "gemini-models-page" }
+        },
+        {
+          "modelId": "gemini-4-argon",
+          "displayName": "Gemini 4 Argon",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "note": "Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108)."
+        },
+        {
+          "modelId": "gemini-4-hydrogen",
+          "displayName": "Gemini 4 Hydrogen",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "note": "Gemini API model discovery listed this generateContent model for the test account on 2026-11-24 (ADR 0108)."
         }
       ]
     }

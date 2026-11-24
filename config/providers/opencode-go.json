@@ -153,6 +153,7 @@
         },
         { "modelId": "glm-5.3-flash", "displayName": "GLM-5.3-Flash（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "glm-5.3", "displayName": "GLM-5.3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "gemini-4-argon", "displayName": "Gemini 4 Argon（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" }, "note": "OpenCode Go catalogue entry selected for the 0.8.0 uses in ADR 0108." },
         { "modelId": "glm-5.2", "displayName": "GLM-5.2（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "glm-5.1", "displayName": "GLM-5.1（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "kimi-k3", "displayName": "Kimi K3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
