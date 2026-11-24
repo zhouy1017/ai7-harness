@@ -194,7 +194,7 @@ async function dispatch(
     switch (request.op) {
       case 'prepareBaselineAnalysis': case 'prepareCustomAnalysis': case 'prepareInitialEvaluation':
       case 'prepareReadersReport': case 'prepareEvaluationRewrite': case 'prepareWritingTask': case 'prepareReviewRun':
-      case 'startQuickTasks': case 'promoteTaskIntentDraft':
+      case 'startQuickTasks': case 'promoteTaskIntentDraft': case 'redoTaskPlan':
         store.requireCurrentModelRoleEffort('foreground-pro');
         break;
       case 'askAboutSelection': case 'continueDialogueAnswer': case 'regenerateDialogueAnswer':

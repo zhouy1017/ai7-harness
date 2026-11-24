@@ -234,12 +234,6 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         credentialSlot: 'opencode-go',
       },
       {
-        route: 'opencode-go-gemini',
-        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
-        model: 'gemini-4-argon',
-        credentialSlot: 'opencode-go',
-      },
-      {
         route: 'deepseek-open-platform',
         endpoint: 'https://api.deepseek.com/chat/completions',
         model: 'deepseek-flash',
@@ -370,6 +364,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         endpoint: 'https://opencode.ai/inference/openai/v1/responses',
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
+      },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
       },
     ],
     fast: [
@@ -380,12 +380,6 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         credentialSlot: 'opencode-go',
       },
       {
-        route: 'opencode-go-gemini',
-        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
-        model: 'gemini-4-argon',
-        credentialSlot: 'opencode-go',
-      },
-      {
         route: 'deepseek-open-platform',
         endpoint: 'https://api.deepseek.com/chat/completions',
         model: 'deepseek-flash',
@@ -516,6 +510,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         endpoint: 'https://opencode.ai/inference/openai/v1/responses',
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
+      },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
       },
     ],
   },
@@ -528,12 +528,6 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         credentialSlot: 'opencode-go',
       },
       {
-        route: 'opencode-go-gemini',
-        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
-        model: 'gemini-4-argon',
-        credentialSlot: 'opencode-go',
-      },
-      {
         route: 'deepseek-open-platform',
         endpoint: 'https://api.deepseek.com/chat/completions',
         model: 'deepseek-flash',
@@ -592,6 +586,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
+      },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
       },
     ],
     fast: [
@@ -602,12 +602,6 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         credentialSlot: 'opencode-go',
       },
       {
-        route: 'opencode-go-gemini',
-        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
-        model: 'gemini-4-argon',
-        credentialSlot: 'opencode-go',
-      },
-      {
         route: 'deepseek-open-platform',
         endpoint: 'https://api.deepseek.com/chat/completions',
         model: 'deepseek-flash',
@@ -667,6 +661,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
   },
 } as const;
@@ -674,7 +674,6 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
 /** The display name of each policy-baseline model, by `route/model`: the label 设置 › 模型服务 names it by (Issue #1225). */
 export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> = {
   'opencode-go/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
-  'opencode-go-gemini/gemini-4-argon': 'Gemini 4 Argon（OpenCode Go）',
   'deepseek-open-platform/deepseek-flash': 'DeepSeek V4.1 Flash',
   'openai-platform/gpt-5.6-luna': 'GPT-5.6 Luna',
   'openai-platform/gpt-5.6-sol': 'GPT-5.6 Sol',
@@ -697,6 +696,7 @@ export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> =
   'opencode-zen-responses/gpt-6-astra': 'GPT 6 Astra（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-sol': 'GPT 5.6 Sol（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-luna': 'GPT 5.6 Luna（OpenCode Zen）',
+  'opencode-go-gemini/gemini-4-argon': 'Gemini 4 Argon（OpenCode Go）',
 };
 
 /** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */

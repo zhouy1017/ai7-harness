@@ -23,7 +23,6 @@
   "policyBaseline": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -45,11 +44,11 @@
       { "route": "opencode-zen-responses", "model": "gpt-6.1-sol" },
       { "route": "opencode-zen-responses", "model": "gpt-6-astra" },
       { "route": "opencode-zen-responses", "model": "gpt-5.6-sol" },
-      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" }
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" }
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -71,13 +70,13 @@
       { "route": "opencode-zen-responses", "model": "gpt-6.1-sol" },
       { "route": "opencode-zen-responses", "model": "gpt-6-astra" },
       { "route": "opencode-zen-responses", "model": "gpt-5.6-sol" },
-      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" }
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" }
     ]
   },
   "ordinaryProduction": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -87,11 +86,11 @@
       { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
       { "route": "google-gemini", "model": "gemini-3.8-flash" },
       { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
-      { "route": "google-gemini", "model": "gemini-2.5-pro" }
+      { "route": "google-gemini", "model": "gemini-2.5-pro" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" }
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "opencode-go-gemini", "model": "gemini-4-argon" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
       { "route": "openai-platform", "model": "gpt-5.6-sol" },
@@ -101,7 +100,8 @@
       { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
       { "route": "google-gemini", "model": "gemini-3.8-flash" },
       { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
-      { "route": "google-gemini", "model": "gemini-2.5-pro" }
+      { "route": "google-gemini", "model": "gemini-2.5-pro" },
+      { "route": "opencode-go-gemini", "model": "gemini-4-argon" }
     ]
   }
 }
