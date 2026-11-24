@@ -43,7 +43,7 @@ export function createRightColumn(commentsOpenInitially: boolean): RightColumn {
 }
 
 /** Keep layout state in memory; widths and the minimum measure belong to the stylesheet. */
-export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement): { destroy(): void } {
+export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement): { destroy(): void; ownsScroll(): boolean } {
   const root = document.documentElement;
   const pixels = (value: string, rem: number): number => parseFloat(value) * (value.trim().endsWith('rem') ? rem : 1);
   // The block the editor is on: the selection's paragraph while it is in view, else the one across the middle of the text — or,
@@ -59,12 +59,21 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
   // A new state changes the sidebar's form and the text's gutters, so the text reflows; the browser keeps no scroll anchor across a
   // width or padding change of the text's own ancestors. Put the reading block back where it was once the shell has applied the form
   // (its observer runs in the microtask queued before this one). The first state of a screen has nothing to keep.
+  // Where that correction rests is this measure's own scroll for the next two frames: at an edge of the loaded text it is not
+  // the reader asking for the next page.
+  let placed: { top: number } | undefined;
   const apply = (next: string): void => {
     const previous = root.dataset['rightColumn'];
     if (previous === next) return;
     const block = previous === undefined ? null : readingBlock(), before = block?.getBoundingClientRect().top;
     root.dataset['rightColumn'] = next;
-    if (block && before !== undefined) queueMicrotask(() => { if (block.isConnected) editor.scrollTop += block.getBoundingClientRect().top - before; });
+    if (block && before !== undefined) queueMicrotask(() => {
+      if (!block.isConnected) return;
+      editor.scrollTop += block.getBoundingClientRect().top - before;
+      const mark = { top: editor.scrollTop };
+      placed = mark;
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (placed === mark) placed = undefined; }));
+    });
   };
   const update = (): void => {
     const style = getComputedStyle(root), rem = parseFloat(style.fontSize);
@@ -93,5 +102,5 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
   mutation.observe(root, { attributes: true, attributeFilter: ['style'] });
   window.addEventListener('resize', update);
   update();
-  return { destroy: () => { resize.disconnect(); mutation.disconnect(); window.removeEventListener('resize', update); delete root.dataset['rightColumn']; } };
+  return { ownsScroll: () => placed !== undefined && editor.scrollTop === placed.top, destroy: () => { resize.disconnect(); mutation.disconnect(); window.removeEventListener('resize', update); delete root.dataset['rightColumn']; } };
 }

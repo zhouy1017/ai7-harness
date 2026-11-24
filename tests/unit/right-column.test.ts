@@ -37,6 +37,8 @@ function measuredColumn(paneVisible: boolean, reading?: { top: (state: string | 
   vi.stubGlobal('innerWidth', 1164);
   vi.stubGlobal('document', { documentElement: root, body, getSelection: () => null });
   vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const frames: Array<() => void> = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => frames.push(callback));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('getComputedStyle', (node: unknown) => node === root
@@ -44,7 +46,7 @@ function measuredColumn(paneVisible: boolean, reading?: { top: (state: string | 
     : node === editor ? { paddingLeft: '20px', paddingRight: '20px' }
       : node === body ? { paddingLeft: '224px', paddingRight: '0px' } : { fontSize: '17px' });
   const measure = mountColumnMeasure(workspace as unknown as HTMLElement, editor as unknown as HTMLElement);
-  return { mode: root.dataset['rightColumn'], editor, destroy: () => measure.destroy() };
+  return { mode: root.dataset['rightColumn'], editor, ownsScroll: () => measure.ownsScroll(), frame: () => frames.shift()?.(), destroy: () => measure.destroy() };
 }
 
 it('includes the screen gutters when deciding whether the full sidebar leaves the reading measure', () => {
@@ -73,5 +75,19 @@ it('keeps the reading place when the middle of the text falls between two paragr
   const view = measuredColumn(false, { top: (state) => state === 'none' ? 430 : 310 });
   await Promise.resolve();
   expect(view.editor.scrollTop).toBe(1120);
+  view.destroy();
+});
+
+it('owns the scroll that put the reading block back: for two frames, and only at that offset', async () => {
+  const view = measuredColumn(false, { top: (state) => state === 'none' ? 420 : 300 });
+  expect(view.ownsScroll()).toBe(false);
+  await Promise.resolve();
+  expect(view.ownsScroll()).toBe(true);
+  // The reader scrolls on: that scroll is theirs.
+  view.editor.scrollTop = 1200;
+  expect(view.ownsScroll()).toBe(false);
+  view.editor.scrollTop = 1120;
+  view.frame(); view.frame();
+  expect(view.ownsScroll()).toBe(false);
   view.destroy();
 });

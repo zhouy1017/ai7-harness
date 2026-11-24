@@ -203,7 +203,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let taskBadgeReading = false;
 
   let destroyed = false;
-  let columnMeasure: { destroy(): void } | undefined;
+  let columnMeasure: ReturnType<typeof mountColumnMeasure> | undefined;
   let currentWindow = initialWindow;
   let editor: BoundedEditor | undefined;
   let editorialMarks: EditorialMarksSurface | undefined;
@@ -2464,8 +2464,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
     // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
     // a frame before the restore's own `scroll` event arrives (#474). The Mark surface moves the pane too:
-    // a card brought into view, or the pane settling once a card's height is gone.
-    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll() || editorialMarks?.ownsScroll()) return;
+    // a card brought into view, or the pane settling once a card's height is gone. So does the column measure, putting the
+    // reading block back after a right-hand column changed.
+    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll() || editorialMarks?.ownsScroll() || columnMeasure?.ownsScroll()) return;
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
