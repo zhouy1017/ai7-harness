@@ -555,7 +555,9 @@ describe('the one model-service flow', () => {
     expect(modelRolesLabel({ ...luna, main: 'channel-not-admitted-by-selected-policy' })).toBe('主编辑角色：当前渠道尚未获准（channel-not-admitted-by-selected-policy）；快速交互角色：可在高级设置中单独指定');
     const { node } = flow(settings(['opencode-go', 'openai-platform']));
     pickChannel(node, 'openai-platform');
-    expect(Array.from(node.querySelectorAll('[data-model-choice]'), (choice) => choice.dataset['modelChoice'])).toEqual(expect.arrayContaining(['gpt-5.6-sol', 'gpt-5.6-luna']));
+    expect(Array.from(node.querySelectorAll('[data-model-choice]'), (choice) => choice.dataset['modelChoice'])).toEqual(expect.arrayContaining([
+      'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-6.2-sol', 'gpt-6.1-terra',
+    ]));
   });
 
   it('sets both roles through the existing route and Fast choices, and renders the settings that answer', async () => {
@@ -573,7 +575,9 @@ describe('the one model-service flow', () => {
     const projection = settings(['opencode-go', 'anthropic-claude'], 'opencode-go');
     const { node, calls } = flow(projection);
     pickChannel(node, 'anthropic-claude');
-    expect(modelServiceChoices(projection).filter((choice) => choice.route === 'anthropic-claude')).toHaveLength(4);
+    expect(modelServiceChoices(projection).filter((choice) => choice.route === 'anthropic-claude').map(choice => choice.modelId).sort()).toEqual([
+      'claude-fable-5-1', 'claude-haiku-4-5', 'claude-opus-5', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-sonnet-5-5',
+    ]);
     expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
     await vi.waitFor(() => expect(calls.selectProModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'off' }));
