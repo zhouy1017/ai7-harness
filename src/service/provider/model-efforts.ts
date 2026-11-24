@@ -20,14 +20,15 @@ export function supportedEffortsOf(entry: DiscoveredModel, model: ProviderModelP
     const provenance = { kind: 'discovered', observedAt: evidence.observedAt } as const;
     const effort = evidence.effort;
     const observed = effort?.levels ?? [];
+    const incompatible = family === 'google-generate-content' && evidence.thinking?.supported === false ||
+      family === 'anthropic-messages' && evidence.thinking?.modes?.adaptive === false;
+    if (incompatible) return { status: 'unsupported', levels: [], completeness: 'complete', provenance };
     if (effort?.supported === false && observed.length > 0) return undefined;
-    if (evidence.thinking?.supported === false && family === 'google-generate-content' ||
-        evidence.completeness === 'complete' && (effort?.supported === false || effort?.levels !== undefined)) {
-      const levels = observed.filter(level => encodable(level) && !denied.has(level));
+    const levels = observed.filter(level => encodable(level) && !denied.has(level));
+    if (evidence.completeness === 'complete' && (effort?.supported === false || effort?.levels !== undefined)) {
       return levels.length === 0 ? { status: 'unsupported', levels: [], completeness: 'complete', provenance }
         : { status: 'supported', levels, completeness: 'complete', provenance };
     }
-    const levels = observed.filter(level => encodable(level) && !denied.has(level));
     if (levels.length > 0) return { status: 'supported', levels, completeness: evidence.completeness, provenance };
     if (effort?.supported === false) return undefined;
   }

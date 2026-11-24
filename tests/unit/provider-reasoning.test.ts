@@ -130,6 +130,16 @@ describe('per-family effort encoding (#1453)', () => {
     expect(wire('none').reasoning).toEqual({ effort: 'none' });
     expect(wire('off').reasoning).toBeUndefined();
   });
+
+  it('respects a discovered refusal of the thinking mode the actual family sends', () => {
+    const model = modelProfileFor('anthropic-claude', 'claude-sonnet-5-5')!;
+    const entry = { modelId: model.model, modelLabel: model.displayName, reasoningEvidence: {
+      source: 'provider-model-list' as const, observedAt: '2026-11-24T00:00:00Z', completeness: 'partial' as const,
+      effort: { levels: ['high'] as const }, thinking: { modes: { adaptive: false } },
+    } };
+    expect(supportedEffortsOf(entry, model)).toMatchObject({ status: 'unsupported', levels: [], provenance: { kind: 'discovered' } });
+    expect(modelEffortRefusal(entry, model, 'high')).toBe('之前选的强度现在不可用，请重新选择。');
+  });
 });
 
 const LOCAL = readLocalToolsRule({ localTools: {
