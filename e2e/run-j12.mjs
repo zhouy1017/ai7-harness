@@ -15,6 +15,7 @@ import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersi
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { taskCardFactsExpression } from './task-status-card.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -3231,6 +3232,10 @@ async function main() {
         if (width === 1008) requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(preferences.values['model.dispatchChoices']['baseline-analysis'])==='{}')`), 'dispatch-restores-default');
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-tasks');
         await waitFor(primary, `Array.from(document.querySelectorAll('.task-overview-model')).some(node=>node.textContent===${JSON.stringify(label)})`, 'dispatch-frozen-task-row');
+        // The card names that model after the word 模型, apart from the time and the working time before it (stage-4/5 R3).
+        const frozenFacts = await primary.evaluate(taskCardFactsExpression(`Array.from(document.querySelectorAll('.task-overview-model')).find(node=>node.textContent===${JSON.stringify(label)})?.closest('.task-overview-card')`, label));
+        console.log(`TASK_CARD_FACTS/${width}/${JSON.stringify(frozenFacts)}`);
+        requireJourney(frozenFacts !== null && frozenFacts.apart === true && frozenFacts.sentence === true && frozenFacts.model === true && frozenFacts.inCard === true, 'dispatch-frozen-task-row-facts', frozenFacts);
       }
     } finally { await primary.send('Emulation.clearDeviceMetricsOverride'); }
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');

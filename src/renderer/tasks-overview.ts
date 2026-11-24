@@ -24,11 +24,13 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   node.dataset['taskKind'] = item.taskKind;
   const line = el('div', 'task-overview-card-line', attentionSentence(view.line)); line.title = line.textContent ?? '';
   const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
-  const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
+  // One line of facts, a separator between them: when it was recorded, how long it worked, and 模型 with its name as the drawer's card says it.
+  const facts = el('div', 'task-overview-card-facts'); facts.append(time);
+  const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, facts);
   const work = taskWorkLine(item.work, Date.now());
-  if (work !== null) body.append(el('span', 'task-overview-usage', work));
+  if (work !== null) facts.append(' · ', el('span', 'task-overview-usage', work));
   const modelLabel = item.work?.finished ? item.work.finished.modelLabel : item.attention.modelLabel;
-  if (modelLabel) body.append(el('span', 'task-overview-model', modelLabel));
+  if (modelLabel) facts.append(' · 模型 ', el('span', 'task-overview-model', modelLabel));
   if (view.pageGroup === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
   function actionButton(entry: (typeof view.actions)[number]): HTMLButtonElement {
