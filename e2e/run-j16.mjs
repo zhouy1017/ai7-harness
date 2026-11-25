@@ -1,5 +1,6 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { withReturnArrival } from './return-arrival.mjs';
+import { readingPlaceSurvivesOverview } from './reading-place.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
@@ -1410,6 +1411,10 @@ async function main() {
     await waitFor(renderer, `${blockInView(rangeBlock)} && ${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'analysis-jumped', 60_000);
     await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'analysis-chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'analysis-chip-used', 60_000);
+
+    at('overview-return-reading-place');
+    // Issue #1703: read on by the wheel, 工作概览 and back — the paragraph being read is on screen again, twice over.
+    await readingPlaceSurvivesOverview(renderer, waitFor, requireJourney, 'reading-place');
 
     at('j14-panel-keyboard');
     // Without a pointer: Enter on 任务 opens the panel at its title, Tab moves into it with visible focus, and Escape closes
