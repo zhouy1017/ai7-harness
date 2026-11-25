@@ -1818,7 +1818,12 @@ async function main() {
     for (let step = filterIndex - 1; step >= 0; step -= 1) { await press(renderer, 'ArrowUp'); await waitFor(renderer, `${filterActive} === ${step}`, 'overview-filter-back-follows-key'); }
     await press(renderer, 'Enter');
     await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
-    await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length > 1 && ${headerCountsCards('全部图书')}`, 'overview-header-counts-every-book');
+    try {
+      await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="running"] .task-overview-card').length > 0 && document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length > 0 && ${headerCountsCards('全部图书')}`, 'overview-header-counts-every-book');
+    } catch (error) {
+      console.error('J-09/overview-header-counts-every-book/diagnostic', JSON.stringify(await renderer.evaluate(`({ header: document.querySelector('.task-overview-context')?.textContent ?? null, groups: Array.from(document.querySelectorAll('.task-overview-group'), (group) => [group.dataset.taskGroup, group.querySelectorAll('.task-overview-card').length]), pressed: Array.from(document.querySelectorAll('.task-overview-filters [aria-pressed="true"]'), (node) => node.textContent) })`).catch(() => null)));
+      throw error;
+    }
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');

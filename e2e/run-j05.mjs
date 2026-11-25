@@ -1162,6 +1162,7 @@ async function main() {
       return { position: getComputedStyle(rail).position, list: l, rail: r, line, view: [innerWidth, innerHeight], outside: drawn.filter((b) => b[0] < r[0] - 0.5 || b[2] > r[2] + 0.5).length,
         beside: r[2] > r[0] && r[0] >= l[2] - 0.5 && r[2] <= innerWidth && Math.abs(r[1] - l[1]) < 1 && Math.abs(r[3] - l[3]) < 1 && Math.abs(line[1] - r[1]) < 1 && Math.abs(line[3] - r[3]) < 1 };
     })()`);
+    if (!(railBeside?.position === 'relative' && railBeside.beside === true && railBeside.outside === 0)) console.error('J-05/proposal-rail-beside-the-list/diagnostic', JSON.stringify(railBeside));
     requireJourney(railBeside?.position === 'relative' && railBeside.beside === true && railBeside.outside === 0, 'proposal-rail-beside-the-list', railBeside);
     const navigatorRows = await renderer.evaluate(`(() => {
       const rows = Array.from(document.querySelectorAll('.proposal-navigator [data-windowed-index]')), active = rows.find((row) => row.getAttribute('aria-selected') === 'true');
