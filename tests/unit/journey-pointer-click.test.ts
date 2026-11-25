@@ -37,6 +37,26 @@ it('waits for a moving target to settle across animation frames before pressing 
   expect(target.events[0]!.x).toBe(825);
 });
 
+it('reads the press point from the resting page: no scripted scroll after the two still frames (J-11 选项 in a sticky bar)', async () => {
+  // A control stuck in a sticky bar stays at one place on screen while each scripted scroll moves the page a step. The fourth
+  // scroll brings the bar to its own place: the control jumps, and the panel placed against the bar follows one frame later.
+  let frame = 0, scrolls = 0, unstuckAt = -1;
+  const events: string[] = [];
+  const top = () => scrolls >= 4 ? 431 : 748;
+  const node = { scrollIntoView() { scrolls += 1; if (scrolls === 4) unstuckAt = frame; }, getBoundingClientRect: () => ({ left: 760, top: top(), right: 820, bottom: top() + 35, width: 60, height: 35 }), contains: (other: unknown) => other === node };
+  const panel = {};
+  const document = { querySelector: () => node, elementFromPoint: () => scrolls >= 4 && frame === unstuckAt ? panel : node };
+  const renderer: Renderer = {
+    evaluate: async expression => await Function('document', 'requestAnimationFrame', 'innerWidth', 'innerHeight', `return (${expression})`)(document, (callback: () => void) => queueMicrotask(() => { frame++; callback(); }), 1280, 800),
+    send: async (_method, input) => { events.push(`${input.type}@${input.y}`); },
+  };
+  const waitFor: WaitFor = async (target, expression, name) => { if (!(await target.evaluate(expression))) throw new Error(name); };
+  await pointerClick(renderer, waitFor, 'summary', 'options');
+  // Three scrolls (the first reveal and the two still frames), then the press where the control rested — not a fourth scroll.
+  expect(scrolls).toBe(3);
+  expect(events).toEqual(['mousePressed@765.5', 'mouseReleased@765.5']);
+});
+
 it('never presses a covered target', async () => {
   const target = scene({ covered: true });
   await expect(pointerClick(target.renderer, target.waitFor, 'button', 'attention-item')).rejects.toThrow('attention-item-pointer-target');

@@ -57,15 +57,21 @@ export async function pointerClick(renderer, waitFor, selector, name, { rest = f
     const query = JSON.stringify(selector);
     const reposition = scroll ? "node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});" : '';
     if (scroll) await renderer.evaluate(`document.querySelector(${query})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);
-    const pointExpression = `(() => {const node=document.querySelector(${query});if(!node)return null;${reposition}const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    const measure = (move) => `(() => {const node=document.querySelector(${query});if(!node)return null;${move}const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
       return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(x,y))?{x,y,width:r.width,height:r.height}:null;})()`;
+    const pointExpression = measure(reposition);
     // A closed drawer changes the body's padding over several frames (#1490). A hit-test during
     // that transition can be true while its coordinates already belong to the next moving frame.
     const stableExpression = `new Promise(resolve=>requestAnimationFrame(()=>{const before=${pointExpression};
       requestAnimationFrame(()=>{const after=${pointExpression};resolve(before!==null&&after!==null&&
         before.x===after.x&&before.y===after.y&&before.width===after.width&&before.height===after.height);});}))`;
     await waitFor(renderer, stableExpression, `${name}-pointer-target`);
-    const ready = await renderer.evaluate(pointExpression);
+    // The press point is read from the page as it rests, never by scrolling it once more. A control in a sticky bar that is stuck
+    // to the window's edge keeps its place on screen while each scripted scroll moves the page one step, so it passes the check
+    // above; the step that brings the bar to its own place moves the control at once, while a panel the page places against the
+    // bar follows only on the scroll event of the next frame — measured in that instant the panel covers the control (J-11
+    // `evaluation-rewrite-run`, 选项 under the open 先看计划 panel). No editor scrolls and presses within one frame.
+    const ready = await renderer.evaluate(measure(''));
     if (ready === null) throw new Error(`${name}-target-moved-before-press`);
     let point = { x: ready.x, y: ready.y };
     if (rest) {
