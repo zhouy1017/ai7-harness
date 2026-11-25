@@ -1,5 +1,6 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
+import { pressReachable as wheelPress } from './task-card-reach.mjs';
 import { setDeveloperMode } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -3082,6 +3083,17 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
     requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
       [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
+    // 相似段落检索 says what leaves the machine (0.7.9 review 2.3): beside the field what a search may send, beside the answer what
+    // this one sent. The editor writes words and presses 检索相似段落 — each reached by the wheel and asserted inside the window
+    // before its press. This guest connects no model, so the answer reads 没有发送.
+    const similar = '[data-screen="editor"] .writing-task .similar-materials';
+    await assertRenderer(renderer, `(() => { const field=document.querySelector(${JSON.stringify(similar)}); const mode=field?.querySelector('.similar-materials-mode');
+      return field?.querySelector('.similar-materials-note')?.textContent==='已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && mode instanceof HTMLElement && mode.hidden && getComputedStyle(mode).display==='none'; })()`, 'writing-retrieval-note');
+    await wheelPress(renderer, waitFor, requireJourney, `${similar} textarea`, 'writing-retrieval-field');
+    await renderer.send('Input.insertText', { text: '宣传' });
+    await wheelPress(renderer, waitFor, requireJourney, `${similar} [data-similar-action="search"]`, 'writing-retrieval-search');
+    await waitFor(renderer, `(() => { const line=document.querySelector(${JSON.stringify(`${similar} .similar-materials-mode`)}); if (!(line instanceof HTMLElement) || line.hidden) return false; const r=line.getBoundingClientRect();
+      return line.dataset.retrievalAssist==='local' && line.textContent==='本次：没有发送，只在本机按字面检索。' && r.width>0 && r.height>0 && getComputedStyle(line).display!=='none'; })()`, 'writing-retrieval-mode');
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, typeId === WRITING_REQUEST.typeId, false])) &&
       JSON.stringify(writingSheet.references) === JSON.stringify([
         '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的宣传文章范例，本次不参考范例',

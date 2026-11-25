@@ -317,6 +317,7 @@ const READ_LIBRARY = `(() => {
           return {
             label: section.querySelector('label')?.textContent ?? null,
             heading: section.querySelector('.material-vector-results-heading')?.textContent ?? null,
+            mode: (() => { const line = section.querySelector('.material-vector-results [data-retrieval-assist]'); if (!(line instanceof HTMLElement)) return null; const r = line.getBoundingClientRect(); return [line.dataset.retrievalAssist, line.textContent, r.width > 0 && r.height > 0 && getComputedStyle(line).display !== 'none']; })(),
             candidates: Array.from(section.querySelectorAll('.material-vector-candidate'), (item) => [item.dataset.candidateOrdinal, item.querySelector('.material-anchor')?.textContent ?? null]),
           };
         })(),
@@ -851,7 +852,7 @@ async function main() {
       JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
       layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
       !layers.has('vectors') && libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null &&
-      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 本机相似搜索仅供参考，原文以分段为准。' && libraryIndexed.cards[0].vectorSearch.heading === null,
+      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 结果仅供参考，原文以分段为准。已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && libraryIndexed.cards[0].vectorSearch.heading === null && libraryIndexed.cards[0].vectorSearch.mode === null,
     'library-index-layers', libraryIndexed.cards[0].layers);
     const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
     requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,
@@ -887,7 +888,9 @@ async function main() {
     await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-details-category');
     await pressReachable(renderer, waitFor, requireJourney, `article.library-material[data-material-id="${materialId}"] > details > summary`, 'library-index-details');
 
-    // 相似段落检索 (Issue #892; R5-F2c): there as soon as the index is built, nothing to build, ranked on this machine by words.
+    // 相似段落检索 (Issue #892; R5-F2c): there as soon as the index is built, nothing to build, ranked on this machine by words —
+    // and, with a fast model connected, widened and re-ordered by it. The field says what a search may send; the answer says
+    // what this one sent (0.7.9 review 2.3). This guest connects no model, so the line beside the results reads 没有发送.
     // The editor wheels the page to the field, writes the runner's own words and presses 检索. Each control is asserted inside
     // the window, inside its scroller's visible box and topmost at its centre before it is pressed — no scripted scroll.
     // Only anchors are read back here, never the paragraphs' words.
@@ -903,6 +906,7 @@ async function main() {
     requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&
       new Set(search.candidates.map(([ordinal]) => ordinal)).size === search.candidates.length &&
       search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-search-candidates', search);
+    requireJourney(JSON.stringify(search.mode) === JSON.stringify(['local', '本次：没有发送，只在本机按字面检索。', true]), 'library-search-mode', search.mode);
     // Nothing was built for it: the item's index reads as it did, with no vector layer on the service either.
     const searchService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, Object.keys(material.index.layers).length, 'vectors' in material.index])`);
     requireJourney(JSON.stringify(searchService) === JSON.stringify(['complete', 6, false]), 'library-search-service', searchService);
@@ -1081,6 +1085,29 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-library-action="segments-close"]') !== null`, 'library-use-read-ready');
     await pointerClick(renderer, waitFor, '[data-library-action="segments-close"]', 'library-use-read-close');
     const useStart = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material'); return { count:Number(card.dataset.decisions), attribution:card.dataset.attribution, materialId:card.dataset.materialId }; })()`);
+    // 暂不使用 on a NEW item (0.7.9 review BUG-03): nobody was named for it, so 待我处理 lists it. Opened from there its 资料 button
+    // takes focus inside the window; 暂不使用 is one recorded decision — still no attribution — the card reads 暂不使用, and
+    // 待我处理 lists it no more. Every control named here is asserted reachable before its press, with no scripted scroll.
+    const attentionItem = (id) => `[data-attention-item="library-material:${id}"]`;
+    const freshId = await renderer.evaluate(`document.querySelector('article.library-material[data-attribution="none"][data-decisions="0"]')?.dataset.materialId ?? null`);
+    requireJourney(typeof freshId === 'string' && freshId !== useStart.materialId, 'library-use-new-item', freshId);
+    const freshCard = `article.library-material[data-material-id="${freshId}"]`;
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${attentionItem(freshId)} button.global-attention-open`)})?.disabled === false`, 'library-use-attention-ready');
+    await pressReachable(renderer, waitFor, requireJourney, `${attentionItem(freshId)} button.global-attention-open`, 'library-use-attention-open');
+    await waitFor(renderer, `(() => { const button=document.querySelector(${JSON.stringify(`${freshCard} [data-library-action="use"]`)}); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
+    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} [data-library-action="use"]`, 'library-use-new-open');
+    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} .library-use-chooser input[data-library-choice="deferred"]`, 'library-use-new-choice');
+    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} [data-library-action="confirm-use"]`, 'library-use-new-confirm');
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(freshCard)}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('暂不使用') && card.dataset.attribution==='none' && card.dataset.decisions==='1'; })()`, 'library-use-new-recorded');
+    const freshService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(freshId)} }).then((material)=>[material.notUsed !== undefined, material.attribution, material.reference.state, material.decisions.at(-1)?.decision.notUsed === true])`);
+    requireJourney(JSON.stringify(freshService) === JSON.stringify([true, null, 'pending', true]), 'library-use-new-service', freshService);
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention-after');
+    // 待我处理 is read — the item that still waits for its decision is listed — and the one marked 暂不使用 is not.
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionItem(useStart.materialId))}) !== null && document.querySelector(${JSON.stringify(attentionItem(freshId))}) === null`, 'library-use-new-left-attention');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'library-use-knowledge-again');
+    await pointerClick(renderer, waitFor, '[data-knowledge-category="library"]', 'library-use-category-again');
+    await waitFor(renderer, `document.querySelector('article.library-material')?.dataset.materialId === ${JSON.stringify(useStart.materialId)} && document.querySelector('[data-library-action="use"]')?.disabled === false`, 'library-use-ready-again');
     let useCount = useStart.count;
     for (const [value, expected] of [['deferred', '暂不使用'], ['house', '本社可参考'], ['book:', null]]) {
       await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="use"]', 'library-use-open');
@@ -1093,13 +1120,6 @@ async function main() {
       useCount += value==='deferred' ? 1 : 2;
       const expectedLine = expected ?? `${bookTitle}的任务可参考`;
       await waitFor(renderer, `(() => { const card=document.querySelector('article.library-material'); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith(${JSON.stringify(expectedLine)}) && card.dataset.attribution===${JSON.stringify(value==='deferred'?useStart.attribution:value==='book:'?'book':'house')} && card.dataset.eligibility===${JSON.stringify(value==='book:'?'book':value)} && Number(card.dataset.decisions)===${useCount}; })()`, 'library-use-recorded');
-      if (value === 'deferred') {
-        await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention');
-        const attentionOpen = `[data-attention-item="library-material:${useStart.materialId}"] button.global-attention-open`;
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionOpen)})?.disabled === false`, 'library-use-attention-ready');
-        await pointerClick(renderer, waitFor, attentionOpen, 'library-use-attention-open');
-        await waitFor(renderer, `(() => { const button=document.querySelector('[data-material-id="${useStart.materialId}"] [data-library-action="use"]'); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
-      }
     }
     await setDeveloperMode(renderer, waitFor, true, 'library-use-restore');
 
