@@ -214,6 +214,25 @@ export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 
 // after it is admitted there.
 export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
+// The window sizes UI evidence is taken at (Owner decision, 2026-11-25): a 1080p screen with the window maximised and with
+// an ordinary restored window; the hosted Gate's size stays as the compatibility form. Each key is an outer size for the
+// guest runner's `-Window` (the E2E-only AI7_E2E_WINDOW); `viewport` is what a 1920×1080 desktop at 100 % then gives the
+// page. The product really maximises a Journey window asked for at the whole display (src/main/e2e-window.ts), so the
+// first is the size an editor gets by maximising. Another desktop gives other numbers, so a Journey reads innerWidth /
+// innerHeight and never these.
+export const E2E_WINDOW_BASELINES = Object.freeze({
+  '1920x1080': Object.freeze({ name: 'maximised', viewport: '1920x1009' }),
+  '1440x900': Object.freeze({ name: 'window', viewport: '1424x861' }),
+  '1024x720': Object.freeze({ name: 'hosted', viewport: '1008x681' }),
+});
+
+/** The one line a single-Journey run prints for an accepted E2E window size; a baseline size is named. */
+export function e2eWindowLine(journey, size) {
+  if (!/^[1-9]\d*x[1-9]\d*$/u.test(size ?? '')) return null;
+  const baseline = E2E_WINDOW_BASELINES[size];
+  return `E2E_WINDOW/${journey}/${size}${baseline ? `/${baseline.name}` : ''}`;
+}
+
 // The shell's sidebar (Issue #934, wave 11 slice 11a): every Journey reaches a global destination, 设置 and a Book's
 // sections through it, by its data attributes; each row's text is exactly its Chinese name. The library keeps its
 // screen state `landing`, so a Journey still waits for that.

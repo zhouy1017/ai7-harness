@@ -1,5 +1,19 @@
 # E2E journeys: what each admitted runner proves
 
+## Window baseline: 1080p maximised and an ordinary window (Owner decision, 2026-11-25)
+
+The Owner changed the assumed resolution of UI tests and layout acceptance on 2026-11-25: a standard 1080p screen (1920×1080) with the window maximised and with an ordinary, non-fullscreen window. The old 1280×800 and the narrow hosted window are no longer the only main baseline; the hosted Gate's 1008×681 stays as the compatibility form, because the hosted runner's desktop cannot be changed. [CI and test boundaries](../agents/ci-test-boundaries.md#where-the-ladder-runs) owns the rule — which sizes a slice, the merged tip and a stage acceptance use.
+
+| Guest runner | Name in `E2E_WINDOW_BASELINES` | Viewport the Journeys measure | What it stands for |
+| --- | --- | --- | --- |
+| `-Window 1920x1080` | `maximised` | 1920×1009 | 1080p, window maximised (primary) |
+| `-Window 1440x900` | `window` | 1424×861 | 1080p, ordinary restored window |
+| `-Window 1024x720` | `hosted` | 1008×681 | the hosted Gate's window (compatibility) |
+
+Measured on a test guest with a 1920×1080 console, without changing the guest: the desktop is 1920×1080 at 100 % with a 1920×1032 work area (one display, reduced motion off). A window only created at 1920×1080 is trimmed to the work area — outer 1920×1032, viewport 1904×993, not in the maximised state — while a real `maximize()` gives outer 1936×1048 and viewport 1920×1009. The primary size must be what an editor gets by maximising, so `src/main/e2e-window.ts` maximises a Journey window asked for at the whole primary display or more (E2E-only, behind `AI7_E2E_JOURNEY` like the size itself; ordinary production never takes the path). The guest runner accepts only `<W>x<H>` for `-Window`, which is why the maximised form is asked for by the display's size and not by a word; for the same reason the hosted form is always `-Window 1024x720`, never a size equal to a guest's own console. Both baseline sizes need a guest with a 1920×1080 console; `1024x720` runs on any guest, and the hosted Gate (1008×681, reduced motion) stays the real small-desktop check. 1440×900 lies midway between the app's own 1180×820 window and the full screen, fits every 1080p work area untrimmed, is the logical size of a common 16:10 notebook, and is a size no Journey stage already emulates (those are 1280×800 and 1008×681), so the run adds a form instead of repeating one.
+
+No Journey stage changed for the new sizes: the 15 Journeys run unchanged at each of the three. One shared helper changed: `pointerClick` (`e2e/dispatch-chooser.mjs`) reads its press point from the page as it rests after the two still frames and no longer scrolls it once more. A control in a sticky bar that is stuck to the window's edge keeps its place while each scripted scroll moves the page a step; the step that brought the bar to its own place moved the control in the same instant, before a panel placed against the bar had followed, and the press was refused as covered (J-11 `evaluation-rewrite-run`, 选项 under the open 先看计划 panel; also seen at 1164×781 and 1008×681). The checks before and after the press are unchanged. `e2e/run.mjs` prints `E2E_WINDOW/J-xx/<size>/<name>` for a baseline size and `E2E_WINDOW/J-xx/<size>` for any other accepted size. No Journey reads the table: every geometry assertion is computed from `innerWidth` / `innerHeight`, and the stages that emulate 1280×800 and 1008×681 keep doing so at every window size.
+
 ## 0.7.9 Owner-review fix: 资料库「暂不使用」, 来源译文 progress, 编辑偏好's way out, 相似段落检索's trust words (#1754)
 
 No stage is added or removed. Three Journeys gain assertions inside existing stages; every control they name is asserted reachable before a real press, with no scripted scroll.
