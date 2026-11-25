@@ -40,6 +40,7 @@ declare module 'electron' {
     isVisible(): boolean;
     isFocused(): boolean;
     loadFile(path: string): Promise<void>;
+    loadURL(url: string): Promise<void>;
     /** E2E-only: a Journey that asks for the whole display (src/main/e2e-window.ts). */
     maximize(): void;
     on(event: string, listener: (...args: any[]) => void): void;

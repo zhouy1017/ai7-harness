@@ -1562,10 +1562,44 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const contract = STRUCTURED_FLASH_TASKS['guideline-clause-formatting'];
       const source = ['核对图题。'];
       expect(await owner.execute(contract, source, 'preview')).toEqual({ state: 'checked', value: source });
-      expect(await owner.execute(contract, source, 'preview')).toMatchObject({ state: 'fallback', value: null });
+      expect(await owner.execute(contract, source, 'preview')).toMatchObject({ state: 'fallback', value: null, formattingParseFailure: true });
       expect(bodies).toHaveLength(2);
       expect(bodies[0]).toMatchObject({ model: 'synthetic-formatter', max_output_tokens: contract.budget.maxOutputTokens });
     } finally { owner.dispose(); }
+  });
+
+  it('serves a table import and search expansion in FIFO order on the shared underlying Flash owner', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic queue', null, 'ready', 'opencode-go');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'deepseek-v4-flash' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, null, { pro: null, flash: binding });
+    const firstSend = deferred(), firstReply = deferred();
+    const calls: string[] = [];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        const message = request.messages.at(-1).content;
+        calls.push(message);
+        if (calls.length === 1) {
+          firstSend.resolve();
+          await firstReply.promise;
+        }
+        const items = message.includes('甲乙') ? [{ paragraph: 1, recommended: '甲', discouraged: ['乙'] }] : ['目录', '书目', '索引'];
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items }) }, finish_reason: 'stop' }] }));
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    const table = owner.execute(STRUCTURED_FLASH_TASKS['standards-table-formatting'], ['甲乙'], 'table');
+    try {
+      await firstSend.promise;
+      const search = owner.execute(STRUCTURED_FLASH_TASKS['retrieval-query-expansion'], '目录', 'expand');
+      expect(owner.busy).toBe(true);
+      expect(calls).toEqual(['["甲乙"]']);
+      firstReply.resolve();
+      expect(await table).toMatchObject({ state: 'checked', value: [{ recommended: '甲' }] });
+      expect(await search).toEqual({ state: 'checked', value: ['目录', '书目', '索引'] });
+      expect(calls).toEqual(['["甲乙"]', '"目录"']);
+      expect(owner.busy).toBe(false);
+    } finally { firstReply.resolve(); owner.dispose(); }
   });
 
   it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {

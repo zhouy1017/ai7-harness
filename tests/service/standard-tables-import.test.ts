@@ -15,6 +15,7 @@ afterEach(async () => { store?.close(); await roots.dispose(); vi.restoreAllMock
 const row = (recommended: string, discouraged: string[] = []): StandardTableRow => ({ recommended, discouraged, rank: null, condition: null, source: null,
   strength: 'house', status: 'applied', reviewNote: null, sourceText: null });
 const prose = { text: '本社写作中推荐甲词，乙词需要改为甲词。', fileName: '用语说明.txt' };
+const multipart = { text: Array.from({ length: 161 }, (_, i) => `第${i + 1}段公开说明推荐甲词而非乙词。`).join('\n') };
 async function importText(text: string, fileName = '词表.tsv') {
   const preview = await store.standardTables.previewStandardTableImport({ text, fileName });
   return store.standardTables.commitStandardTableImport({ previewId: preview.previewId });
@@ -48,17 +49,39 @@ describe('R5-L2 standard-table library service', () => {
     expect(saved.table.counts).toEqual({ applied: 0, toConfirm: 1, unrecognized: 1 });
   });
 
-  it('retries invalid or refused answers once, keeps successful parts, and never resends an unknown outcome', async () => {
-    const input = { text: Array.from({ length: 161 }, (_, i) => `第${i + 1}段公开说明推荐甲词而非乙词。`).join('\n') };
-    const send = vi.fn().mockResolvedValueOnce('invalid').mockResolvedValueOnce({ reason: '未能整理。' })
-      .mockResolvedValueOnce({ reason: '结果尚不明确，请重新开始这一部分。', outcomeUnknown: true })
-      .mockResolvedValueOnce(JSON.stringify([{ paragraph: 1, recommended: '甲词', discouraged: ['乙词'] }]));
-    store.useStandardTableFormatter({ model: () => '测试 / flash', format: paragraphs => runStructuredFlashTask(standardsTable, paragraphs, send) });
-    await expect(store.standardTables.previewStandardTableImport(input)).rejects.toMatchObject({ code: 'STANDARD_TABLE_FORMAT_OFFER' });
-    const preview = await store.standardTables.previewStandardTableImport({ ...input, formatConfirmed: true });
-    expect(send).toHaveBeenCalledTimes(4);
-    expect(preview.conversionReport.parts.map(p => [p.state, p.attempts])).toEqual([['fallback', 2], ['outcome-unknown', 1], ['checked', 1]]);
-    expect(preview.entries).toHaveLength(1); expect(preview.entries[0]?.source).toBe('第161段');
+  it('retries a formatting failure once and reports a part that still fails alongside the successful parts', async () => {
+    const invalid = { state: 'fallback', value: null, reason: '返回内容未能对应输入。', formattingParseFailure: true };
+    const checked = { state: 'checked', value: [{ paragraph: 1, recommended: '甲词', discouraged: ['乙词'], status: '待确认', reason: '请核对。' }] };
+    const format = vi.fn().mockResolvedValueOnce(invalid).mockResolvedValueOnce(invalid).mockResolvedValue(checked);
+    store.useStandardTableFormatter({ model: () => '测试 / flash', format });
+    await expect(store.standardTables.previewStandardTableImport(multipart)).rejects.toMatchObject({ code: 'STANDARD_TABLE_FORMAT_OFFER' });
+    const preview = await store.standardTables.previewStandardTableImport({ ...multipart, formatConfirmed: true });
+    expect(format).toHaveBeenCalledTimes(4);
+    expect(preview.conversionReport.parts.map(p => [p.state, p.attempts, p.reason])).toEqual([
+      ['fallback', 2, invalid.reason], ['checked', 1, null], ['checked', 1, null],
+    ]);
+    expect(preview.entries.map(entry => entry.source)).toEqual(['第81段', '第161段']);
+  });
+
+  it.each([
+    ['fallback', '受保护凭据库中没有保存的凭据。', 'STANDARD_TABLE_FORMAT_FAILED'],
+    ['fallback', '无法连接模型服务，请检查网络。', 'STANDARD_TABLE_FORMAT_FAILED'],
+    ['outcome-unknown', '请求可能已经发出，但没有收到完整回答。', 'STANDARD_TABLE_FORMAT_OUTCOME_UNKNOWN'],
+  ])('stops a multipart import on %s and surfaces its exact reason', async (state, reason, code) => {
+    const format = vi.fn().mockResolvedValue({ state, value: null, reason });
+    store.useStandardTableFormatter({ model: () => '测试 / flash', format });
+    await expect(store.standardTables.previewStandardTableImport(multipart)).rejects.toMatchObject({ code: 'STANDARD_TABLE_FORMAT_OFFER' });
+    await expect(store.standardTables.previewStandardTableImport({ ...multipart, formatConfirmed: true })).rejects.toMatchObject({ code, message: reason });
+    expect(format).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a formatting failure if the retry leaves no rows to preview', async () => {
+    const reason = '返回内容未能对应输入。';
+    const format = vi.fn().mockResolvedValue({ state: 'fallback', value: null, reason, formattingParseFailure: true });
+    store.useStandardTableFormatter({ model: () => '测试 / flash', format });
+    await expect(store.standardTables.previewStandardTableImport(prose)).rejects.toMatchObject({ code: 'STANDARD_TABLE_FORMAT_OFFER' });
+    await expect(store.standardTables.previewStandardTableImport({ ...prose, formatConfirmed: true })).rejects.toMatchObject({ code: 'STANDARD_TABLE_FORMAT_FAILED', message: reason });
+    expect(format).toHaveBeenCalledTimes(2);
   });
 
   it('refuses scanned PDFs with the recognition reason and offers text-layer PDFs for formatting', async () => {

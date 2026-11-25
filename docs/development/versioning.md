@@ -53,15 +53,15 @@ Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.7.3`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**116** at this head) and service protocol (**205**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.7.9`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **2**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. The candidate's database revision is **117** and its service protocol is **206**. An ordinary rebuild does not create a software upgrade. Build identity is independent of store-version records, backup manifests and migration decisions.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.7.3",
-  "dataVersion": 1,
+  "softwareVersion": "0.7.9",
+  "dataVersion": 2,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "dirty": false

@@ -18,6 +18,7 @@ import { backupLocationFor } from '../../src/service/scheduled-backups.js';
 import { databasePackageSources, verifyCopiedPayloads, type DatabasePackageMember } from '../../src/service/database-exports.js';
 import * as packageWriter from '../../src/service/database-exports.js';
 import { fileDigest } from '../../src/service/manuscript-export.js';
+import { inventoryStore } from '../../src/service/store-inventory.js';
 import { verifyDatabasePackage } from '../../src/service/database-package-reader.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { ImportedSkills, acquireSkillPackage } from '../../src/service/imported-skills.js';
@@ -84,6 +85,11 @@ it('resumes each phase, imports the older package and recovers missing old files
   const root = join(roots.inputRoot, 'library');
   await cp(roots.dataRoot, root, { recursive: true });
   await expect(upgradePreflight(root, 0)).rejects.toMatchObject({ code: 'UPGRADE_SPACE' });
+  const { tables } = JSON.parse(inventoryStore(join(root, 'store', 'ai7.sqlite')));
+  await expect(upgradePreflight(root)).resolves.toEqual({
+    books: tables.books, manuscripts: tables.manuscripts, marks: tables.editorial_marks,
+    reports: tables.review_reports, materials: tables.library_materials,
+  });
   expect(existsSync(join(root, 'store.upgrading'))).toBe(false);
   await beginUpgrade(root);
   const stopped = new Set<string>();
