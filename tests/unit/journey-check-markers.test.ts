@@ -31,6 +31,8 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   journeyElapsedSegment(milliseconds: number): string;
   discloseJ02Viewport(viewport: { width: number; height: number; overlay: boolean }): void;
   collectJ02ViewportDisclosures(result: { stdout: string }): string[];
+  E2E_WINDOW_BASELINES: Readonly<Record<string, { name: string; viewport: string }>>;
+  e2eWindowLine(journey: string, size: string | undefined): string | null;
 };
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
   parseGateLog(text: string): {
@@ -361,4 +363,16 @@ it('forwards bounded pointer failure metadata from a real child without changing
     expect(source.match(/collectJourneyPointerFailure\(result, journey, failure\)/gu), file).toHaveLength(1);
     expect(source, file).toContain('console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`)');
   }
+});
+
+it('names a baseline window size in the one E2E_WINDOW line and keeps any other accepted size bare', () => {
+  // Owner decision 2026-11-25: 1080p at full size and an ordinary window are the baseline; the hosted size is the compatibility form.
+  expect(Object.entries(controller.E2E_WINDOW_BASELINES).map(([size, { name }]) => `${size}=${name}`)).toEqual(['1920x1080=maximised', '1440x900=window', '1024x720=hosted']);
+  expect(controller.e2eWindowLine('J-08', '1920x1080')).toBe('E2E_WINDOW/J-08/1920x1080/maximised');
+  expect(controller.e2eWindowLine('J-08', '1440x900')).toBe('E2E_WINDOW/J-08/1440x900/window');
+  expect(controller.e2eWindowLine('J-08', '1024x720')).toBe('E2E_WINDOW/J-08/1024x720/hosted');
+  expect(controller.e2eWindowLine('J-08', '1300x800')).toBe('E2E_WINDOW/J-08/1300x800');
+  // Only a size the product accepts is announced: anything else leaves the app at its own size, and the run says nothing.
+  for (const refused of [undefined, '', 'maximised', '0x720', '1024x', '1024X720']) expect(controller.e2eWindowLine('J-08', refused)).toBeNull();
+  expect(readFileSync(resolve(E2E, 'run.mjs'), 'utf8')).toContain('e2eWindowLine(args[1], process.env.AI7_E2E_WINDOW)');
 });
