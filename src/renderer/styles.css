@@ -1249,7 +1249,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .material-anchor { display: inline-block; margin-right: .2rem; padding: 0 .25rem; border: 1px solid var(--boundary); border-radius: 4px; font-size: .75rem; color: var(--action-text); }
 /* 相似段落检索 and 来源译文 (Issue #892): made on request; a translation sits under its paragraph, labelled, never in its place. */
 .material-index-layer-actions { display: grid; gap: .3rem; min-width: 0; }
-.material-translation-note, .material-vector-note { margin: 0; color: var(--text-subdued); }
+.material-translation-note, .material-vector-note, .material-translation-progress, .material-vector-mode { margin: 0; color: var(--text-subdued); }
 .material-vector-search { display: grid; gap: .35rem; min-width: 0; }
 .material-vector-search input { flex: 1 1 14rem; min-width: 0; box-sizing: border-box; font: inherit; }
 .material-vector-results-heading { margin: 0; font-weight: 700; }
@@ -2814,6 +2814,8 @@ button.btn.small, button.btn.sidebar-pin { min-height: 28px; }
 .state-term.export-status-degraded::before, .state-term.status-degraded::before, .state-term.is-unmet::before { border-radius: 1px; background: currentColor; transform: rotate(45deg); }
 .state-term.export-status-unavailable::before, .state-term.status-unsupported::before { border-radius: 1px; background: currentColor; }
 
+.similar-materials-note { display: block; }
+.similar-materials-note, .similar-materials-mode { margin: .2rem 0 0; color: var(--text-subdued); overflow-wrap: anywhere; }
 .similar-materials textarea { box-sizing: border-box; width: 100%; padding: .4rem .6rem; border: 1px solid var(--boundary-strong); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
 /* Rail buttons keep the shared hit height while their dots retain the narrow lane geometry. */
 button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padding: 0; border: 0; background: transparent; transform: none; }

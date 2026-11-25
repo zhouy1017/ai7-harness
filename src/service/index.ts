@@ -2550,10 +2550,10 @@ async function run(): Promise<void> {
     store.useRetrievalAssist({
       expand: async query => underlyingFlash() && underlyingOwner.refusal('retrieval-query-expansion') === null
         ? underlyingOwner.execute(queryExpansion, query, 'material-search-expansion')
-        : { state: 'fallback', value: null, reason: '底层 Flash 检索词扩展不可用。' },
+        : null, // Not asked: nothing left the machine.
       rerank: async input => underlyingFlash() && underlyingOwner.refusal('retrieval-rerank') === null
         ? underlyingOwner.execute(retrievalRerank, input, 'material-search-rerank')
-        : { state: 'fallback', value: null, reason: '底层 Flash 候选整理不可用。' },
+        : null,
     });
     store.useMaterialTranslator(materialTranslator(
       underlyingOwner,

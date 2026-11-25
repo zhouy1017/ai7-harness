@@ -115,7 +115,8 @@ describe('相似段落检索 over the real store (R5-F2c)', () => {
       const before = tableCounts();
       const found = await store.searchLibraryMaterialVectors({ materialId: added.materialId, text: words, k: 5 });
       expect(tableCounts()).toEqual(before);
-      expect(Object.keys(found).sort()).toEqual(['candidates', 'indexDigest', 'materialId']);
+      expect(Object.keys(found).sort()).toEqual(['assist', 'candidates', 'indexDigest', 'materialId']);
+      expect(found.assist).toBe('local');
       expect(found.indexDigest).toBe(index.digest);
       expect(found.candidates.length).toBeGreaterThan(0);
       expect(found.candidates.length).toBeLessThanOrEqual(5);

@@ -1,5 +1,6 @@
 import { serviceWords } from './service-wording.js';
 import { createButton } from './components/controls.js';
+import { RETRIEVAL_ASSIST_LINES, RETRIEVAL_ASSIST_NOTE } from './knowledge-base-labels.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskMaterialProjection, type RendererApi } from '../shared/protocol.js';
 
 /** Keep only still-offered choices, in offer order, within the same whole-item bounds the service enforces. */
@@ -153,7 +154,10 @@ export function reviewPlanReferenceField(options: {
   return host;
 }
 
-/** Local discovery leaves every choice to the editor and uses the fieldset's existing reference bounds. */
+/**
+ * Discovery leaves every choice to the editor and uses the fieldset's existing reference bounds. The field says what a search
+ * may send, and each answer what this one sent (0.7.9 review 2.3): never 本机 when the words went to the fast model.
+ */
 export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMaterials'>, bookId: string,
   items: readonly WritingTaskMaterialProjection[], selected: ReadonlySet<string>, choose: (materialId: string) => void): HTMLElement {
   const root = document.createElement('div');
@@ -165,20 +169,23 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
   input.rows = 2;
   input.setAttribute('aria-label', '相似段落检索');
   const status = document.createElement('span'); status.setAttribute('role', 'status');
-  label.append(status, input);
+  const note = document.createElement('span'); note.className = 'similar-materials-note'; note.textContent = RETRIEVAL_ASSIST_NOTE;
+  label.append(status, input, note);
+  const mode = document.createElement('p'); mode.className = 'similar-materials-mode'; mode.hidden = true;
   const selection = window.getSelection()?.toString() ?? '';
   const useSelection = createButton();
   useSelection.type = 'button'; useSelection.textContent = '使用当前选中文字';
   useSelection.addEventListener('click', () => { input.value = (window.getSelection()?.toString() || selection).slice(0, 1_000); });
   const search = createButton();
-  search.type = 'button'; search.textContent = '检索相似段落';
+  search.type = 'button'; search.textContent = '检索相似段落'; search.dataset['similarAction'] = 'search';
   const results = document.createElement('ul');
   search.addEventListener('click', () => {
     if (search.disabled || input.value.trim().length === 0) return;
-    search.disabled = true; status.textContent = ' · 正在本机检索…'; results.replaceChildren();
+    search.disabled = true; status.textContent = ' · 正在检索…'; results.replaceChildren(); mode.hidden = true;
     void api.searchReferableMaterials({ bookId, query: input.value, k: 8 }).then((page) => {
       if (!root.isConnected) return;
       status.textContent = page.candidates.length === 0 ? ' · 没有找到相似段落。' : ' · 以下是检索候选，预览只供选择参考资料。';
+      mode.textContent = RETRIEVAL_ASSIST_LINES[page.assist]; mode.dataset['retrievalAssist'] = page.assist; mode.hidden = false;
       for (const candidate of page.candidates) {
         const item = items.find((offer) => offer.materialId === candidate.sourceId);
         const row = document.createElement('li');
@@ -198,6 +205,6 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
       }
     }).catch(() => { status.textContent = ' · 这次检索没有完成，请稍后重试。'; }).finally(() => { search.disabled = false; });
   });
-  root.append(label, useSelection, search, results);
+  root.append(label, useSelection, search, mode, results);
   return root;
 }
