@@ -200,11 +200,11 @@ export async function searchLibraryMaterialVectors(host: MaterialIndexOperations
     return { digest: now.indexDigest, segments: now.paragraphs.map((paragraph) => ({ segmentOrdinal: paragraph.ordinal, text: paragraph.text })) };
   } }]);
   try {
-    const found = await retrieveWithFlash(index, input.text, RETRIEVAL_MAX_CANDIDATES, assist);
+    const { candidates: found, assist: mode } = await retrieveWithFlash(index, input.text, RETRIEVAL_MAX_CANDIDATES, assist);
     // A long paragraph is ranked in chunks: it answers once, where its best chunk ranks.
     const ordinals = new Set<number>();
     const best = found.filter((candidate) => !ordinals.has(candidate.anchor.segmentOrdinal!) && ordinals.add(candidate.anchor.segmentOrdinal!));
-    return { materialId: input.materialId, indexDigest: build.indexDigest, candidates: best.slice(0, input.k).map(({ anchor, score }) => {
+    return { materialId: input.materialId, indexDigest: build.indexDigest, assist: mode, candidates: best.slice(0, input.k).map(({ anchor, score }) => {
       const ordinal = anchor.segmentOrdinal!;
       const { page, pageParagraph, preview } = build.paragraphs[ordinal - 1]!;
       return { ordinal, page, pageParagraph, score: Math.round(score * 10_000) / 10_000, preview };
