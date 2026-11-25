@@ -40,6 +40,7 @@ declare module 'electron' {
     isVisible(): boolean;
     isFocused(): boolean;
     loadFile(path: string): Promise<void>;
+    loadURL(url: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
     restore(): void;
@@ -67,6 +68,7 @@ declare module 'electron' {
   export const webUtils: { getPathForFile(file: File): string };
   export const dialog: {
     showMessageBox(options: Record<string, unknown>): Promise<{ response: number }>;
+    showMessageBox(window: BrowserWindow, options: Record<string, unknown>): Promise<{ response: number }>;
     showOpenDialog(options: Record<string, unknown>): Promise<{ canceled: boolean; filePaths: string[] }>;
     showOpenDialog(
       window: BrowserWindow,

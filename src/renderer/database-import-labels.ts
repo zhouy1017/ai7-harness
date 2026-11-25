@@ -91,7 +91,7 @@ export function databaseImportVersionLine(preview: Pick<DatabaseImportPreviewPro
   const fit = {
     compatible: preview.dataVersion < preview.localDataVersion ? '可在导入时升级' : '与本机相同',
     'newer-data-version': `比本机的数据版本 ${preview.localDataVersion} 新，请先更新 AI7`,
-    'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，请先用 0.7.4 导入并重新导出`,
+    'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，请先用 0.7.3 导入并重新导出`,
     'newer-schema': '由更新的 AI7 做成，请先更新 AI7',
   }[preview.compatibility];
   return `${technicalWords(`数据版本 ${preview.dataVersion} · `)}${fit}${technicalWords(` · 软件 ${preview.softwareVersion}`)}`;
