@@ -94,10 +94,11 @@ function mountSettings(calls: ReturnType<typeof api>) {
     const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
   };
   const root = element('main'); document.body.append(root);
-  const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
+  const setStatus = vi.fn();
+  const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
-  return { screen, node: root as unknown as MiniElement, poll: () => poll!() };
+  return { screen, node: root as unknown as MiniElement, poll: () => poll!(), setStatus };
 }
 
 describe('the one model-service flow', () => {
@@ -1037,6 +1038,116 @@ it('keeps the selected lighter model connection-test result beside its controls'
   Object.assign(route.connection!, { connectionTest: { modelId: binding.modelId, outcome: 'passed', code: null, testedAt: '2026-11-21T00:00:00.000Z', credentialUpdatedAt: '2026-11-21T00:00:00.000Z', verified: 'buffered-text-only' } });
   const { node } = flow(projection);
   expect(node.querySelector('[data-flash-connection-test]')!.textContent).toBe('较轻模型连接成功，可以使用。');
+});
+
+// BUG-11: the route's single newest result served both roles, so testing one model erased the other's line.
+const tested = (modelId: string, outcome: 'passed' | 'failed', testedAt: string) => ({ modelId, outcome, code: outcome === 'passed' ? null : 'INVALID_CREDENTIAL',
+  testedAt, credentialUpdatedAt: '2026-11-21T00:00:00.000Z', verified: 'buffered-text-only' });
+/** The same settings with a route's connection tests, newest first, as the service projects them. */
+function withTests(projection: ModelServiceSettingsProjection, route: ModelServiceRouteId, ...tests: ReturnType<typeof tested>[]): ModelServiceSettingsProjection {
+  const next = structuredClone(projection);
+  Object.assign(next.routeChoice.routes.find(item => item.route === route)!.connection!, { connectionTest: tests[0] ?? null, connectionTests: tests });
+  return next;
+}
+const twoClaudeModels = (projection: ModelServiceSettingsProjection): string[] => projection.channels.find(channel => channel.channelId === 'anthropic-claude')!.models
+  .filter(model => model.main === 'eligible' && model.fast === 'eligible').slice(0, 2).map(model => model.modelId);
+
+it.each(['main', 'lighter'] as const)('shows the main and the lighter model their own connection-test results when the %s model was tested last', (last) => {
+  setTechnicalLayerVisible(false);
+  const base = settings(['anthropic-claude']);
+  const [main, lighter] = twoClaudeModels(base);
+  const results = [tested(main!, 'failed', last === 'main' ? '2026-11-25T00:00:02.000Z' : '2026-11-25T00:00:01.000Z'), tested(lighter!, 'passed', last === 'main' ? '2026-11-25T00:00:01.000Z' : '2026-11-25T00:00:02.000Z')];
+  const { node } = flow(withTests(base, 'anthropic-claude', ...(last === 'main' ? results : results.reverse())), api(), { modelId: main!, flashModelId: lighter! });
+  expect(node.querySelector('[data-connection-test-outcome]')!.textContent).toBe('连接失败，请检查密钥和所选模型后重试。');
+  expect(node.querySelector('[data-flash-connection-test]')!.textContent).toBe('较轻模型连接成功，可以使用。');
+});
+
+it('reports the lighter model\'s own outcome although the route\'s newest result is the main model\'s', async () => {
+  setTechnicalLayerVisible(false);
+  const base = settings(['anthropic-claude']);
+  const [main, lighter] = twoClaudeModels(base);
+  const answer = withTests(base, 'anthropic-claude', tested(main!, 'failed', '2026-11-25T00:00:02.000Z'), tested(lighter!, 'passed', '2026-11-25T00:00:01.000Z'));
+  const { node, setStatus } = flow(base, api(answer), { modelId: main!, flashModelId: lighter! });
+  button(node, 'test-fast-flow-connection').click();
+  await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(expect.stringContaining('连接测试通过'), 'success'));
+});
+
+describe('an answer that arrives after 模型服务 moved on (BUG-11)', () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const flowNode = (node: MiniElement) => node.querySelector('[data-model-service-flow]');
+  const showChannel = (node: MiniElement, id: string) => { const channel = node.querySelector('select[aria-label="渠道"]')!; channel.value = id; channel.dispatchEvent({ type: 'change' }); };
+  /** The next call of `request` answers only when the returned function is given its answer. */
+  function held(request: unknown): (answer: ModelServiceSettingsProjection) => void {
+    let land: (answer: ModelServiceSettingsProjection) => void = () => undefined;
+    vi.mocked(request as () => Promise<ModelServiceSettingsProjection>).mockImplementationOnce(() => new Promise((resolve) => { land = resolve; }));
+    return (answer) => land(answer);
+  }
+  /** 模型服务 open in ordinary mode on OpenCode Go, and the settings a passed test of its chosen model answers with. */
+  async function open() {
+    setTechnicalLayerVisible(false);
+    const projection = completeSettings(), calls = api(projection), page = mountSettings(calls);
+    await page.screen.renderModelServiceSettings();
+    const modelId = page.node.querySelector('select[aria-label="AI7 使用的模型"]')!.value;
+    return { ...page, calls, projection, passed: withTests(projection, 'opencode-go', tested(modelId, 'passed', '2026-11-25T00:00:00.000Z')) };
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('says and repaints nothing for a test that answers while another channel is shown, and shows its result on return', async () => {
+    const { node, calls, poll, setStatus, passed } = await open();
+    const land = held(calls.testModelServiceConnection);
+    button(node, 'test-flow-connection').click();
+    showChannel(node, 'anthropic-claude');
+    const before = flowNode(node);
+    land(passed); await tick();
+    expect(flowNode(node) === before).toBe(true);
+    // The busy line the test left ends; no outcome is said about a channel that is not on screen.
+    expect(setStatus).toHaveBeenLastCalledWith('');
+    vi.mocked(calls.getModelServiceSettings).mockResolvedValue(passed);
+    poll();
+    await vi.waitFor(() => expect(flowNode(node) === before).toBe(false));
+    showChannel(node, 'opencode-go');
+    expect(node.querySelector('[data-connection-test-outcome]')!.textContent).toBe('连接成功，可以使用。');
+  });
+
+  it('acts on the answer when the editor is back on the channel the test started on', async () => {
+    const { node, calls, setStatus, passed } = await open();
+    const land = held(calls.testModelServiceConnection);
+    button(node, 'test-flow-connection').click();
+    showChannel(node, 'anthropic-claude'); showChannel(node, 'opencode-go');
+    land(passed);
+    await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(expect.stringContaining('连接测试通过'), 'success'));
+    expect(node.querySelector('[data-connection-test-outcome]')!.textContent).toBe('连接成功，可以使用。');
+  });
+
+  it.each(['left', 'opened again'] as const)('says nothing once the page was %s', async (how) => {
+    const { screen, node, calls, setStatus, passed } = await open();
+    const land = held(calls.testModelServiceConnection);
+    button(node, 'test-flow-connection').click();
+    if (how === 'left') node.replaceChildren(document.createElement('section') as unknown as MiniElement); else await screen.renderModelServiceSettings();
+    const said = setStatus.mock.calls.length;
+    land(passed); await tick();
+    expect(setStatus.mock.calls.length).toBe(said);
+    expect(node.querySelector('[data-connection-test-outcome]')).toBeNull();
+  });
+
+  it('drops the unsaved lighter choice of the channel 「不单独选择」 was pressed on, not of the channel on screen', async () => {
+    const { node, calls, poll, projection } = await open();
+    const land = held(calls.clearFlashModel);
+    button(node, 'clear-flash-model').click();
+    showChannel(node, 'anthropic-claude');
+    const light = node.querySelector('select[data-flash-model]')!;
+    const draft = light.querySelectorAll('option').find(option => option.value !== light.value)!.value;
+    light.value = draft; light.dispatchEvent({ type: 'change' });
+    land(projection); await tick();
+    expect(node.querySelector('select[data-flash-model]') === light).toBe(true);
+    // The next repaint still offers the choice made on the channel on screen.
+    const changed = structuredClone(projection);
+    Object.assign(changed.channels[0]!, { channelLabel: 'Updated public catalogue' });
+    vi.mocked(calls.getModelServiceSettings).mockResolvedValue(changed);
+    poll();
+    await vi.waitFor(() => expect(node.querySelector('select[data-flash-model]') === light).toBe(false));
+    expect(node.querySelector('select[data-flash-model]')!.value).toBe(draft);
+  });
 });
 
 // Stage-2 rework (#1547): the sentence under 「使用这个模型」 names only what the editor can do now.

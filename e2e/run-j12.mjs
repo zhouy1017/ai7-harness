@@ -2728,6 +2728,18 @@ async function main() {
     await chooseModel('deepseek-flash', true);
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：') && document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-two-sentence');
+    // BUG-11: the lighter model has its own test control and its own result line beside it, apart from the main model's. A
+    // provider-free run refuses a connection test before anything is sent, so there is no result to show: the stage proves the
+    // control is reachable and pressed for real, that the refusal is said, and that neither result line took the other's place.
+    const TEST_PLACES = `(() => { const light=document.querySelector('[data-action="test-fast-flow-connection"]'), main=document.querySelector('[data-action="test-flow-connection"]');
+      const lightLine=document.querySelector('.model-service-optional [data-flash-connection-test]'), mainLine=document.querySelector('.model-service-flow-test .model-service-flow-feedback');
+      return light instanceof HTMLButtonElement && main instanceof HTMLButtonElement && !light.disabled && !main.disabled && lightLine instanceof HTMLElement && mainLine instanceof HTMLElement &&
+        light.nextElementSibling===lightLine && !mainLine.contains(lightLine) && lightLine.textContent==='' && document.querySelector('[data-connection-test-outcome]')===null; })()`;
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places');
+    await reachPress(primary, waitFor, requireJourney, '[data-action="test-fast-flow-connection"]', 'model-choice-light-test');
+    await waitFor(primary, `(() => { const bar=document.querySelector('#persistence-status'); return bar?.dataset.tone==='error' && !bar.hidden && bar.textContent!=='' && !bar.textContent.includes('正在测试连接'); })()`, 'model-choice-light-test-refused');
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places-kept');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.every(route=>(route.connection?.connectionTests??[]).length===0))`)) === true, 'model-choice-no-test-recorded');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
     await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');

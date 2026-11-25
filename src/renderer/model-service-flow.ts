@@ -1,6 +1,7 @@
 import { technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
+  type ModelConnectionTestStatus,
   type ModelServiceChannelId,
   type ModelServiceChannelModelProjection,
   type ModelServiceChannelProjection,
@@ -28,7 +29,13 @@ export interface ModelServiceFlowOptions {
   chooseChannel(channel: ModelServiceChannelId): void;
   readonly modelId?: string;
   flashModelId?: string;
-  chooseFlashModel?(modelId: string): void;
+  /** `channel` names the channel the choice belongs to when an answer sets it after the page moved on; absent, the one on screen. */
+  chooseFlashModel?(modelId: string, channel?: ModelServiceChannelId): void;
+  /**
+   * Called as an action starts on `channel`. The check it returns is asked when the answer arrives: whether the page still shows
+   * what the action started on. A late answer repaints nothing, says nothing and moves no focus. Absent, every answer is acted on.
+   */
+  beginRequest?(channel: ModelServiceChannelId): () => boolean;
   /** The unsaved 思考强度 of a role on this page, kept across its repaints; it belongs to one model and never moves to another. */
   effortDraft?(channel: ModelServiceChannelId, role: 'main' | 'fast', modelId: string): string | undefined;
   setEffortDraft?(channel: ModelServiceChannelId, role: 'main' | 'fast', modelId: string, value: string | undefined): void;
@@ -78,6 +85,18 @@ export function modelCapabilityLabel(model: ModelServiceChannelModelProjection):
 }
 
 const bothEligible = (model: ModelServiceChannelModelProjection): boolean => model.main === 'eligible' && model.fast === 'eligible';
+
+const requestCheck = (options: ModelServiceFlowOptions, channel: ModelServiceChannelProjection): (() => boolean) => options.beginRequest?.(channel.channelId) ?? (() => true);
+
+/**
+ * A model's own newest connection test on a route. The main and the lighter model each keep theirs (Issue #1671): the route's
+ * single `connectionTest` is only the newest of them, so reading it for both let one test erase the other's result.
+ */
+export function modelConnectionTest(projection: ModelServiceSettingsProjection, route: ModelServiceRouteId | null, modelId: string | undefined): ModelConnectionTestStatus | null {
+  const connection = projection.routeChoice.routes.find((option) => option.route === route)?.connection;
+  const tests = connection?.connectionTests ?? (connection?.connectionTest == null ? [] : [connection.connectionTest]);
+  return tests.find((test) => test.modelId === modelId) ?? null;
+}
 
 function credentialReady(projection: ModelServiceSettingsProjection, route: ModelServiceRouteId | null): boolean {
   return route !== null && projection.routeChoice.routes.find((option) => option.route === route)?.connection?.credentialOperationState === 'ready';
@@ -136,11 +155,13 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   form.addEventListener('submit', (event) => { event.preventDefault(); void (async () => {
     if (save.disabled) return;
     save.disabled = true;
+    const live = requestCheck(options, channel);
     const pending = options.api.saveModelServiceCredential({ route: option.route, connectionName: name.value.trim(), secret: secret.value });
     secret.value = '';
     options.setStatus('正在保存密钥并获取模型…', 'busy');
     try {
       const result = await pending;
+      if (!live()) return;
       options.render(result);
       const discovery = result.modelDiscovery;
       if (discovery?.status === 'failure') options.setStatus(`密钥已保存，但无法获取模型列表：${discovery.reason}`, 'error');
@@ -148,28 +169,31 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
         ? `密钥已保存；已获取 ${discovery.modelCount} 个模型。`
         : '密钥已保存；可选择账号模型或手动输入模型 ID。', 'success');
     }
-    catch (error) { update(); options.setStatus(options.errorMessage(error, '无法保存模型服务密钥。'), 'error'); }
+    catch (error) { if (!live()) return; update(); options.setStatus(options.errorMessage(error, '无法保存模型服务密钥。'), 'error'); }
   })(); });
   const actions = el('div', 'button-row');
   const ready = credentialReady(projection, channel.route);
   const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'retry-model-list';
   refresh.addEventListener('click', () => void (async () => {
     refresh.disabled = true;
+    const live = requestCheck(options, channel);
     try {
       const result = await options.api.refreshModelServiceModels({ route: option.route });
+      if (!live()) return;
       options.render(result);
       const discovery = result.modelDiscovery;
       if (discovery?.status === 'failure') options.setStatus(discovery.reason, 'error');
       else if (discovery?.status === 'success') options.setStatus(`模型列表已刷新，共 ${discovery.modelCount} 个可用模型。`, 'success');
       else options.setStatus('无法获取模型列表。', 'error');
     }
-    catch (error) { refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
+    catch (error) { if (!live()) return; refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
   })());
   const remove = el('button', 'quiet', '移除密钥'); remove.type = 'button'; remove.disabled = !ready; remove.dataset['action'] = 'remove-model-service-credential';
   remove.addEventListener('click', () => void (async () => {
     remove.disabled = true;
-    try { options.render(await options.api.removeModelServiceCredential({ route: option.route })); options.setStatus('密钥已移除。', 'success'); }
-    catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务密钥。'), 'error'); }
+    const live = requestCheck(options, channel);
+    try { const next = await options.api.removeModelServiceCredential({ route: option.route }); if (!live()) return; options.render(next); options.setStatus('密钥已移除。', 'success'); }
+    catch (error) { if (!live()) return; remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务密钥。'), 'error'); }
   })());
   actions.append(save, refresh, remove);
   form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, actions);
@@ -308,11 +332,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     use.disabled = !ready || checked === null || stale('main') || (current?.route === channel.route && current.modelId === checked.modelId && sameEffort);
     for (const [index, button] of roleButtons.entries()) button.disabled = !ready || (index === 0 ? checked : flashModel()) === null || stale(index === 0 ? 'main' : 'fast');
     for (const [tier, button] of tierButtons) button.disabled = !ready || stale(tier);
-    const flashTest = projection.routeChoice.routes.find(option => option.route === channel.route)?.connection?.connectionTest;
-    const ownFlashTest = flashTest?.modelId === flashModel()?.modelId ? flashTest : null;
+    const ownFlashTest = modelConnectionTest(projection, channel.route, flashModel()?.modelId);
     flashFeedback.textContent = ownFlashTest == null ? '' : technicalLayerVisible ? modelConnectionTestLabel(ownFlashTest) : ownFlashTest.outcome === 'passed' ? '较轻模型连接成功，可以使用。' : '较轻模型连接未通过，请检查密钥和所选模型后重试。';
-    const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
-    const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
+    const own = modelConnectionTest(projection, channel.route, checked?.modelId);
     // Ordinary mode reads the test's outcome only (Issue #1431 item 96); the capability matrix and the test's technical scope are developer words.
     const note = el('p', 'field-note', checked === null ? '' : technicalLayerVisible
       ? `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own).replace(/。$/u, '')}${own === null ? '。' : '；测试仅核验缓冲文本，不核验工具或流式。'}`
@@ -334,8 +356,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       const id = modelId();
       if (id === undefined || savingFavourite || !options.toggleFavourite) return;
       savingFavourite = true; repaintCatalogue();
+      const live = requestCheck(options, channel);
       try { favourites = await options.toggleFavourite(channel.channelId, id); }
-      catch (error) { options.setStatus(options.errorMessage(error, '无法保存模型收藏。'), 'error'); }
+      catch (error) { if (live()) options.setStatus(options.errorMessage(error, '无法保存模型收藏。'), 'error'); }
       finally { savingFavourite = false; repaintCatalogue(); }
     })());
     return button;
@@ -446,8 +469,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       const model = role === 'main' ? checked : flashModel();
       if (model === null || channel.route === null) return;
       button.disabled = true;
-      try { const next = await select({ route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(role) }); options.setEffortDraft?.(channel.channelId, role, model.modelId, undefined); options.render(next); options.setStatus(`${role === 'main' ? 'AI7' : '对话、润色和 AI 助手'}将使用 ${modelLabelWords(model)}。`, 'success'); }
-      catch (error) { paint(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+      const live = requestCheck(options, channel);
+      try { const next = await select({ route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(role) }); options.setEffortDraft?.(channel.channelId, role, model.modelId, undefined); if (!live()) return; options.render(next); options.setStatus(`${role === 'main' ? 'AI7' : '对话、润色和 AI 助手'}将使用 ${modelLabelWords(model)}。`, 'success'); }
+      catch (error) { if (!live()) return; paint(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
     })());
     roleButtons.push(button);
   }
@@ -456,26 +480,30 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     if (testing || model === null || channel.route === null) return;
     testing = true;
     test.disabled = testFast.disabled = true;
+    const live = requestCheck(options, channel);
     options.setStatus('正在测试连接…', 'busy');
     try {
       const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(role) });
-      const result = next.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest;
-      const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, modelLabelWords(model));
+      if (!live()) return;
+      // The tested model's own result: the route's newest may be the other role's, tested meanwhile.
+      const status = modelConnectionTestFeedback(modelConnectionTest(next, channel.route, model.modelId), channel.channelLabel, modelLabelWords(model));
       options.render(next);
       options.setStatus(status.message, status.tone);
-    } catch (error) { options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    } catch (error) { if (live()) options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
     finally { testing = false; paint(); }
   })());
   use.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;
     use.disabled = true;
+    const live = requestCheck(options, channel);
     options.setStatus('正在保存模型…', 'busy');
     try {
       const next = await options.api.selectProModel({ route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort() });
       options.setEffortDraft?.(channel.channelId, 'main', checked.modelId, undefined);
+      if (!live()) return;
       options.render(next);
       options.setStatus(`AI7 的主要任务将使用 ${channel.channelLabel} / ${modelLabelWords(checked)}。已在进行的任务不受影响。`, 'success');
-    } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+    } catch (error) { if (!live()) return; use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   if (checked !== null) options.chooseModel?.(checked.modelId);
   const actions = el('div', 'button-row');
@@ -486,8 +514,10 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   clear.disabled = !flashChosen;
   clear.addEventListener('click', () => void (async () => {
     clear.disabled = true;
-    try { const next = await options.api.clearFlashModel(); options.setEffortDraft?.(channel.channelId, 'fast', flashModel()?.modelId ?? '', undefined); options.chooseFlashModel?.(''); options.render(next); document.querySelector<HTMLSelectElement>('select[data-flash-model]')?.focus(); options.setStatus('对话、润色和 AI 助手将使用主要模型。', 'success'); }
-    catch (error) { clear.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+    const live = requestCheck(options, channel);
+    // The unsaved lighter choice dropped is the one of the channel the press was made on, whichever channel the page shows by now.
+    try { const next = await options.api.clearFlashModel(); options.setEffortDraft?.(channel.channelId, 'fast', flashModel()?.modelId ?? '', undefined); options.chooseFlashModel?.('', channel.channelId); if (!live()) return; options.render(next); document.querySelector<HTMLSelectElement>('select[data-flash-model]')?.focus(); options.setStatus('对话、润色和 AI 助手将使用主要模型。', 'success'); }
+    catch (error) { if (!live()) return; clear.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   optional.append(clear);
   if (technicalLayerVisible) {
@@ -501,10 +531,13 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
         const model = tier === 'main' ? checked : flashModel();
         if (model === null || channel.route === null) return;
         button.disabled = true;
+        const live = requestCheck(options, channel);
         try {
-          options.render(await options.api.selectUnderlyingModel({ roleId, route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(tier) }));
+          const next = await options.api.selectUnderlyingModel({ roleId, route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(tier) });
+          if (!live()) return;
+          options.render(next);
           options.setStatus(label + '：' + modelLabelWords(model), 'success');
-        } catch (error) { options.setStatus(options.errorMessage(error, '无法保存角色模型。'), 'error'); }
+        } catch (error) { if (live()) options.setStatus(options.errorMessage(error, '无法保存角色模型。'), 'error'); }
         finally { paint(); }
       })());
       const role = projection.modelRoles.find(entry => entry.roleId === roleId);
@@ -516,8 +549,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       inherit.dataset['action'] = 'inherit-' + roleId;
       inherit.addEventListener('click', () => void (async () => {
         inherit.disabled = true;
-        try { options.render(await options.api.selectUnderlyingModel({ roleId, inherit: true })); }
-        catch (error) { options.setStatus(options.errorMessage(error, '无法恢复角色默认模型。'), 'error'); }
+        const live = requestCheck(options, channel);
+        try { const next = await options.api.selectUnderlyingModel({ roleId, inherit: true }); if (live()) options.render(next); }
+        catch (error) { if (live()) options.setStatus(options.errorMessage(error, '无法恢复角色默认模型。'), 'error'); }
         finally { inherit.disabled = false; }
       })());
       target.append(summary, button, inherit);
