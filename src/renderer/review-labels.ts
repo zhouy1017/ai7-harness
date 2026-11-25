@@ -522,6 +522,11 @@ export function reviewBatchExcludedLine(excluded: number): string {
   return `另有 ${excluded} 条需要逐条确认，不在其中；请在稿件上逐条处理。`;
 }
 
+/** 批量采纳机械修正's strip (ADR 0106 §7): how many of its suggestions rest on a table of each strength, by the strength's label. */
+export function reviewBatchStrengthsLine(strengths: ReadonlyArray<{ readonly label: string; readonly count: number }>): string {
+  return `其中 ${strengths.map((row) => `${row.label} ${row.count} 条`).join('、')}。`;
+}
+
 export function reviewBatchCappedLine(maximum: number): string {
   return `一次最多应用 ${maximum} 条；其余的在这次应用之后再准备。`;
 }

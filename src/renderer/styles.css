@@ -409,7 +409,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .review-runs > li[aria-current="true"] { border-color: var(--action-text); box-shadow: inset 3px 0 0 var(--selection-boundary); }
 .review-runs > li > span { display: block; }
 .review-run-line { font-weight: 800; }
-.review-runs .quiet { min-height: 28px; padding: .15rem .4rem; }
+.review-runs .quiet, .review-run-heading > .quiet { min-height: 28px; padding: .15rem .4rem; }
 .review-new-actions { margin-top: 1rem; }
 .review-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 22rem; }
 .review-unavailable-reason { margin: 0; }
@@ -473,6 +473,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
    the 修改建议 colour, because every line in it is one. */
 .review-batch-strip { margin-top: .7rem; padding: .8rem .9rem; border: 2px solid var(--mark-suggestion); border-radius: 10px; background: var(--surface); }
 .review-batch-scope { margin: 0; font-weight: 800; }
+.review-batch-strengths { margin: .25rem 0 0; }
 .review-batch-items { margin: .45rem 0 0; padding-left: 1.4rem; line-height: 1.7; }
 .review-report-versions, .review-report-list { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; }
 /* A list read in part (Issue #1592): how much is shown, 显示更多, and a failed page said beside it. */

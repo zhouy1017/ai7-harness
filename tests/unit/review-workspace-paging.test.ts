@@ -510,6 +510,22 @@ describe('a press on the review card while a read arrives (#1592: 查看计划 l
     expect(state.opened).toEqual([RUN]);
   });
 
+  it('stands in the Run header, above the findings a poll brings, in both layouts (#1706)', async () => {
+    const state = running();
+    const view = mount(state); await flush();
+    const above = (): boolean => {
+      const [plan, ...others] = view.root.querySelectorAll('[data-review-action="view-plan"]');
+      const order = view.root.querySelectorAll('.review-run-heading, .review-results, .review-progress-section');
+      return others.length === 0 && plan!.parentElement === order[0] && order[0]!.className === 'review-run-heading';
+    };
+    const leading = (): boolean => view.root.querySelector('.review-run-leading') !== null;
+    expect([leading(), above()]).toEqual([true, true]);
+    // Before the first finding the history stands above the Run and its results below the progress: the header is still first.
+    state.full = { ...state.full, run: { ...state.full.run!, findingCounts: { ...state.full.run!.findingCounts, must: 0, should: 0, note: 0 } } };
+    view.surface.refresh(); await flush();
+    expect([leading(), above()]).toEqual([false, true]);
+  });
+
   it('holds through the unforced poll of a running Run as well', async () => {
     const state = running();
     const view = mount(state); await flush();
@@ -661,13 +677,14 @@ describe('the control under a resting pointer stays where it stands when the car
     return { ...base, run: { ...base.run!, categories: [category(settled, ids.length)], findings: ids.map((id, index) => finding(id, index + 1)), findingsTotal: ids.length, findingsTruncated: false,
       findingCounts: { ...COUNTS, must: ids.length, pending: ids.length } } } as never;
   };
-  const viewPlan = (root: MiniElement): MiniElement => root.querySelector('[data-review-action="view-plan"]')!;
+  // 取消任务 stands below the findings, above the progress list; 查看计划 is in the Run's header, above both (#1706).
+  const below = (root: MiniElement): MiniElement => root.querySelector('[data-review-action="scope-cancel"]')!;
   const inFinding = (root: MiniElement, id: string): MiniElement => root.querySelector(`article[data-finding-id="${id}"] button`)!;
   const rest = (node: MiniElement): void => { node.dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 300, clientY: 400 })); };
   const poll = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 300)); await flush(); };
 
   /**
-   * A page that lays out like an engine, in one column: finding cards from 100 px, 200 px apart; 查看计划 300 px further down for
+   * A page that lays out like an engine, in one column: finding cards from 100 px, 200 px apart; 取消任务 300 px further down for
    * each card above it; then the progress list (100 px tall while the Run reads, 54 px once its last part is read, never less than
    * its own min-height) and 600 px more. The window is 800 px tall and the scroll is clamped to [0, page − window], also when the
    * page gets shorter. `under` names what lies under the pointer's last position.
@@ -708,17 +725,17 @@ describe('the control under a resting pointer stays where it stands when the car
     }
   }
 
-  it('keeps 查看计划 under the resting pointer while findings arrive above it, with the page at its end', async () => {
+  it('keeps 取消任务 under the resting pointer while findings arrive above it, with the page at its end', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       scroller.scrollTop = 1e6;
       expect(scroller.scrollTop).toBe(334);
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
-      const before = viewPlan(view.root).getBoundingClientRect().top;
+      under(() => below(view.root)); rest(below(view.root));
+      const before = below(view.root).getBoundingClientRect().top;
       state.full = reading(['f-1', 'f-2']);
       view.surface.refresh(); await flush();
       expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(2);
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
     });
   });
 
@@ -726,29 +743,29 @@ describe('the control under a resting pointer stays where it stands when the car
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       scroller.scrollTop = 1e6;
-      const before = viewPlan(view.root).getBoundingClientRect().top;
+      const before = below(view.root).getBoundingClientRect().top;
       // The Run's own poll with only its progress moved on: the list is drawn again, shorter, and keeps its height.
       state.full = reading([], 7);
       await poll();
       expect(view.root.querySelector('ol.review-progress li')!.dataset['reviewProgress']).toBe('7/7');
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
-      // Then findings above it while the progress list is drawn anew: 查看计划 stays under the resting pointer.
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
+      // Then findings above it while the progress list is drawn anew: 取消任务 stays under the resting pointer.
+      under(() => below(view.root)); rest(below(view.root));
       state.full = reading(['f-1'], 7);
       view.surface.refresh(); await flush();
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
     });
   });
 
   it('lets the last input win: a key or the wheel disarms the pointer\'s place until the pointer moves again', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      under(() => below(view.root)); rest(below(view.root));
       miniDocument.body.dispatchEvent({ type: 'keydown', key: 'j' });
       state.full = reading(['f-1']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(0);
-      rest(viewPlan(view.root));
+      rest(below(view.root));
       state.full = reading(['f-1', 'f-2']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(300);
@@ -759,8 +776,8 @@ describe('the control under a resting pointer stays where it stands when the car
       // A still pointer receives pointerover when what lies under it changes: that is no move, and arms nothing.
       miniDocument.body.dispatchEvent({ type: 'keydown', key: 'j' });
       scroller.scrollTop = 900;
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(400);
-      viewPlan(view.root).dispatchEvent(Object.assign({ type: 'pointerover', bubbles: true }, { clientX: 300, clientY: 400 }));
+      expect(below(view.root).getBoundingClientRect().top).toBe(400);
+      below(view.root).dispatchEvent(Object.assign({ type: 'pointerover', bubbles: true }, { clientX: 300, clientY: 400 }));
       state.full = reading(['f-1', 'f-2', 'f-3', 'f-4']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(900);
@@ -772,7 +789,7 @@ describe('the control under a resting pointer stays where it stands when the car
       await flush();
       state.full = reading(['f-1']);
       view.surface.refresh(); await flush();
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      under(() => below(view.root)); rest(below(view.root));
       // The pointer has not moved, but the page has: f-1's control is under it now.
       under(() => inFinding(view.root, 'f-1'));
       const before = inFinding(view.root, 'f-1').getBoundingClientRect().top;
@@ -786,7 +803,7 @@ describe('the control under a resting pointer stays where it stands when the car
   it('scrolls nothing when the pointer left the card, rests on text, or on a control the draw removed, hid or made one of several', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      under(() => below(view.root)); rest(below(view.root));
       view.root.querySelector('.review-host')!.dispatchEvent({ type: 'pointerleave' });
       state.full = reading(['f-1']);
       view.surface.refresh(); await flush();
@@ -808,12 +825,12 @@ describe('the control under a resting pointer stays where it stands when the car
       state.full = reading(['f-1', 'f-2', 'f-2']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(0);
-      // On 查看计划, on screen, which the draw leaves hidden.
+      // On 取消任务, on screen, which the draw leaves hidden.
       scroller.scrollTop = 900;
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(400);
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      expect(below(view.root).getBoundingClientRect().top).toBe(400);
+      under(() => below(view.root)); rest(below(view.root));
       const shown = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'checkVisibility')!;
-      Object.defineProperty(MiniElement.prototype, 'checkVisibility', { configurable: true, value(this: MiniElement) { return this.dataset['reviewAction'] !== 'view-plan'; } });
+      Object.defineProperty(MiniElement.prototype, 'checkVisibility', { configurable: true, value(this: MiniElement) { return this.dataset['reviewAction'] !== 'scope-cancel'; } });
       try {
         state.full = reading(['f-0', 'f-1', 'f-2', 'f-3']);
         view.surface.refresh(); await flush();
@@ -833,41 +850,39 @@ describe('the control under a resting pointer stays where it stands when the car
     });
   });
 
-  it('still holds the draw while 查看计划 is pressed, then draws it once with the button where the pointer rests', async () => {
+  it('still holds the draw while 取消任务 is pressed, then draws it once with the button where the pointer rests', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
-      const pressed = viewPlan(view.root);
+      under(() => below(view.root)); rest(below(view.root));
+      const pressed = below(view.root);
       const before = pressed.getBoundingClientRect().top;
       pressed.dispatchEvent(Object.assign({ type: 'pointerdown', bubbles: true }, { button: 0 }));
       state.full = reading(['f-1']);
       view.surface.refresh(); await flush();
-      expect(viewPlan(view.root)).toBe(pressed);
+      expect(below(view.root)).toBe(pressed);
       expect(scroller.scrollTop).toBe(0);
       pressed.dispatchEvent(Object.assign({ type: 'pointerup', bubbles: true }, { button: 0 }));
-      pressed.click(); await flush();
-      expect(state.opened).toEqual([RUN]);
       nextFrame(); await flush();
       expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(1);
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(300);
     });
   });
 
-  it('keeps 查看计划 in place while the note of a failed read comes and goes at the top of the card', async () => {
+  it('keeps 取消任务 in place while the note of a failed read comes and goes at the top of the card', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       scroller.scrollTop = 200;
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
-      const before = viewPlan(view.root).getBoundingClientRect().top;
+      under(() => below(view.root)); rest(below(view.root));
+      const before = below(view.root).getBoundingClientRect().top;
       state.refuse = refusal('SERVICE_UNAVAILABLE', '服务暂时无法回答。');
       view.surface.refresh(); await flush();
       expect(view.root.querySelector('.review-read-failed')).not.toBeNull();
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
       state.refuse = null;
       view.surface.refresh(); await flush();
       expect(view.root.querySelector('.review-read-failed')).toBeNull();
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(200);
     });
   });
@@ -876,12 +891,12 @@ describe('the control under a resting pointer stays where it stands when the car
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       scroller.scrollTop = 1e6;
-      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
-      const before = viewPlan(view.root).getBoundingClientRect().top;
+      under(() => below(view.root)); rest(below(view.root));
+      const before = below(view.root).getBoundingClientRect().top;
       state.full = reading(['f-1'], 7);
       view.surface.refresh(); await flush();
       expect(view.root.querySelector('ol.review-progress')!.style['minHeight']).toBe('100px');
-      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
     });
   });
 

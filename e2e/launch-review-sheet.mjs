@@ -71,8 +71,14 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   }
   const runId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.run?.reviewRunId)`);
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
-  // The running review draws its card again as findings arrive above 查看计划; the pointer rests on it, then presses once.
-  await pressReviewControl(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan', null, { wheel: true, rest: true });
+  // 查看计划 stands in the Run's own header (#1706): the running review draws its summary, findings and progress again below it, so
+  // nothing a poll brings moves it. Real geometry says so before the press; the pointer rests on it, then presses once.
+  const viewPlan = '.review-run-heading > [data-review-action="view-plan"]';
+  await waitFor(renderer, `(() => {const button=document.querySelector(${JSON.stringify(viewPlan)});if(!button||document.querySelectorAll('[data-review-action="view-plan"]').length!==1)return false;
+    const bottom=button.getBoundingClientRect().bottom;let below=0;
+    for(let node=button.parentElement.nextElementSibling;node;node=node.nextElementSibling){const box=node.getBoundingClientRect();if(box.height===0)continue;below+=1;if(box.top<bottom-.5)return false;}
+    return below>0;})()`, 'review-sheet-view-plan-in-header');
+  await pressReviewControl(renderer, waitFor, viewPlan, 'review-sheet-view-plan', null, { wheel: true, rest: true });
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
   if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`)) {
     try {

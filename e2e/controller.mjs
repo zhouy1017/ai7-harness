@@ -1268,6 +1268,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-keyboard-gate',
     'marks-paging-wide',
     'marks-paging-gate',
+    'review-mechanical-batch-confirm',
     'review-batch-undo-after-leaving',
     'review-batch-undo-wide',
     'review-batch-undo-gate',

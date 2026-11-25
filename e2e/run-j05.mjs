@@ -1,6 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { draftClick, draftKey, draftGeometry, draftSelect, draftWheelToAnchor, markDraftKept, draftReviewRunIds, draftReviewRunsUnchanged } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { pressReviewControl } from './launch-review-sheet.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1358,8 +1359,22 @@ async function main() {
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
-    // Q1 / Issue #1410 item 5: 批量采纳机械修正 applies at once, and 撤销本批应用 stands beside the result.
-    await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
+    // ADR 0106 §7: 批量采纳机械修正 first shows its strip — what it holds, and how many per strength — and writes nothing; 确认应用 there
+    // writes the batch, and 撤销本批应用 stands beside the result. Both are pressed by the pointer, each read inside the window first,
+    // and the group stays open under the press.
+    at('review-mechanical-batch-confirm');
+    const localBatch = 'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]';
+    await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(localBatch)}); return !!button && !button.disabled && button.textContent==='批量采纳机械修正' && button.closest('details.review-category-fold')?.open===true; })()`, 'local-mechanical-batch-offered');
+    await pressReviewControl(renderer, waitFor, localBatch, 'local-mechanical-batch-prepare', null, { wheel: true });
+    await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]')?.dataset.reviewBatchState==='ready' && document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-mechanical-batch-strip');
+    const batchStrip = await renderer.evaluate(`(async () => { const strip=document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]'), box=strip.getBoundingClientRect();
+      const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run, strengths=run.localCheck.strengths??[];
+      const card=await window.ai7.getEditorialMarkCard({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,markId:window.__j05LocalMark});
+      return { open: strip.closest('details.review-category-fold')?.open===true, shown: strip.checkVisibility() && box.height>0 && box.width>0, count: Number(strip.dataset.reviewBatchCount),
+        strengths: strengths.length, line: (strip.querySelector('.review-batch-strengths')?.textContent??null)===(strengths.length===0?null:'其中 '+strengths.map(row=>row.label+' '+row.count+' 条').join('、')+'。'),
+        unwritten: card.suggestion?.application==null && !document.querySelector('.review-batch-applied') }; })()`);
+    requireJourney(batchStrip?.open === true && batchStrip.shown === true && batchStrip.count > 0 && batchStrip.line === true && batchStrip.unwritten === true, 'local-mechanical-batch-confirms-first', batchStrip);
+    await pressReviewControl(renderer, waitFor, '[data-review-action="batch-confirm"]', 'local-mechanical-batch-confirm', null, { wheel: true });
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');
     requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
     // 撤销本批应用 is the batch's editor step (Issue #1654): it stands again after leaving the review page and coming back.
@@ -1376,6 +1391,8 @@ async function main() {
         await waitFor(renderer, `!document.querySelector('.review-batch-applied') && document.querySelector('[data-review-action="batch-prepare"]')?.disabled===false`, 'review-batch-undone');
         await assertRenderer(renderer, `(async()=>{const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run;return run.findings.filter(f=>f.categoryId==='local-text-check').every(f=>f.status==='pending');})()`, 'review-batch-all-pending');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'review-batch-reconfirm-ready');
+        await triageClick(renderer,'[data-review-action="batch-confirm"]');
         await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')?.disabled===false`, 'review-batch-reapplied');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
@@ -1515,6 +1532,8 @@ async function main() {
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'review-triage-cleanup-confirm-ready');
+        await triageClick(renderer,'[data-review-action="batch-confirm"]');
         try {
           await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
         } catch {
