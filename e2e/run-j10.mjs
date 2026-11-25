@@ -1928,15 +1928,15 @@ async function main() {
 
     at('review-controls-progress-floor');
     // #1526: while the Run runs, the page's own polls draw its progress list again and it keeps its height — set through the style
-    // object, which the page's policy admits (an inline style attribute it refuses) — so 查看计划 stays where it stands at the end.
+    // object, which the page's policy admits (an inline style attribute it refuses) — so the page stays where it stands at its end.
     await waitFor(renderer, `(() => { const list=document.querySelector('.review-workspace-card[data-review-state="running"] ol.review-progress'); if(!list||list.style.minHeight==='')return false;
       const shown=getComputedStyle(list).minHeight; return shown===list.style.minHeight && shown!=='0px'; })()`, 'review-controls-progress-floor-applied', 30_000);
     const progressPlace = await renderer.evaluate(`new Promise(resolve => { const page=document.scrollingElement; page.scrollTop=page.scrollHeight; requestAnimationFrame(() => {
-      window.__ai7ProgressProbe=document.querySelector('ol.review-progress'); resolve({ top: document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top,
+      window.__ai7ProgressProbe=document.querySelector('ol.review-progress'); resolve({ top: document.querySelector('.review-progress-section').getBoundingClientRect().top,
       end: page.scrollTop > 0 && Math.abs(page.scrollTop + page.clientHeight - page.scrollHeight) < 1 }); }); })`);
     requireJourney(progressPlace?.end === true, 'review-controls-progress-page-end', progressPlace);
     await waitFor(renderer, `document.querySelector('ol.review-progress')!==window.__ai7ProgressProbe && document.querySelector('.review-workspace-card')?.dataset.reviewState==='running'`, 'review-controls-progress-redrawn', 30_000);
-    const progressTop = await renderer.evaluate(`document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top`);
+    const progressTop = await renderer.evaluate(`document.querySelector('.review-progress-section').getBoundingClientRect().top`);
     requireJourney(Math.abs(progressTop - progressPlace.top) < 1, 'review-controls-progress-kept-place', { before: progressPlace.top, after: progressTop });
 
     at('review-controls-pause-resume');

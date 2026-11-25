@@ -164,6 +164,7 @@ import {
   reviewBatchItemLine,
   reviewBatchReadyLine,
   reviewBatchScopeLine,
+  reviewBatchStrengthsLine,
   reviewCategoryProgressLine,
   reviewChapterOptionLabel,
   reviewClauseLine,
@@ -319,6 +320,8 @@ interface BatchStrip {
   readonly items: ReadonlyArray<BatchItem>;
   readonly excluded: number;
   readonly capped: boolean;
+  /** 批量采纳机械修正 alone: how many of the listed suggestions rest on a table of each strength (ADR 0106 §7). */
+  readonly strengths: ReadonlyArray<{ readonly label: string; readonly count: number }>;
   problem: string | null;
   /** The Effect was refused or its outcome is unknown: only 重新准备应用 is offered, never the same 确认应用 again. */
   refused: boolean;
@@ -992,7 +995,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   /**
    * What stays where it stands on screen when the card is drawn again (Issues #1525, #1526): the control under the editor's
-   * resting pointer inside the card — findings arriving above 查看计划 must not walk it out from under the pointer — otherwise
+   * resting pointer inside the card — findings arriving above it must not walk it out from under the pointer — otherwise
    * the caller's own anchor (the focused card). Measured before the draw, put back once after it by one relative scroll; nothing
    * when it is off screen, gone, hidden or not the only control of its kind. The last input wins: a pointer move over the card
    * arms the pointer's place, and leaving the card, the window losing focus, a key or the wheel disarm it until the next move
@@ -1366,10 +1369,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
+    if (run.state !== 'prepared') {
+      // In the Run's own header (Issue #1706): the summary, the findings and the progress are all drawn below it, so nothing a
+      // poll brings moves it. Right after the Run's name, before its scope and date: there it also stands clear of a Task Drawer
+      // that lies over the page's right half in a small window. It keeps the prepared card's plan-reading route after Start
+      // became one step; the same drawer hides technical detail in ordinary mode.
+      const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
+      viewPlan.dataset['taskPlanOpen'] = 'review-run';
+      heading.append(viewPlan);
+    }
     heading.append(meta);
     if (runHasResults(run)) {
       section.classList.add('review-run-leading');
       meta.textContent = `${run.scope.label.replaceAll('内容块', '段落')} · 创建于 ${reviewMinuteLabel(run.createdAt)}`;
+      // Where the one-row header is too narrow these words are cut short; hovering says them whole.
+      meta.title = meta.textContent;
       // One row (Issue #1524 6.1): the Run's state, name, scope and date share it with the history fold, the 新建审阅
       // actions and the one export entry. The synthesis header below keeps its own one-line behaviour (#1433 / #1510).
       const reasonId = uid('new-review-reason');
@@ -1487,10 +1501,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.state === 'prepared') {
       section.append(renderPlan(run));
     } else {
-      // Keeps the prepared card's plan-reading route after Start became one step; the same drawer hides technical detail in ordinary mode.
-      const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
-      viewPlan.dataset['taskPlanOpen'] = 'review-run';
-      section.append(viewPlan, renderProgress(run));
+      section.append(renderProgress(run));
       if (run.canContinue) {
         const resume = el('div', 'review-continue');
         resume.append(el('p', 'attention-note', REVIEW_CONTINUE_NOTE), actionButton('continue', 'primary', () => void continueRun(run)));
@@ -2202,7 +2213,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         line.dataset['markId'] = item.markId;
         items.append(line);
       }
-      node.append(scope, items);
+      node.append(scope);
+      if (strip.strengths.length > 0) node.append(el('p', 'review-batch-strengths', reviewBatchStrengthsLine(strip.strengths)));
+      node.append(items);
       if (strip.unknown) {
         node.append(el('p', 'review-problem', technicalWords('结果待确认；确认权威记录之前不能再次应用。', '正在确认上次修改的结果，请稍后再试。')));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
@@ -2768,8 +2781,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * found. The strip lists exactly what 确认应用 will send.
    */
   async function prepareBatch(run: ReviewRunProjection, category: ReviewRunCategoryProjection): Promise<void> {
+    const mechanical = category.categoryId === 'local-text-check';
     await act(REVIEW_STATUS_LINES.batchPreparing, REVIEW_STATUS_LINES.batchPrepareFailed, async () => {
       const pending: ReviewFindingProjection[] = [];
+      let strengths: BatchStrip['strengths'] = [];
       let after: number | null = null;
       for (let page = 0; page < MAX_FOLLOW_PAGES; page += 1) {
         const answer: ReviewWorkspaceProjection = await api.inspectReviewWorkspace({
@@ -2778,17 +2793,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const opened: ReviewRunProjection | null = answer.run;
         if (opened === null || opened.reviewRunId !== run.reviewRunId) break;
         pending.push(...opened.findings);
+        if (mechanical) strengths = opened.localCheck?.strengths ?? [];
         if (!opened.findingsTruncated || opened.findings.length === 0) break;
         after = opened.findings.at(-1)!.ordinal;
       }
       const suggestions = pending.filter((finding) => finding.status === 'pending' && finding.output === 'change-suggestion');
-      const standing = standingBatchSuggestions(suggestions, category.categoryId === 'local-text-check');
+      const standing = standingBatchSuggestions(suggestions, mechanical);
       const listed = standing.slice(0, MAX_BATCH_APPLY_SUGGESTIONS);
       ui.batch = {
         categoryId: category.categoryId,
         items: listed.map((finding) => ({ findingId: finding.findingId, markId: finding.markId!, blockId: finding.blockId, quote: finding.quote, replacement: finding.replacement! })),
         excluded: suggestions.length - standing.length,
         capped: standing.length > listed.length,
+        strengths,
         problem: null,
         refused: false,
         capability: false,
@@ -2798,9 +2815,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pendingFocus = { findingId: null, field: 'batch' };
     });
     // 接受并应用全部 applies in the same step (Issue #1410 item 5): what was left out is counted in the result, and
-    // 撤销本批应用 takes the batch back.
+    // 撤销本批应用 takes the batch back. 批量采纳机械修正 stops at its strip first (ADR 0106 §7): the editor reads how many
+    // suggestions it holds per strength, and 确认应用 there writes them.
     const strip = ui.batch;
-    if (strip !== null && strip.categoryId === category.categoryId && strip.items.length > 0 && !strip.refused) await confirmBatch(run, strip);
+    if (!mechanical && strip !== null && strip.categoryId === category.categoryId && strip.items.length > 0 && !strip.refused) await confirmBatch(run, strip);
   }
 
   /**

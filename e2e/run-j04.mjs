@@ -3142,7 +3142,11 @@ async function main() {
         synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.top <= synthesisLayout.height * .45 && synthesisLayout.bottom <= synthesisLayout.height,
           `review-first-card-${viewport}-geometry`, synthesisLayout);
-        await pointerClick(renderer, waitFor, '.review-run > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`);
+        // 查看计划 is in the Run's header, above the findings (#1706): on the header's one row — level with 导出 at its end — and
+        // inside the window with the page unscrolled, then pressed.
+        requireJourney(await renderer.evaluate(`(() => {const centre=(node)=>{const box=node.getBoundingClientRect();return box.top+box.height/2;},plan=document.querySelector('.review-run-heading > [data-review-action="view-plan"]'),last=document.querySelector('.review-run-heading > .review-header-export > summary');
+          return !!plan&&!!last&&Math.abs(centre(plan)-centre(last))<plan.getBoundingClientRect().height/2;})()`) === true, `review-first-card-${viewport}-header-one-row`);
+        await pressReviewControl(renderer, waitFor, '.review-run-heading > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`, null);
         await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`, `review-first-card-${viewport}-drawer`);
         await renderer.evaluate(`scrollTo(0, 0)`);
         await waitFor(renderer, `(async () => {const card=document.querySelector('article.review-finding'),width=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const next=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?document.querySelector('#task-drawer').getBoundingClientRect().width:0;return scrollY===0&&Math.abs(width-next)<.1&&Math.abs(next-card.getBoundingClientRect().width)<.1&&Math.abs(padding-target)<1;})()`, `review-first-card-${viewport}-drawer-stable`);
@@ -3724,7 +3728,7 @@ async function main() {
     requireJourney(collapsed.parts.every(Boolean) && collapsed.card <= collapsed.bound && collapsed.quote <= collapsed.quoteBound && collapsed.address && collapsed.badges === 1 &&
       JSON.stringify(collapsed.buttons) === JSON.stringify(['展开', '回到原文', '忽略']), 'factual-card-ordinary-collapsed', collapsed);
     // The Task Drawer beside or over the card: docked, 展开 stays topmost; overlaid, closing it by pointer gives the card its place back.
-    await pressInWindow(renderer, '.review-run > [data-review-action="view-plan"]', 'factual-card-ordinary-open-drawer');
+    await pressInWindow(renderer, '.review-run-heading > [data-review-action="view-plan"]', 'factual-card-ordinary-open-drawer');
     await waitFor(renderer, `(async () => {const drawer=document.querySelector('#task-drawer');if(drawer?.dataset.taskDrawer!=='open')return false;const before=drawer.getBoundingClientRect().left;await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
       const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?drawer.getBoundingClientRect().width:0;return Math.abs(before-drawer.getBoundingClientRect().left)<.1&&Math.abs(padding-target)<1;})()`, 'factual-card-ordinary-drawer-settled');
     const docked = await renderer.evaluate(`innerWidth>=1120`);

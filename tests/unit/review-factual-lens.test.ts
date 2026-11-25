@@ -735,6 +735,32 @@ describe('one-step review actions (#1410)', () => {
     expect(root.querySelector('section.review-batch-applied')).toBeNull();
   });
 
+  it('stops 批量采纳机械修正 at its strip with the count per strength, and writes on 确认应用 (ADR 0106 §7)', async () => {
+    const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
+    const mounted = mount();
+    Object.assign(mounted.api, { applyChangeSuggestionBatch: applyBatch, getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn() });
+    const base = typos([suggestion('m1', 1), suggestion('m2', 2)].map((entry) => ({ ...entry, categoryId: 'local-text-check' })));
+    const local = { ...base, run: { ...base.run!, categories: [{ ...base.run!.categories[0]!, categoryId: 'local-text-check' }],
+      localCheck: { strengths: [{ label: '国家规范（应改）', count: 2 }, { label: '辞书推荐（建议改）', count: 1 }], planDigest: 'd'.repeat(64),
+        options: { numerals: 'off' }, state: 'materialized', paragraphs: 2, counts: {}, excluded: [] } } } as never;
+    mounted.inspectReviewWorkspace.mockImplementation(async () => local);
+    mounted.surface.refresh(); await flush();
+    const { root } = mounted;
+    expect(button(root, 'batch-prepare')!.textContent).toBe('批量采纳机械修正');
+    button(root, 'batch-prepare')!.click(); await flush();
+    // Nothing is written yet: the strip stands open in its group, with what it holds per strength, 确认应用 and 取消.
+    expect(applyBatch).not.toHaveBeenCalled();
+    const strip = root.querySelector('section.review-batch-strip') as MiniElement;
+    expect(strip.dataset['reviewBatchState']).toBe('ready');
+    expect(strip.closest('details')!.open).toBe(true);
+    expect(strip.querySelector('.review-batch-strengths')!.textContent).toBe('其中 国家规范（应改） 2 条、辞书推荐（建议改） 1 条。');
+    expect(button(root, 'batch-cancel')).not.toBeNull();
+    button(root, 'batch-confirm')!.click(); await flush();
+    expect(applyBatch).toHaveBeenCalledOnce();
+    expect(applyBatch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['m1', 'm2'] }));
+    expect(root.querySelector('section.review-batch-applied')!.dataset['reviewBatchState']).toBe('applied');
+  });
+
   it.each(['', '【未联网核查】'])('excludes guessed and punctuation-matched suggestions from the batch (%s)', async (disclosure) => {
     const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
     const { root, status } = await view([{ ...suggestion('guess', 1), quote: '古怪', replacement: '奇怪', note: `${disclosure}【锚点不唯一】同一段内“古怪”重复出现，可酌情替换其一。` },

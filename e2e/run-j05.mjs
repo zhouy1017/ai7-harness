@@ -1,6 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { draftClick, draftKey, draftGeometry, draftSelect, draftWheelToAnchor, markDraftKept, draftReviewRunIds, draftReviewRunsUnchanged } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { pressReviewControl } from './launch-review-sheet.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1406,8 +1407,22 @@ async function main() {
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
-    // Q1 / Issue #1410 item 5: 批量采纳机械修正 applies at once, and 撤销本批应用 stands beside the result.
-    await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
+    // ADR 0106 §7: 批量采纳机械修正 first shows its strip — what it holds, and how many per strength — and writes nothing; 确认应用 there
+    // writes the batch, and 撤销本批应用 stands beside the result. Both are pressed by the pointer, each read inside the window first,
+    // and the group stays open under the press.
+    at('review-mechanical-batch-confirm');
+    const localBatch = 'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]';
+    await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(localBatch)}); return !!button && !button.disabled && button.textContent==='批量采纳机械修正' && button.closest('details.review-category-fold')?.open===true; })()`, 'local-mechanical-batch-offered');
+    await pressReviewControl(renderer, waitFor, localBatch, 'local-mechanical-batch-prepare', null, { wheel: true });
+    await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]')?.dataset.reviewBatchState==='ready' && document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-mechanical-batch-strip');
+    const batchStrip = await renderer.evaluate(`(async () => { const strip=document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]'), box=strip.getBoundingClientRect();
+      const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run, strengths=run.localCheck.strengths??[];
+      const card=await window.ai7.getEditorialMarkCard({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,markId:window.__j05LocalMark});
+      return { open: strip.closest('details.review-category-fold')?.open===true, shown: strip.checkVisibility() && box.height>0 && box.width>0, count: Number(strip.dataset.reviewBatchCount),
+        strengths: strengths.length, line: (strip.querySelector('.review-batch-strengths')?.textContent??null)===(strengths.length===0?null:'其中 '+strengths.map(row=>row.label+' '+row.count+' 条').join('、')+'。'),
+        unwritten: card.suggestion?.application==null && !document.querySelector('.review-batch-applied') }; })()`);
+    requireJourney(batchStrip?.open === true && batchStrip.shown === true && batchStrip.count > 0 && batchStrip.line === true && batchStrip.unwritten === true, 'local-mechanical-batch-confirms-first', batchStrip);
+    await pressReviewControl(renderer, waitFor, '[data-review-action="batch-confirm"]', 'local-mechanical-batch-confirm', null, { wheel: true });
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');
     requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
     // 撤销本批应用 is the batch's editor step (Issue #1654): it stands again after leaving the review page and coming back.
@@ -1424,6 +1439,8 @@ async function main() {
         await waitFor(renderer, `!document.querySelector('.review-batch-applied') && document.querySelector('[data-review-action="batch-prepare"]')?.disabled===false`, 'review-batch-undone');
         await assertRenderer(renderer, `(async()=>{const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run;return run.findings.filter(f=>f.categoryId==='local-text-check').every(f=>f.status==='pending');})()`, 'review-batch-all-pending');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'review-batch-reconfirm-ready');
+        await triageClick(renderer,'[data-review-action="batch-confirm"]');
         await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')?.disabled===false`, 'review-batch-reapplied');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
@@ -1530,6 +1547,41 @@ async function main() {
           requireJourney(false,'review-triage-findings',state);
         }
         const runId=await renderer.evaluate(`document.querySelector('.review-workspace-card').dataset.reviewRunId`);
+        if (viewport.width===1280) {
+          // The page's notice sits in the header band, as on the manuscript: with 审阅 at its top it lies on none of the Run header's
+          // controls (查看计划 among them), and its 撤销 is pressed by the pointer. Read at the window's own size, not an emulated
+          // one. The pointer on the notice keeps it showing; the wheel, over it, brings the page to its top.
+          at('review-notice-header-band');
+          await renderer.send('Emulation.clearDeviceMetricsOverride');
+          const noticeFinding=await renderer.evaluate(`document.querySelector('article.review-finding[data-status="pending"] [data-review-action="reject"]')?.closest('article').dataset.findingId ?? null`);
+          requireJourney(typeof noticeFinding==='string','review-notice-finding');
+          await pressReviewControl(renderer, waitFor, `article.review-finding[data-finding-id="${noticeFinding}"] [data-review-action="reject"]`, 'review-notice-reject', null, { wheel: true });
+          const undoPoint=`(() => { const toast=document.querySelector('[data-toast]'), button=toast?.querySelector('button'); if(!toast||toast.hidden||button?.textContent!=='撤销')return null; const r=button.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`;
+          await waitFor(renderer, `${undoPoint}!==null`, 'review-notice-shown');
+          const undoAt=await renderer.evaluate(undoPoint);
+          requireJourney(undoAt!==null,'review-notice-still-shown');
+          await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:undoAt.x,y:undoAt.y,button:'none',buttons:0});
+          for (let turn=0; turn<20; turn+=1) {
+            const offset=await renderer.evaluate('scrollY');
+            if (offset===0) break;
+            await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:undoAt.x,y:undoAt.y,deltaX:0,deltaY:-offset});
+            await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+          }
+          const band=await renderer.evaluate(`(() => { const toast=document.querySelector('[data-toast]'), box=toast.getBoundingClientRect(), undo=toast.querySelector('button'), u=undo?.getBoundingClientRect();
+            const controls=Array.from(document.querySelectorAll('.review-run-heading :is(button, summary)')).filter((node)=>node.checkVisibility()&&node.getBoundingClientRect().height>0);
+            const clear=controls.filter((node)=>{const r=node.getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));});
+            return { shown: !toast.hidden, scrollY, window: [innerWidth, innerHeight], toast: [box.left, box.top, box.right, box.bottom], inside: box.left>=0&&box.top>=0&&box.right<=innerWidth&&box.bottom<=innerHeight,
+              controls: controls.length, clear: clear.length, plan: clear.some((node)=>node.dataset.reviewAction==='view-plan'),
+              undo: !!undo && undo.contains(document.elementFromPoint(u.left+u.width/2,u.top+u.height/2)) }; })()`);
+          requireJourney(band.shown===true && band.scrollY===0 && band.inside===true && band.controls>=5 && band.clear===band.controls && band.plan===true && band.undo===true, 'review-notice-clear-of-header', band);
+          for (const type of ['mousePressed','mouseReleased']) await renderer.send('Input.dispatchMouseEvent',{type,x:undoAt.x,y:undoAt.y,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
+          await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${noticeFinding}"]')?.dataset.status==='pending' && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已撤回拒绝')`, 'review-notice-undo-pressed');
+          // The pointer leaves the notice, so it goes by itself before the stage goes on.
+          await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:Math.round(band.window[0]/2),y:Math.round(band.window[1]/2),button:'none',buttons:0});
+          await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden===true`, 'review-notice-gone', 15_000);
+          await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
+          await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'review-notice-viewport-back');
+        }
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
         // The large Run reads (#1592): its first page is on screen, no refused read is standing, and a second page is offered.
@@ -1607,6 +1659,8 @@ async function main() {
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'review-triage-cleanup-confirm-ready');
+        await triageClick(renderer,'[data-review-action="batch-confirm"]');
         try {
           await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
         } catch {
