@@ -14,7 +14,7 @@ export function newerDataVersionMessage(dataVersion: number, schemaRevision: num
 
 /** Data an earlier AI7 wrote, refused before anything touches it (#1634). */
 export function olderDataVersionMessage(dataVersion: number): string {
-  return `这份书库的数据版本是 ${dataVersion}，需要升级才能打开。早于 0.7.2 的书库请先用 0.7.4 打开。`;
+  return `这份书库的数据版本是 ${dataVersion}，需要升级才能打开。早于 0.7.2 的书库请先用 0.7.3 打开。`;
 }
 
 /** Accept only the exact, bounded storage refusals owned here, on both sides of startup IPC. */

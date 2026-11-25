@@ -117,7 +117,7 @@ function harness(api: object = {}) {
     mountBackgroundAnalysis: vi.fn(), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
     settleScreen: vi.fn(async () => true),
     BOOK_SCREEN_SECTIONS: {},
-    modelServiceChannel:null,modelChoices:new Map(),flashModelChoices:new Map(),effortOtherDrafts:new Map(),effortDrafts:new Map(),modelFilters:new Map(),favourites:[],
+    modelServiceChannel:null,generation:0,opened:0,modelChoices:new Map(),flashModelChoices:new Map(),effortOtherDrafts:new Map(),effortDrafts:new Map(),modelFilters:new Map(),favourites:[],
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
     KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
     mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),

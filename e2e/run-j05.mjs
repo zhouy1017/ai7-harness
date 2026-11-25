@@ -12,7 +12,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { READING_REVISION, DIRECT_EDIT, applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { READING_REVISION, DIRECT_EDIT, statusBarClear, statusBarOverlaps, applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -688,16 +688,25 @@ async function main() {
     await draftGeometry(renderer, '#persistence-status', async () => {
     await waitFor(renderer, `(() => {const status=document.querySelector('#persistence-status'),line=status?.querySelector('.status-line');if(!status||status.hidden||status.dataset.tone!=='error'||!line||line.textContent!=='先选中一段文字，再添加备注。'||window.__j05.composer())return false;const style=getComputedStyle(status),r=line.getBoundingClientRect();return style.visibility==='visible'&&Number(style.opacity)>0&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, 'header-no-selection-reason');
     });
-    await draftClick(renderer,requireJourney,waitFor,'#persistence-status .status-dismiss','header-no-selection-dismiss');
-    await waitFor(renderer,`document.querySelector('#persistence-status').hidden`,'header-no-selection-dismissed');
+    // Issue #1710: the refusal stays in the bar while the note form opens over the text. The form stops above the bar, so every
+    // press below is on the form's own controls (each press checks the hit at its control's centre, with no scroll made for it).
+    const composerClearOfBar = async (name) => {
+      try { await waitFor(renderer, `window.__j05.composer() !== null && ${statusBarClear(['[data-mark-composer]'])}`, name, 10_000); }
+      catch { requireJourney(false, name, await renderer.evaluate(statusBarOverlaps(['[data-mark-composer]']))); }
+    };
     await draftSelect(renderer,requireJourney,waitFor,first,RANGES.note[0],RANGES.note[1],'header-note-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');
+    await composerClearOfBar('header-note-clear-of-the-refusal');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-quote]','header-empty-note-inside');
     await assertRenderer(renderer,`window.__j05.composer()?.dataset.markComposer==='create-editor-note'&&document.querySelector('[data-mark-composer] textarea').value===''`,'header-empty-note-kept');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] textarea','header-note-field-focus');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="cancel"]','header-note-cancel');
     await waitFor(renderer,`!window.__j05.composer()&&!document.querySelector('[data-mark-draft-row="editor-note"]')`,'header-note-cancelled');
+    // The refusal is still there to read, and × closes it.
+    await waitFor(renderer, `(() => {const status=document.querySelector('#persistence-status');return !status.hidden&&status.dataset.tone==='error'&&status.querySelector('.status-line')?.textContent==='先选中一段文字，再添加备注。';})()`, 'header-no-selection-still-said');
+    await draftClick(renderer,requireJourney,waitFor,'#persistence-status .status-dismiss','header-no-selection-dismiss');
+    await waitFor(renderer,`document.querySelector('#persistence-status').hidden`,'header-no-selection-dismissed');
     await draftSelect(renderer,requireJourney,waitFor,first,34,35,'header-annotation-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','header-annotation-choose');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`, 'header-annotation-focused');
@@ -709,6 +718,22 @@ async function main() {
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-draft-row="annotation"]','header-annotation-reopen');
     await waitFor(renderer,`document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`,'header-annotation-restored-focused');
     await assertRenderer(renderer,`document.querySelector('[data-mark-composer="create-annotation"] textarea')?.value==='公开合成栏头批注'`,'header-annotation-restored-words');
+    // Issue #1710, the other order: the form is open when its own 添加批注 fails. The fault is armed apart from the press (the next
+    // press of 添加批注 finds no identity for the new mark); the bar then appears and the form is brought back above it, words kept.
+    await assertRenderer(renderer, `(() => {
+      const arm = (event) => {
+        if (!(event.target instanceof Element) || event.target.closest('[data-mark-composer] [data-mark-action="submit"]') === null) return;
+        document.removeEventListener('click', arm, true);
+        const original = Crypto.prototype.randomUUID;
+        Crypto.prototype.randomUUID = function () { Crypto.prototype.randomUUID = original; throw new Error('J-05 armed fault'); };
+      };
+      document.addEventListener('click', arm, true);
+      return true;
+    })()`, 'header-annotation-fault-armed');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="submit"]','header-annotation-failing-submit');
+    await waitFor(renderer, `(() => {const status=document.querySelector('#persistence-status');return !status.hidden&&status.dataset.tone==='error'&&status.querySelector('.status-line')?.textContent==='标记未能添加。'&&document.documentElement.dataset.statusBar==='shown'&&document.querySelector('[data-mark-composer="create-annotation"] textarea')?.value==='公开合成栏头批注'&&window.__j05.mark('annotation',${JSON.stringify(first)}).length===0;})()`, 'header-annotation-failure-said');
+    await composerClearOfBar('header-annotation-clear-of-its-failure');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] textarea','header-annotation-field-again');
     await draftKey(renderer,'Tab',9);
     await waitFor(renderer,`document.activeElement===document.querySelector('[data-mark-composer] [data-mark-action="submit"]')`,'header-annotation-submit-focused');
     await draftKey(renderer,'Enter',13,2); await draftKey(renderer,'Enter',13,2);
@@ -1126,6 +1151,29 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]')`, 'proposal-workspace-active');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const workspace = await window.ai7.inspectProposalWorkspace({ manuscriptId: work.manuscriptId, branchId: work.branchId, resultId: null }); window.__j05WorkspaceMarkId = workspace.items.find((item) => item.blockId === ${JSON.stringify(proposalBlock)}).markId; const row = document.getElementById('windowed-' + window.__j05WorkspaceMarkId); if (!row) return false; row.click(); return true; })()`, 'proposal-activate-synthetic-change');
     await waitFor(renderer, `document.querySelector('[data-proposal-active]')?.dataset.proposalActive === window.__j05WorkspaceMarkId`, 'proposal-synthetic-active');
+    // The position rail stands beside the 修改导航 list, in its own column: its track, ticks and lanes are drawn inside that column and
+    // never over a row, so a row's centre is the row's own. A real press there chooses the row, and a real key goes back.
+    await waitFor(renderer, `document.querySelector('.proposal-navigator > .position-rail .rail-marker') !== null`, 'proposal-rail-drawn');
+    const railBeside = await renderer.evaluate(`(() => {
+      const nav = document.querySelector('.proposal-navigator'), list = nav.querySelector('[role="listbox"]'), rail = nav.querySelector(':scope > .position-rail');
+      const box = (node) => { const r = node.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom].map((value) => Math.round(value * 10) / 10); };
+      const l = box(list), r = box(rail), line = box(rail.querySelector('.rail-line'));
+      const drawn = Array.from(rail.querySelectorAll('.rail-line, .rail-now, .rail-tick, .rail-gap, .rail-marker'), box).filter((b) => b[2] > b[0]);
+      return { position: getComputedStyle(rail).position, list: l, rail: r, line, view: [innerWidth, innerHeight], outside: drawn.filter((b) => b[0] < r[0] - 0.5 || b[2] > r[2] + 0.5).length,
+        beside: r[2] > r[0] && r[0] >= l[2] - 0.5 && r[2] <= innerWidth && Math.abs(r[1] - l[1]) < 1 && Math.abs(r[3] - l[3]) < 1 && Math.abs(line[1] - r[1]) < 1 && Math.abs(line[3] - r[3]) < 1 };
+    })()`);
+    if (!(railBeside?.position === 'relative' && railBeside.beside === true && railBeside.outside === 0)) console.error('J-05/proposal-rail-beside-the-list/diagnostic', JSON.stringify(railBeside));
+    requireJourney(railBeside?.position === 'relative' && railBeside.beside === true && railBeside.outside === 0, 'proposal-rail-beside-the-list', railBeside);
+    const navigatorRows = await renderer.evaluate(`(() => {
+      const rows = Array.from(document.querySelectorAll('.proposal-navigator [data-windowed-index]')), active = rows.find((row) => row.getAttribute('aria-selected') === 'true');
+      const index = Number(active?.dataset.windowedIndex), next = rows.find((row) => Number(row.dataset.windowedIndex) === index + 1), previous = rows.find((row) => Number(row.dataset.windowedIndex) === index - 1);
+      return active ? { active: active.id, other: (next ?? previous)?.id ?? null, back: next ? 'ArrowUp' : 'ArrowDown' } : null;
+    })()`);
+    requireJourney(typeof navigatorRows?.other === 'string' && navigatorRows.active === 'windowed-' + await renderer.evaluate('window.__j05WorkspaceMarkId'), 'proposal-navigator-rows', navigatorRows);
+    await pointerClick(renderer, waitFor, `[id="${navigatorRows.other}"]`, 'proposal-row-press', { scroll: false });
+    await waitFor(renderer, `'windowed-' + document.querySelector('[data-proposal-active]')?.dataset.proposalActive === ${JSON.stringify(navigatorRows.other)} && document.getElementById(${JSON.stringify(navigatorRows.other)})?.getAttribute('aria-selected') === 'true'`, 'proposal-row-press-chooses-the-row');
+    await press(renderer, navigatorRows.back);
+    await waitFor(renderer, `document.querySelector('[data-proposal-active]')?.dataset.proposalActive === window.__j05WorkspaceMarkId && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-row-key-returns');
     await click(renderer, '并排对比', 'proposal-side-by-side');
     await waitFor(renderer, `document.querySelector('[data-comparison-mode="side-by-side"]')`, 'proposal-comparison-mode');
     await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); window.__j05ProposalBinding = null; return root.querySelectorAll('[data-windowed-index]').length <= 14 && root.textContent.includes('原文') && root.textContent.includes('当前稿件') && !root.textContent.includes('当前权威稿件') && root.textContent.includes('修改建议（未应用）'); })()`, 'proposal-bounded-labeled-comparison');
@@ -1332,7 +1380,7 @@ async function main() {
     // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
     at('local-check-exact-sample1');
     await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
-    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
+    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id] + p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
     await settled(renderer, 'local-edit-durable');
     await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。'); })()`, 'local-frozen-words-kept');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-review-entry');
@@ -1389,6 +1437,50 @@ async function main() {
     await waitFor(renderer, `window.__j05.text(window.__j05LocalBlock)===window.__j05LocalOriginal && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent==='待处理'`, 'local-reversal-restores-text');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
+
+    // BUG-06 (#1754): a review card can reject a suggestion after its paragraph joins the one before it.
+    at('review-reject-after-join');
+    await press(renderer, 'Escape');
+    const localBlock = await renderer.evaluate('window.__j05LocalBlock');
+    const previousBlock = await renderer.evaluate('window.__j05.block(window.__j05LocalBlock)?.previousElementSibling?.dataset.blockId ?? null');
+    requireJourney(previousBlock !== null, 'review-join-previous-paragraph');
+    await assertRenderer(renderer, `window.__j05.place(window.__j05LocalBlock, 0, 0) && ${DIRECT_EDIT}`, 'review-join-caret');
+    await caretIntoView(renderer);
+    await waitFor(renderer, paragraphInView(JSON.stringify(localBlock)), 'review-join-paragraph-visible');
+    await waitFor(renderer, `(() => {
+      const value = document.querySelector('[data-testid="manuscript-editor"]')?.dataset.selectionSnapshot;
+      if (!value) return false;
+      const { anchor, head } = JSON.parse(value);
+      return anchor.blockId === window.__j05LocalBlock && head.blockId === window.__j05LocalBlock && anchor.grapheme === 0 && head.grapheme === 0;
+    })()`, 'review-join-caret-at-start');
+    await press(renderer, 'Backspace');
+    await waitFor(renderer, `window.__j05.block(window.__j05LocalBlock) === null && window.__j05.mark('change-suggestion', ${JSON.stringify(previousBlock)}).some(node => node.dataset.markId === window.__j05LocalMark && node.dataset.markStatus === 'open')`, 'review-join-moved-mark');
+    await settled(renderer, 'review-join-saved');
+    await pointerClick(renderer, waitFor, '[data-review-return]', 'review-join-return', { scroll: false });
+    const localFinding = await renderer.evaluate('window.__j05LocalFinding');
+    const joinedCard = `article.review-finding[data-finding-id="${localFinding}"]`;
+    const reject = `${joinedCard} [data-review-action="reject"]`;
+    await waitFor(renderer, `document.activeElement?.matches(${JSON.stringify(joinedCard)})`, 'review-joined-card-focused');
+    // Tab brings the action into view through the engine's normal focus navigation.
+    for (let step = 0; step < 8 && !await renderer.evaluate(`document.activeElement?.matches(${JSON.stringify(reject)})`); step += 1) {
+      await press(renderer, 'Tab');
+    }
+    await waitFor(renderer, `(() => {
+      const button = document.querySelector(${JSON.stringify(reject)});
+      if (!button || button.disabled) return false;
+      const rect = button.getBoundingClientRect();
+      if (rect.left < 0 || rect.top < 0 || rect.right > innerWidth || rect.bottom > innerHeight) return false;
+      for (let box = button.parentElement; box && box !== document.scrollingElement; box = box.parentElement) {
+        if (!/(auto|scroll)/.test(getComputedStyle(box).overflowY)) continue;
+        const clip = box.getBoundingClientRect();
+        if (rect.top < clip.top || rect.bottom > clip.bottom || rect.left < clip.left || rect.right > clip.right) return false;
+      }
+      return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button;
+    })()`, 'review-joined-reject-reachable');
+    await pointerClick(renderer, waitFor, reject, 'review-joined-reject', { scroll: false });
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(joinedCard)})?.dataset.status === 'handled' && window.__j05.notice().includes('已拒绝这条修改建议；原文保留。')`, 'review-joined-rejection-succeeds');
+    await pointerClick(renderer, waitFor, '[data-nav-book-section="manuscript"]', 'review-join-back-to-manuscript', { scroll: false });
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null`, 'review-join-manuscript-ready');
 
     // The large Run (#1592) leaves more than 400 open marks in one paragraph, more than one answer of the manuscript window
     // carries: the 批注栏 says how many it shows (#1604), and every 批注栏 stage after it runs on that Book.

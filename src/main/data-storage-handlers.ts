@@ -7,6 +7,7 @@ import { ServiceClient } from './service-client.js';
 import type { PreferenceStore } from './preferences.js';
 import { envelope, requireDesktop } from './handler-guards.js';
 import type { OwnedRendererWindow } from './application-types.js';
+import type { RestoreOnQuit } from './application-quit.js';
 
 export function registerDataStorageHandlers(context: {
   chooseDatabaseExportFile: NativeFilePickers['chooseDatabaseExportFile'];
@@ -18,8 +19,8 @@ export function registerDataStorageHandlers(context: {
   service: ServiceClient;
   preferences: PreferenceStore;
   requireNothingUnsaved: () => void;
-  quitApplication: () => "quitting" | "blocked";
-  rollbackUpgrade: (() => Promise<boolean>) | undefined;
+  quitApplication: (restore?: RestoreOnQuit) => "quitting" | "blocked";
+  rollbackUpgrade: (() => Promise<RestoreOnQuit | undefined>) | undefined;
 }) {
   const { chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication } = context;
   // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file begins the preparation, and approving
@@ -188,8 +189,8 @@ export function registerDataStorageHandlers(context: {
       return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => {
         if (input?.rollbackUpgrade === true) {
           requireAuthority();
-          requireNothingUnsaved();
-          if (!(await context.rollbackUpgrade?.())) return { outcome:'blocked' };
+          const restore = await context.rollbackUpgrade?.();
+          return { outcome: restore ? quitApplication(restore) : 'blocked' };
         }
         return { outcome:quitApplication() };
       });

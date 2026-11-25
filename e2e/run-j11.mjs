@@ -1690,6 +1690,15 @@ async function main() {
     await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
     await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
     await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    // Issue #1710's class on 评估: the refusal stands above the sticky action bar, never over it. Every button of the bar is whole in
+    // the window and the topmost thing at its own centre, and a real press on one works while the refusal still shows.
+    const evaluationBar = '[data-screen="book-evaluation"] .evaluation-record .evaluation-action-bar';
+    const barButtonsReachable = `(() => { const buttons = Array.from(document.querySelector(${JSON.stringify(evaluationBar)})?.querySelectorAll('button') ?? []).filter((button) => button.checkVisibility());
+      return buttons.length >= 3 && buttons.every((button) => { const r = button.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && button.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); }); })()`;
+    try { await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。' && ${statusBarClear([evaluationBar])} && ${barButtonsReachable}`, 'evaluation-refusal-clear-of-the-action-bar', 10_000); }
+    catch { requireJourney(false, 'evaluation-refusal-clear-of-the-action-bar', await renderer.evaluate(statusBarOverlaps([evaluationBar]))); }
+    await pointerClick(renderer, waitFor, `${evaluationBar} [data-evaluation-action="copy-report"]`, 'evaluation-copy-under-refusal', { scroll: false });
+    await waitFor(renderer, `${notice} === '评估报告已复制。'`, 'evaluation-copied-under-refusal', 10_000);
     await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
     await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
