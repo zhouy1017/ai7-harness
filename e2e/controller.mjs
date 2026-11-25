@@ -1776,6 +1776,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'chip-return-arrival-unobserved',
     'chip-return-late-completion',
     'analysis-jump-chip',
+    'overview-return-reading-place',
     'j14-panel-keyboard',
     'j14-panel-zoom-200-reflow',
     'j14-panel-forced-colors',

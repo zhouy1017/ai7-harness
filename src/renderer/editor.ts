@@ -56,6 +56,12 @@ export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
   captureContinuity(): EditorContinuity;
+  /**
+   * Where the reader is (Issue #1703): the caret while its paragraph shows in the pane. Once the reader has moved the pane by
+   * hand and the caret is out of sight, or was left on another window by paging, the caret is not where they read: the
+   * paragraph at the pane's middle answers, at its start.
+   */
+  readingPoint(): EditorPoint;
   /** Adopt the browser caret before decorating a completed click, even before selectionchange reaches the model. */
   followNativeCaret(): EditorPoint | null;
   captureNavigationContinuity(): EditorContinuity;
@@ -123,6 +129,23 @@ export interface EditorContinuity {
   direction: 'forward' | 'backward';
   scrollAnchor: { blockId: string; offset: number };
   focused: boolean;
+}
+
+/**
+ * The paragraph a reader is on (Issue #1703), from the pane's box and the rendered paragraphs' boxes in document order. The
+ * caret's paragraph answers while any of it shows — and whenever the pane is not laid out, since nothing can be compared
+ * then. Otherwise the first paragraph reaching the pane's middle answers: an arrival puts the paragraph it opens at there,
+ * so coming back shows the same page, where the pane's top paragraph would come back half a page lower.
+ */
+export function readingBlockId(
+  pane: { top: number; bottom: number },
+  blocks: ReadonlyArray<{ blockId: string; top: number; bottom: number }>,
+  caretBlockId: string | undefined,
+): string | undefined {
+  const caret = blocks.find((block) => block.blockId === caretBlockId);
+  if (caret && (pane.bottom <= pane.top || (caret.bottom > pane.top && caret.top < pane.bottom))) return caret.blockId;
+  const middle = (pane.top + pane.bottom) / 2;
+  return (blocks.find((block) => block.bottom >= middle) ?? blocks.at(-1))?.blockId;
 }
 
 interface MountOptions {
@@ -454,11 +477,19 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   options.scrollContainer.addEventListener('wheel', endSmoothJump, { passive: true });
   options.scrollContainer.addEventListener('pointerdown', endSmoothJump);
   options.scrollContainer.addEventListener('keydown', endSmoothJump);
-  const scrollToTarget = (target: HTMLElement): void => {
+  // Whether the reader has moved the pane by hand — the wheel, a touch, the scrollbar — since this screen last arrived at a
+  // paragraph. Only then can the caret have been read away from (Issue #1703): a reflow or a scroll of the product's own
+  // that leaves the caret out of sight is not the reader reading on.
+  let readerMoved = false;
+  const noteReaderMove = (event: Event): void => { if (event.type !== 'pointerdown' || event.target === options.scrollContainer) readerMoved = true; };
+  for (const type of ['wheel', 'touchmove', 'pointerdown']) options.scrollContainer.addEventListener(type, noteReaderMove, { passive: true });
+  // An arrival — the screen opening on its window — has no place on this screen to travel from: it stands at its paragraph at
+  // once (Issue #1703). A jump within the screen still travels there.
+  const scrollToTarget = (target: HTMLElement, arriving = false): void => {
     const pane = options.scrollContainer;
     const box = target.getBoundingClientRect();
     const desired = Math.max(0, Math.min(pane.scrollHeight - pane.clientHeight, pane.scrollTop + box.top - pane.getBoundingClientRect().top - (pane.clientHeight - box.height) / 2));
-    smoothJump = Math.abs(pane.scrollTop - desired) > 1 && document.documentElement.dataset['reducedMotion'] !== 'true' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    smoothJump = !arriving && Math.abs(pane.scrollTop - desired) > 1 && document.documentElement.dataset['reducedMotion'] !== 'true' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     target.scrollIntoView({ block: 'center', behavior: smoothJump ? 'smooth' : 'instant' });
   };
   const markOwnScroll = (): void => {
@@ -651,6 +682,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     focusGrapheme: number | null,
     deferMissing: boolean,
     clampPresentPoints = false,
+    arriving = false,
   ): void => {
     let nextState = state;
     let selectionRestored = false;
@@ -690,6 +722,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }
     view.updateState(nextState);
     applyEditableState();
+    // An arrival at a named paragraph starts the reading there; paging, or a reload that keeps the place, continues it.
+    if (!continuity) readerMoved = false;
     // A restore superseded before its frame never runs: the later one speaks for the window now shown.
     if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
     const focusAtSchedule = document.activeElement;
@@ -706,7 +740,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         const containerTop = options.scrollContainer.getBoundingClientRect().top;
         options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
       } else if (target) {
-        scrollToTarget(target);
+        scrollToTarget(target, arriving);
       }
       // An explicit command can move focus while this arrival waits for its frame (for example, starting a document
       // phase just after saving a version). Restore the arrival, but do not reclaim focus from that later command.
@@ -1201,7 +1235,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   // this the editor would sit at the window's first block while the window it mounted says the caller
   // arrived somewhere else, and anything that then reads the caret back would read the wrong place.
   if (windowProjection.focusBlockId !== null) {
-    restoreContinuity(makeState(), undefined, windowProjection.focusBlockId, windowProjection.focusGrapheme, false);
+    restoreContinuity(makeState(), undefined, windowProjection.focusBlockId, windowProjection.focusGrapheme, false, false, true);
   }
 
   const stopSourceImages = options.readManuscriptImageChunk
@@ -1230,6 +1264,20 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     focus: () => view.focus(),
     flush: () => { editAction = {}; ownershipBlocked = false; return flush(); },
     captureContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
+    readingPoint: () => {
+      settlePendingRestore();
+      // Paging leaves the caret on a window no longer shown; a jump still travelling has put it where the pane is going.
+      const caret = deferredNavigationContinuity ? undefined : pointAtPosition(view.state.doc, view.state.selection.anchor);
+      if (caret && (!readerMoved || smoothJump)) return caret;
+      const blocks = Array.from(view.dom.querySelectorAll<HTMLElement>('[data-block-id]'), (block) => {
+        const box = block.getBoundingClientRect();
+        return { blockId: block.dataset['blockId']!, top: box.top, bottom: box.bottom };
+      });
+      // A window paged to by a command, the pane not moved by hand, answers with its own first block, as since Issue #405.
+      const blockId = readerMoved ? readingBlockId(options.scrollContainer.getBoundingClientRect(), blocks, caret?.blockId) : blocks[0]?.blockId;
+      requireEditor(blockId !== undefined, '稿件阅读位置无法解析。');
+      return caret?.blockId === blockId ? caret : { blockId, grapheme: 0 };
+    },
     followNativeCaret: () => {
       const native = view.dom.ownerDocument.getSelection();
       if (!native?.isCollapsed || !native.anchorNode || !view.dom.contains(native.anchorNode)) return null;
@@ -1397,6 +1445,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       options.scrollContainer.removeEventListener('wheel', endSmoothJump);
       options.scrollContainer.removeEventListener('pointerdown', endSmoothJump);
       options.scrollContainer.removeEventListener('keydown', endSmoothJump);
+      for (const type of ['wheel', 'touchmove', 'pointerdown']) options.scrollContainer.removeEventListener(type, noteReaderMove);
       stopSourceImages();
       destroyed = true;
       if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);

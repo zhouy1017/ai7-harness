@@ -231,6 +231,10 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     }
     globalThis.__comments={...binding,bookId,blockId:block.blockId,start,ids,journal:page.journalSequence};
     document.querySelector('.editorial-mark-layer [data-mark-action="close"]')?.click();
+    // The manuscript opens again on the page that was on screen when it was left (Issue #1703), no longer on the caret's: the
+    // reload below is left from the seeded paragraph, so the window it comes back to holds the seeds.
+    editor.querySelector('[data-block-id="'+block.blockId+'"]')?.scrollIntoView({block:'center',behavior:'instant'});
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     return true;
   })()`), 'comments-seed-five');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-reload-overview');

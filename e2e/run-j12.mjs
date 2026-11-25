@@ -4,6 +4,7 @@ import { chooseDispatch, pointerClick, EFFORT_WORDS, EFFORT_UNKNOWN_SENTENCE } f
 import { chooseEffort, effortKey, effortListFacts, openEffortList, pressEffortRow, reachPress, wheelClear } from './effort-list.mjs';
 import { assertReachable, pressReachable as wheelPress } from './task-card-reach.mjs';
 import { pressEscape } from './ordinary-pages.mjs';
+import { helpReturnsHere, pressBack } from './return-places.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -2463,6 +2464,16 @@ async function main() {
       await click(primary, label, `return-${state}-open`);
       await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${state}-ready`);
     }
+    // 返回 from 设置 (0.7.9 review, BUG-18): its pages were visited back and forth above, and two presses still reach 审阅 — the
+    // page before the last, then the Book page 设置 was opened from. 帮助 by F1 goes back to the page it was pressed on: 审阅,
+    // and the manuscript — never 书库 or 工作概览.
+    await pressBack(primary);
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'return-settings-previous-page');
+    await pressBack(primary);
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, 'return-settings-source');
+    await helpReturnsHere(primary, waitFor, `document.querySelector('[data-screen="book-review"]') !== null`, 'return-help-review');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('manuscript')), 'return-help-manuscript-open');
+    await helpReturnsHere(primary, waitFor, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookA)}] [data-testid="manuscript-editor"]') !== null`, 'return-help-manuscript');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'return-library-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');

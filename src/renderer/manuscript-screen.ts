@@ -1325,18 +1325,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   async function rememberEntryPosition(): Promise<void> {
     // Where the editor was belongs to the manuscript the Book opens into, never to a Production Document.
     if (!editor || options.interrupted() || isDocument) return;
-    const point = editor.captureContinuity().anchor;
-    // Paging with 向前浏览 / 向后浏览 deliberately leaves the caret where it was, off the window now on
-    // screen, so the window's own first block answers for the position rather than a caret the editor
-    // can no longer see. Anywhere else the caret is the position.
-    const carried = currentWindow.blocks.some((block) => block.blockId === point.blockId);
-    const blockId = carried ? point.blockId : currentWindow.blocks[0]?.blockId;
-    if (blockId === undefined) return;
+    // The caret while the editor can see it. Read away from by the wheel, it is not where they read: the paragraph at the
+    // middle of the page answers, so the way back opens on that page (Issue #1703). A window paged to by 向前浏览 / 向后浏览
+    // leaves the caret behind and answers with its own first block until the reader moves the page.
+    const point = editor.readingPoint();
     await api.recordManuscriptEntryPosition({
       manuscriptId: currentWindow.manuscriptId,
       branchId: currentWindow.branchId,
-      blockId,
-      grapheme: carried ? point.grapheme : 0,
+      blockId: point.blockId,
+      grapheme: point.grapheme,
     }).catch(() => undefined);
   }
 
@@ -1598,7 +1595,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (!editor) return null;
     const windowNow = editor.currentWindow();
     const blocks = windowNow.blocks;
-    const anchorId = editor.captureContinuity().anchor.blockId;
+    // The paragraph being read, which is the caret's only while the caret shows (Issue #1703).
+    const anchorId = editor.readingPoint().blockId;
     const index = Math.max(0, blocks.findIndex((block) => block.blockId === anchorId));
     const block = blocks[index];
     if (block === undefined) return null;

@@ -93,6 +93,10 @@ describe('the mounted 帮助 screen', () => {
     expect((root as unknown as MiniElement).dataset['helpTab']).toBe('licenses');
     dispatch(find('[id="help-tab-licenses"]'), 'Home');
     expect((root as unknown as MiniElement).dataset['helpTab']).toBe('usage');
+    // Alt+← is 返回, not the tab row's arrow: the focused tab leaves it for the command (0.7.9 review, BUG-18).
+    const chord = { type: 'keydown', key: 'ArrowLeft', altKey: true };
+    expect(find('[id="help-tab-usage"]').dispatchEvent(chord)).toBe(true);
+    expect((root as unknown as MiniElement).dataset['helpTab']).toBe('usage');
   });
 
   it('lists every generated license and filters by name with a live count', () => {

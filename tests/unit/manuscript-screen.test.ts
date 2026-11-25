@@ -35,6 +35,8 @@ const children = vi.hoisted(() => ({
   realReadingReturn: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
+  /** Where the editor reads once the caret has scrolled out of sight (Issue #1703); the caret otherwise. */
+  reading: null as { blockId: string; grapheme: number } | null,
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn>; flush: ReturnType<typeof vi.fn> }>,
   marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
@@ -118,6 +120,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
     const surface = {
       focus: vi.fn(), flush: vi.fn(async () => undefined), interrupt: vi.fn(), setOperationLocked: vi.fn(), setMarks: vi.fn(),
       captureContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
+      readingPoint: () => children.reading ?? point,
       captureNavigationContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       currentWindow: () => currentWindow,
       loadWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
@@ -219,6 +222,7 @@ beforeEach(() => {
   children.destroyed.length = 0;
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
+  children.reading = null;
   children.protections.length = 0;
   children.rails.length = 0;
   children.marks.length = 0;
@@ -522,6 +526,18 @@ describe('the Manuscript screen lifecycle', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(load).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'cursor', cursor: 'previous-window' } }));
+    app.showing?.destroy();
+  });
+
+  it('remembers the paragraph being read when the manuscript is left, not a caret scrolled out of sight (#1703)', async () => {
+    const record = vi.fn(async () => undefined);
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'recordManuscriptEntryPosition' ? record : Reflect.get(target, key) }));
+    app.open(windowOf('book-one'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record).toHaveBeenLastCalledWith({ manuscriptId: 'book-one-manuscript', branchId: 'branch-main', blockId: 'blk_3', grapheme: 0 });
+    children.reading = { blockId: 'blk_read', grapheme: 0 };
+    await expect(app.showing!.settle()).resolves.toBe(true);
+    expect(record).toHaveBeenLastCalledWith({ manuscriptId: 'book-one-manuscript', branchId: 'branch-main', blockId: 'blk_read', grapheme: 0 });
     app.showing?.destroy();
   });
 
