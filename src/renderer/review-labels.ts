@@ -505,13 +505,17 @@ export function reviewIgnoreReasonCount(reason: string): string {
 
 // ---- the batch confirmation strip (V2-UX-REV-006, PDEC-012, EAPP-003) -----------------------------------
 
-export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入稿件：全部写入，或一条也不写。';
+export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入：全部写入，或一条也不写。';
 export const REVIEW_BATCH_NOTHING = '没有可以一起应用的修改建议：本类待处理、原文未变的修改建议已经都处理过了。';
 export const REVIEW_BATCH_REFUSED = '稿件没有改动。请另做一份预览：原文已变的修改建议不会再列入。';
 
-/** The write scope stated before 确认应用, exactly as the strip will send it. */
-export function reviewBatchScopeLine(count: number): string {
-  return `将把 ${count} 条修改建议写入稿件：`;
+/**
+ * The write scope stated before 确认应用, exactly as the strip will send it: one whole sentence. 批量采纳机械修正's strip (ADR 0106 §7)
+ * says in it how many of its suggestions rest on a table of each strength, by the strength's label.
+ */
+export function reviewBatchScopeLine(count: number, strengths: ReadonlyArray<{ readonly label: string; readonly count: number }> = []): string {
+  const among = strengths.length === 0 ? '' : `，其中 ${strengths.map((row) => `${row.label} ${row.count} 条`).join('、')}`;
+  return `将把 ${count} 条修改建议写入稿件${among}。`;
 }
 
 export function reviewBatchItemLine(quote: string, replacement: string): string {
@@ -520,11 +524,6 @@ export function reviewBatchItemLine(quote: string, replacement: string): string 
 
 export function reviewBatchExcludedLine(excluded: number): string {
   return `另有 ${excluded} 条需要逐条确认，不在其中；请在稿件上逐条处理。`;
-}
-
-/** 批量采纳机械修正's strip (ADR 0106 §7): how many of its suggestions rest on a table of each strength, by the strength's label. */
-export function reviewBatchStrengthsLine(strengths: ReadonlyArray<{ readonly label: string; readonly count: number }>): string {
-  return `其中 ${strengths.map((row) => `${row.label} ${row.count} 条`).join('、')}。`;
 }
 
 export function reviewBatchCappedLine(maximum: number): string {

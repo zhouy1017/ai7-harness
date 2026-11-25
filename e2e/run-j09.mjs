@@ -1824,6 +1824,25 @@ async function main() {
       console.error('J-09/overview-header-counts-every-book/diagnostic', JSON.stringify(await renderer.evaluate(`({ header: document.querySelector('.task-overview-context')?.textContent ?? null, groups: Array.from(document.querySelectorAll('.task-overview-group'), (group) => [group.dataset.taskGroup, group.querySelectorAll('.task-overview-card').length]), pressed: Array.from(document.querySelectorAll('.task-overview-filters [aria-pressed="true"]'), (node) => node.textContent) })`).catch(() => null)));
       throw error;
     }
+    // 0.7.9 acceptance R3: a pressed filter is marked. 「7 天」 is pressed by the pointer, read inside the window first; in every row of
+    // filter buttons the pressed one's computed background is then neither the page's behind it nor an unpressed filter's. 「今天」 is
+    // pressed back, so the page is left as it was.
+    const timeFilter = (index) => `.task-overview-filters .task-overview-filter-row:last-child button.task-overview-filter:nth-of-type(${index})`;
+    const timeFilterPressed = (index, label) => `(() => { const button = document.querySelector(${JSON.stringify(timeFilter(index))}); return button?.textContent === ${JSON.stringify(label)} && button.getAttribute('aria-pressed') === 'true'; })()`;
+    const filterMarks = `(() => { const clear = (colour) => colour === 'transparent' || colour === 'rgba(0, 0, 0, 0)';
+      const behind = (node) => { for (let at = node; at; at = at.parentElement) { const colour = getComputedStyle(at).backgroundColor; if (!clear(colour)) return colour; } return null; };
+      return Array.from(document.querySelectorAll('.task-overview-filters .task-overview-filter-row'), (row) => { const buttons = Array.from(row.querySelectorAll('button.task-overview-filter')), pressed = buttons.filter((button) => button.getAttribute('aria-pressed') === 'true');
+        return { buttons: buttons.length, pressed: pressed.map((button) => button.textContent), marked: pressed.map((button) => getComputedStyle(button).backgroundColor), page: behind(row),
+          plain: [...new Set(buttons.filter((button) => !pressed.includes(button)).map((button) => getComputedStyle(button).backgroundColor))] }; }).filter((row) => row.buttons > 0)
+        .map((row) => ({ ...row, shown: row.pressed.length === 1 && !clear(row.marked[0]) && row.page !== null && row.marked[0] !== row.page && row.plain.length > 0 && !row.plain.includes(row.marked[0]) })); })()`;
+    await waitFor(renderer, timeFilterPressed(1, '今天'), 'overview-time-filter-rests-on-today');
+    await pressReachable(renderer, waitFor, requireJourney, timeFilter(2), 'overview-filter-seven-days');
+    await waitFor(renderer, timeFilterPressed(2, '7 天'), 'overview-filter-seven-days-pressed');
+    const filterRows = await renderer.evaluate(filterMarks);
+    console.log(`J-09/overview-pressed-filter-marks/${JSON.stringify(filterRows)}`);
+    requireJourney(Array.isArray(filterRows) && filterRows.length >= 2 && filterRows.every((row) => row.shown === true) && filterRows.at(-1).pressed[0] === '7 天', 'overview-pressed-filter-is-marked', filterRows);
+    await pressReachable(renderer, waitFor, requireJourney, timeFilter(1), 'overview-filter-today-again');
+    await waitFor(renderer, timeFilterPressed(1, '今天'), 'overview-filter-back-to-today');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');

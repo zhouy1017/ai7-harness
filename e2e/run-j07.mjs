@@ -3088,7 +3088,7 @@ async function main() {
     // before its press. This guest connects no model, so the answer reads 没有发送.
     const similar = '[data-screen="editor"] .writing-task .similar-materials';
     await assertRenderer(renderer, `(() => { const field=document.querySelector(${JSON.stringify(similar)}); const mode=field?.querySelector('.similar-materials-mode');
-      return field?.querySelector('.similar-materials-note')?.textContent==='已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && mode instanceof HTMLElement && mode.hidden && getComputedStyle(mode).display==='none'; })()`, 'writing-retrieval-note');
+      return field?.querySelector('.similar-materials-note')?.textContent==='已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && mode instanceof HTMLElement && mode.hidden && getComputedStyle(mode).display==='none'; })()`, 'writing-retrieval-note');
     await wheelPress(renderer, waitFor, requireJourney, `${similar} textarea`, 'writing-retrieval-field');
     await renderer.send('Input.insertText', { text: '宣传' });
     await wheelPress(renderer, waitFor, requireJourney, `${similar} [data-similar-action="search"]`, 'writing-retrieval-search');

@@ -1413,14 +1413,44 @@ async function main() {
     at('review-mechanical-batch-confirm');
     const localBatch = 'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]';
     await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(localBatch)}); return !!button && !button.disabled && button.textContent==='批量采纳机械修正' && button.closest('details.review-category-fold')?.open===true; })()`, 'local-mechanical-batch-offered');
+    const batchStripReady = `document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]')?.dataset.reviewBatchState==='ready' && document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`;
+    const batchUnwritten = `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const card=await window.ai7.getEditorialMarkCard({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application==null && !document.querySelector('.review-batch-applied'); })()`;
+    // 取消 by the pointer and Escape by the key close the strip, write nothing, return to 批量采纳机械修正 and take the notice that asked
+    // for the confirmation away with the press itself (0.7.9 acceptance R1): the notice is read as the press arrives, before the
+    // strip's own handler, and again in the next task. A notice that had already run out when the press came proves nothing, so the
+    // strip is opened again.
+    for (const how of ['cancel', 'escape']) {
+      for (let attempt = 0; ; attempt += 1) {
+        await pressReviewControl(renderer, waitFor, localBatch, `local-mechanical-batch-prepare-${how}`, null, { wheel: true });
+        await waitFor(renderer, batchStripReady, `local-mechanical-batch-strip-${how}`);
+        await renderer.evaluate(`(() => { const seen = { before: null, after: null }; window.__j05BatchClose = seen;
+          const notice = () => { const toast=document.querySelector('[data-toast]'); return !!toast && !toast.hidden && toast.checkVisibility() ? toast.textContent : null; };
+          const mine = (event) => event.type==='keydown' ? event.key==='Escape' : event.target instanceof Element && event.target.closest('[data-review-action="batch-cancel"]')!==null;
+          for (const type of ['click','keydown']) document.addEventListener(type, (event) => { if (!mine(event) || seen.before!==null) return; seen.before = { notice: notice() }; setTimeout(() => { seen.after = { notice: notice() }; }, 0); }, true);
+          return true; })()`);
+        if (how === 'cancel') await pressReviewControl(renderer, waitFor, 'section.review-batch-strip [data-review-action="batch-cancel"]', 'local-mechanical-batch-cancel', null, { wheel: true });
+        else {
+          await waitFor(renderer, `!!document.activeElement?.closest('section.review-batch-strip')`, 'local-mechanical-batch-focus-in-strip');
+          await press(renderer, 'Escape');
+        }
+        await waitFor(renderer, `document.querySelector('section.review-batch-strip')===null && window.__j05BatchClose?.after!==null`, `local-mechanical-batch-closed-by-${how}`);
+        const closed = await renderer.evaluate(`(async () => ({ ...window.__j05BatchClose, focus: document.activeElement?.matches(${JSON.stringify(localBatch)})===true, unwritten: await ${batchUnwritten},
+          pending: (await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run.findings.filter(f=>f.categoryId==='local-text-check').every(f=>f.status==='pending') }))()`);
+        if (closed?.before?.notice == null && attempt < 2) continue;
+        requireJourney(/^将把 \d+ 条修改建议写入稿件；请核对后确认应用。$/u.test(closed?.before?.notice ?? '') && closed.after?.notice === null && closed.focus === true && closed.unwritten === true && closed.pending === true,
+          `local-mechanical-batch-${how}-takes-the-notice-away`, closed);
+        break;
+      }
+    }
     await pressReviewControl(renderer, waitFor, localBatch, 'local-mechanical-batch-prepare', null, { wheel: true });
-    await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]')?.dataset.reviewBatchState==='ready' && document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-mechanical-batch-strip');
+    await waitFor(renderer, batchStripReady, 'local-mechanical-batch-strip');
     const batchStrip = await renderer.evaluate(`(async () => { const strip=document.querySelector('section.review-batch-strip[data-review-category="local-text-check"]'), box=strip.getBoundingClientRect();
-      const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run, strengths=run.localCheck.strengths??[];
-      const card=await window.ai7.getEditorialMarkCard({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,markId:window.__j05LocalMark});
-      return { open: strip.closest('details.review-category-fold')?.open===true, shown: strip.checkVisibility() && box.height>0 && box.width>0, count: Number(strip.dataset.reviewBatchCount),
-        strengths: strengths.length, line: (strip.querySelector('.review-batch-strengths')?.textContent??null)===(strengths.length===0?null:'其中 '+strengths.map(row=>row.label+' '+row.count+' 条').join('、')+'。'),
-        unwritten: card.suggestion?.application==null && !document.querySelector('.review-batch-applied') }; })()`);
+      const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run, strengths=run.localCheck.strengths??[], count=Number(strip.dataset.reviewBatchCount);
+      // Whole sentences (0.7.9 acceptance R1): the count, with how many per strength inside the same sentence, then all-or-none.
+      const words='将把 '+count+' 条修改建议写入稿件'+(strengths.length===0?'':'，其中 '+strengths.map(row=>row.label+' '+row.count+' 条').join('、'))+'。确认后一次写入：全部写入，或一条也不写。', said=strip.querySelector('.review-batch-scope')?.textContent??'';
+      return { open: strip.closest('details.review-category-fold')?.open===true, shown: strip.checkVisibility() && box.height>0 && box.width>0, count,
+        strengths: strengths.length, said, line: said.startsWith(words) && !/[：；，、]{2}|[：；，、]。/u.test(said) && said.endsWith('。'),
+        unwritten: await ${batchUnwritten} }; })()`);
     requireJourney(batchStrip?.open === true && batchStrip.shown === true && batchStrip.count > 0 && batchStrip.line === true && batchStrip.unwritten === true, 'local-mechanical-batch-confirms-first', batchStrip);
     await pressReviewControl(renderer, waitFor, '[data-review-action="batch-confirm"]', 'local-mechanical-batch-confirm', null, { wheel: true });
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');

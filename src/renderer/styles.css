@@ -475,7 +475,6 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
    the 修改建议 colour, because every line in it is one. */
 .review-batch-strip { margin-top: .7rem; padding: .8rem .9rem; border: 2px solid var(--mark-suggestion); border-radius: 10px; background: var(--surface); }
 .review-batch-scope { margin: 0; font-weight: 800; }
-.review-batch-strengths { margin: .25rem 0 0; }
 .review-batch-items { margin: .45rem 0 0; padding-left: 1.4rem; line-height: 1.7; }
 .review-report-versions, .review-report-list { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; }
 /* A list read in part (Issue #1592): how much is shown, 显示更多, and a failed page said beside it. */
@@ -608,7 +607,8 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-overview-filters { display: grid; gap: .55rem; }
 .task-overview-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .task-overview-filter-label { min-width: 3rem; color: var(--text-subdued); font-weight: 700; }
-.task-overview-filter[aria-pressed="true"] { border-color: var(--action-text); background: var(--status-progress-surface); }
+/* Named with `.btn` (every button has it) so the later `.btn.quiet` does not clear the pressed mark. */
+.btn.task-overview-filter[aria-pressed="true"] { border-color: var(--action-text); background: var(--status-progress-surface); }
 .task-overview-groups { display: grid; gap: 1rem; }
 /* A group is a heading over its cards, not a box around them (#1522). */
 .task-overview-group { padding: 0; }
