@@ -929,6 +929,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'second-book-disabled',
     'accessibility-reflow-forced-colors',
     'knowledge-guidelines',
+    'standard-table-workbook-preview',
+    'standard-table-unavailable',
     'knowledge-guideline-import',
     'knowledge-library-use',
     'j14-knowledge-keyboard',

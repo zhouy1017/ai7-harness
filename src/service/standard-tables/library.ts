@@ -6,13 +6,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { StoreError, requireStore } from '../store-records.js';
 import { installPreinstalledStandardTables, PREINSTALLED_TABLE_KEYS, requireStandardTableEntries, standardTableDigest } from '../standard-tables.js';
-import { standardsTable, type FlashTaskResult, type StandardRow } from '../fast-role/flash-task-contract.js';
+import { standardsTable, type StandardRow } from '../fast-role/flash-task-contract.js';
+import type { ExecutedFlashTaskResult } from '../fast-role/fast-role-execution.js';
 import { standardTableInputs } from './schemas.js';
 import { type StandardTableOperations as Ops, type StandardTableRow as Row, type StandardTableVersion,
   type StandardTablePreview, type StandardTableConversionReport, type StandardTablesProjection, type StandardTableInspection, type StandardTableDiff } from '../../shared/protocol/standard-tables.js';
 import { checkedRows, convertTable, counts, holdConflicts, MAX_TABLE_BYTES, rowTuple } from './conversion.js';
 
-export interface StandardTableFormatter { model(): string | null; format(paragraphs: readonly string[]): Promise<FlashTaskResult<StandardRow[]>> }
+export interface StandardTableFormatter { model(): string | null; format(paragraphs: readonly string[]): Promise<ExecutedFlashTaskResult<StandardRow[]>> }
 interface Host {
   db: DatabaseSync; assertAvailable(): void; transaction<T>(operation: () => T): T;
   withObjects<T>(operation: () => Promise<T>): Promise<T>;
@@ -139,24 +140,29 @@ export class StandardTableLibrary {
     const report: StandardTableConversionReport = { method: 'direct', model: null, counts: counts([]), parts: [] };
     let rows = read.rows;
     if (rows === null) {
-      const model = this.#formatter?.model(); requireStore(model && this.#formatter, 'STANDARD_TABLE_FORMAT_UNAVAILABLE', '请先在模型服务中选择可用的底层 Flash 模型，再整理这份文件。');
+      const model = this.#formatter?.model(); requireStore(model && this.#formatter, 'STANDARD_TABLE_FORMAT_UNAVAILABLE', '这份文件需要模型整理。请在 设置 › 模型服务 选好可用的模型，再导入。');
       const parts = formattingParts(read.paragraphs), digest = sha256Hex(canonicalJson({ digest: sha256Hex(bytes), fileName, tableId: input.tableId ?? null, model }));
       if (!input.formatConfirmed) {
         if (this.#offers.size >= 8) this.#offers.clear(); this.#offers.add(digest);
         const size = parts.reduce((n, part) => n + Buffer.byteLength(standardsTable.message(part)), 0);
-        throw new StoreError('STANDARD_TABLE_FORMAT_OFFER', `将把选定文件的 ${read.paragraphs.length} 段文字（${size} 字节）发送给底层 Flash（${model}）整理字表与词表。预计 ${parts.length} 次请求；回答无效的部分最多再试一次，最多 ${parts.length * 2} 次。结果可逐条核对后导入。`);
+        throw new StoreError('STANDARD_TABLE_FORMAT_OFFER', `将把选定文件的 ${read.paragraphs.length} 段文字（${size} 字节）发送给底层 Flash（${model}）整理字表与词表。预计 ${parts.length} 次请求；只有回答格式有误的部分会再试一次，最多 ${parts.length * 2} 次。结果可逐条核对后导入。`);
       }
       requireStore(this.#offers.delete(digest), 'STANDARD_TABLE_CHANGED', '文件或所选模型已变化，请重新预览并确认。');
       report.method = 'model'; report.model = model; rows = []; let paragraph = 1;
       for (const [index, part] of parts.entries()) {
         let result = await this.#formatter.format(part), attempts = 1;
-        if (result.state === 'fallback') { result = await this.#formatter.format(part); attempts++; }
+        if (result.formattingParseFailure) { result = await this.#formatter.format(part); attempts++; }
+        if (result.state !== 'checked' && !result.formattingParseFailure) {
+          throw new StoreError(result.state === 'outcome-unknown' ? 'STANDARD_TABLE_FORMAT_OUTCOME_UNKNOWN' : 'STANDARD_TABLE_FORMAT_FAILED', result.reason);
+        }
         report.parts.push({ part: index + 1, firstParagraph: paragraph, paragraphs: part.length, attempts, state: result.state, reason: result.state === 'checked' ? null : result.reason });
         if (result.state === 'checked') rows.push(...result.value.map(r => ({ recommended: r.recommended, discouraged: r.discouraged, rank: null, condition: null,
           source: `第${paragraph + r.paragraph - 1}段`, strength: input.strength ?? 'house', status: r.status === '未识别' ? 'unrecognized' as const : 'to-confirm' as const,
           reviewNote: r.reason, sourceText: part[r.paragraph - 1] ?? null })));
         paragraph += part.length;
       }
+      const failedPart = report.parts.find(part => part.state === 'fallback');
+      requireStore(rows.length > 0 || failedPart === undefined, 'STANDARD_TABLE_FORMAT_FAILED', failedPart?.reason ?? '');
     }
     rows = holdConflicts(checkedRows(rows)); report.counts = counts(rows);
     const previewId = randomUUID();

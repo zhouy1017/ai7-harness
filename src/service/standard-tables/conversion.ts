@@ -81,20 +81,32 @@ function xml(text: string, open: (name: string, attrs: Record<string, string>) =
   parser.on('closetag', tag => close(tag.name.split(':').at(-1)!)); parser.on('text', content); parser.on('cdata', content);
   parser.write(text).close();
 }
+const worksheetPart = /^xl\/worksheets\/sheet(\d+)\.xml$/u;
 function office(bytes: Uint8Array, spreadsheet: boolean): { grids: string[][][]; paragraphs: string[] } {
   let expanded = 0;
   const archive = unzipSync(bytes, { filter: file => {
     expanded += file.originalSize;
     requireStore(expanded <= 64 * 1024 * 1024, 'STANDARD_TABLE_TOO_LARGE', '文件展开后过大，请分开导入。');
-    return spreadsheet ? /^xl\/(sharedStrings\.xml|worksheets\/sheet\d+\.xml)$/u.test(file.name) : file.name === 'word/document.xml';
+    return spreadsheet ? file.name === 'xl/sharedStrings.xml' || worksheetPart.test(file.name) : file.name === 'word/document.xml';
   } });
   const decode = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(archive[name]);
   const grids: string[][][] = [], paragraphs: string[] = [];
   if (spreadsheet) {
-    const shared: string[] = []; let value = '', capture = false;
-    if (archive['xl/sharedStrings.xml']) xml(decode('xl/sharedStrings.xml'), name => { if (name === 'si') value = ''; if (name === 't') capture = true; },
-      name => { if (name === 't') capture = false; if (name === 'si') shared.push(value); }, text => { if (capture) value += text; });
-    for (const name of Object.keys(archive).filter(n => n.startsWith('xl/worksheets/')).sort()) {
+    const shared: string[] = []; let value = '', capture = false, phonetic = false;
+    if (archive['xl/sharedStrings.xml']) xml(decode('xl/sharedStrings.xml'), name => {
+      if (name === 'si') value = '';
+      if (name === 'rPh') phonetic = true;
+      if (name === 't') capture = !phonetic;
+    }, name => {
+      if (name === 'rPh') phonetic = false;
+      if (name === 't') capture = false;
+      if (name === 'si') shared.push(value);
+    }, text => { if (capture) value += text; });
+    const sheets = Object.keys(archive).flatMap(name => {
+      const part = worksheetPart.exec(name);
+      return part === null ? [] : [{ name, number: Number(part[1]) }];
+    }).sort((a, b) => a.number - b.number);
+    for (const { name } of sheets) {
       const grid: string[][] = []; let row: string[] = [], column = 0, type = '', cell = '', reading = false;
       xml(decode(name), (tag, attrs) => {
         if (tag === 'row') row = [];
@@ -103,9 +115,10 @@ function office(bytes: Uint8Array, spreadsheet: boolean): { grids: string[][][];
       }, tag => {
         if (tag === 'v' || tag === 't') reading = false;
         if (tag === 'c') { requireStore(column < 1024, 'STANDARD_TABLE_INVALID', '表格列数过多，请只保留字表字段。'); while (row.length < column) row.push(''); row[column] = type === 's' ? shared[Number(cell)] ?? '' : cell; }
-        if (tag === 'row' && row.some(Boolean)) grid.push(row);
+        if (tag === 'row' && row.some(value => value.trim())) grid.push(row);
       }, text => { if (reading) cell += text; });
-      grids.push(grid); paragraphs.push(...grid.map(r => r.join('\t')));
+      if (grid.length) grids.push(grid);
+      paragraphs.push(...grid.map(r => r.join('\t')));
     }
   } else {
     let grid: string[][] = [], row: string[] = [], cell = '', paragraph = '', inCell = false, inText = false;
@@ -114,7 +127,9 @@ function office(bytes: Uint8Array, spreadsheet: boolean): { grids: string[][][];
       if (tag === 'p') paragraph = ''; if (tag === 't') inText = true; if (tag === 'tab') paragraph += '\t'; }, tag => {
       if (tag === 't') inText = false;
       if (tag === 'p' && paragraph.trim()) { paragraphs.push(paragraph); if (inCell) cell += (cell ? '\n' : '') + paragraph; }
-      if (tag === 'tc') { row.push(cell); inCell = false; } if (tag === 'tr') grid.push(row); if (tag === 'tbl') grids.push(grid);
+      if (tag === 'tc') { row.push(cell); inCell = false; }
+      if (tag === 'tr' && row.some(Boolean)) grid.push(row);
+      if (tag === 'tbl' && grid.length) grids.push(grid);
     }, text => { if (inText) paragraph += text; });
   }
   return { grids, paragraphs };
@@ -159,7 +174,7 @@ export async function convertTable(bytes: Uint8Array, fileName: string, strength
     if (extension === '.csv' || extension === '.tsv' || text.includes('\t')) grids = [delimited(text, extension === '.csv' ? ',' : '\t')];
   }
   requireStore(paragraphs.length > 0, 'STANDARD_TABLE_EMPTY', '文件没有可读取的文字。');
-  const converted = grids.map(grid => tableRows(grid, strength));
-  const rows = converted.length && converted.every(r => r !== null) ? converted.flat() as StandardTableRow[] : gfRows(paragraphs, strength);
+  const converted = grids.map(grid => tableRows(grid, strength)).filter(rows => rows !== null);
+  const rows = converted.length ? converted.flat() : gfRows(paragraphs, strength);
   return { rows: rows === null ? null : holdConflicts(checkedRows(rows)), paragraphs };
 }
