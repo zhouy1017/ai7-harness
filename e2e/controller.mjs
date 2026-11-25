@@ -843,6 +843,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback',
     'controller-imports',
     'upgrade-release-library',
+    'upgrade-failure',
     'upgrade-decline',
     'upgrade-consent',
     'upgrade-card',

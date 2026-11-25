@@ -128,13 +128,22 @@ async function checkedStore(root: string, dir: string): Promise<string> {
   return database(dir);
 }
 
-export async function upgradePreflight(root: string, freeBytes?: number): Promise<void> {
+export async function upgradePreflight(root: string, freeBytes?: number) {
   const source = await checkedStore(root, join(root, 'store'));
   const marker = await readDataVersionMarker(root);
   requireStore(!marker || (marker.dataVersion === 1 && marker.schemaRevision === 116),
-    'UPGRADE_SOURCE_INVALID', '旧数据的版本标记不一致。请先用 0.7.4 打开。');
+    'UPGRADE_SOURCE_INVALID', '旧数据的版本标记不一致。请先用 0.7.3 打开。');
   const db = openPackageStore(source);
-  try { requireUpgradeSource(db); } finally { db.close(); }
+  let counts: Record<'books' | 'manuscripts' | 'marks' | 'reports' | 'materials', number>;
+  try {
+    requireUpgradeSource(db);
+    counts = db.prepare(`SELECT
+      (SELECT count(*) FROM books) AS books,
+      (SELECT count(*) FROM manuscripts) AS manuscripts,
+      (SELECT count(*) FROM editorial_marks) AS marks,
+      (SELECT count(*) FROM review_reports) AS reports,
+      (SELECT count(*) FROM library_materials) AS materials`).get() as typeof counts;
+  } finally { db.close(); }
   const payload = (await databasePackageSources(root)).reduce((sum, row) => sum + row.bytes, 0);
   const size = (await lstat(source)).size + (existsSync(source + '-wal') ? (await lstat(source + '-wal')).size : 0);
   const backupPath = backupLocationFor(root);
@@ -149,6 +158,7 @@ export async function upgradePreflight(root: string, freeBytes?: number): Promis
   // Verification holds a second archive and its extracted SQLite file in the data root.
   const missing = upgradeSpaceShortfall(size,packageBytes,newStoreBytes,dataFree,backupFree,dataInfo.dev === backupInfo.dev);
   requireStore(missing <= 0, 'UPGRADE_SPACE', `磁盘空间不足，还差 ${Math.ceil(missing / 1048576)} MB。释放空间后再升级。`);
+  return counts;
 }
 
 export function upgradeSpaceShortfall(store: number, archive: number, converted: number, dataFree: number, backupFree: number, shared: boolean): number {
@@ -734,9 +744,9 @@ export async function beginUpgradeRollback(root: string): Promise<void> {
 }
 
 type UpgradeHook = (stage: Stage, afterRename?: boolean) => void;
-export async function resumeUpgrade(root: string, softwareVersion: string, before?: UpgradeHook, freeDataBytes?: number): Promise<{ restored: boolean; message: string } | null> {
+export async function resumeUpgrade(root: string, softwareVersion: string, before?: UpgradeHook, freeDataBytes?: number, onStage?: (stage: Stage) => void): Promise<{ restored: boolean; message: string } | null> {
   try {
-    return await runUpgrade(root, softwareVersion, before,freeDataBytes);
+    return await runUpgrade(root, softwareVersion, before, freeDataBytes, onStage);
   } catch (error) {
     if ((error as {code?:string})?.code === 'UPGRADE_SPACE') throw error;
     requireStore(!isStorageFullError(error),'UPGRADE_SPACE','磁盘空间不足。释放空间后重新打开 AI7 即可继续。');
@@ -771,7 +781,7 @@ export async function resumeUpgrade(root: string, softwareVersion: string, befor
   }
 }
 
-async function runUpgrade(root: string, softwareVersion: string, before?: UpgradeHook, freeDataBytes?: number): Promise<{ restored: boolean; message: string } | null> {
+async function runUpgrade(root: string, softwareVersion: string, before?: UpgradeHook, freeDataBytes?: number, onStage?: (stage: Stage) => void): Promise<{ restored: boolean; message: string } | null> {
   const state = await readState(journal(root));
   if (!state) return null;
   if (state.softwareVersion === undefined) {
@@ -898,6 +908,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
   }
   for (; ;) {
     before?.(state.stage);
+    onStage?.(state.stage);
     switch (state.stage) {
       case 'backup': {
         // The active 116 store is still in place. Any uncommitted conversion under this attempt can be rebuilt.
@@ -1078,7 +1089,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         }
         await writeAtomic(join(ready, DATA_VERSION_MARKER_FILE), JSON.stringify({
           dataVersion: 1, schemaRevision: 116,
-          softwareVersion: backup.fromSoftwareVersion ?? '0.7.4', writtenAt: new Date().toISOString()
+          softwareVersion: backup.fromSoftwareVersion ?? '0.7.3', writtenAt: new Date().toISOString()
         }));
         for (const source of [saved,previous,prepared,legacyFiles,...(state.fallback ? [incoming] : [])]) {
           if (!needed.size || !existsSync(source)) continue;

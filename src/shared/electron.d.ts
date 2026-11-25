@@ -40,6 +40,7 @@ declare module 'electron' {
     isVisible(): boolean;
     isFocused(): boolean;
     loadFile(path: string): Promise<void>;
+    loadURL(url: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
     restore(): void;

@@ -19,7 +19,7 @@ export function requireUpgradeSource(db: DatabaseSync): void {
     .map(row => ({ ...row, sql: row.sql === null ? null : canonicalSchemaSql(String(row.sql)) }));
   requireStore(db.prepare('PRAGMA user_version').get()?.user_version === 116 &&
     createHash('sha256').update(JSON.stringify(rows)).digest('hex') === SOURCE_SHAPE,
-    'UPGRADE_SOURCE_INVALID', '无法识别这份旧数据库的结构。请先用 0.7.4 打开并重新导出。');
+    'UPGRADE_SOURCE_INVALID', '无法识别这份旧数据库的结构。请先用 0.7.3 打开并重新导出。');
   validateProcedureDefinitions(db);
 }
 
