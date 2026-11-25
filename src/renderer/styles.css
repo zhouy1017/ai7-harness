@@ -410,6 +410,8 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .review-runs > li > span { display: block; }
 .review-run-line { font-weight: 800; }
 .review-runs .quiet, .review-run-heading > .quiet { min-height: 28px; padding: .15rem .4rem; }
+/* Before findings lead the header spreads its parts; 查看计划 stays beside the Run's name at the left, and what follows it goes right. */
+.review-run:not(.review-run-leading) > .review-run-heading > .quiet { margin-right: auto; }
 .review-new-actions { margin-top: 1rem; }
 .review-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 22rem; }
 .review-unavailable-reason { margin: 0; }

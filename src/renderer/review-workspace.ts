@@ -1369,15 +1369,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
-    heading.append(meta);
     if (run.state !== 'prepared') {
       // In the Run's own header (Issue #1706): the summary, the findings and the progress are all drawn below it, so nothing a
-      // poll brings moves it. It keeps the prepared card's plan-reading route after Start became one step; the same drawer hides
-      // technical detail in ordinary mode.
+      // poll brings moves it. Right after the Run's name, before its scope and date: there it also stands clear of a Task Drawer
+      // that lies over the page's right half in a small window. It keeps the prepared card's plan-reading route after Start
+      // became one step; the same drawer hides technical detail in ordinary mode.
       const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
       viewPlan.dataset['taskPlanOpen'] = 'review-run';
       heading.append(viewPlan);
     }
+    heading.append(meta);
     if (runHasResults(run)) {
       section.classList.add('review-run-leading');
       meta.textContent = `${run.scope.label.replaceAll('内容块', '段落')} · 创建于 ${reviewMinuteLabel(run.createdAt)}`;
