@@ -2403,9 +2403,10 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 
 /* Issue #902: bounded Proposal navigator and exact active-range comparison. */
 /* The list and the position rail stand side by side: the rail is its own positioned column, as wide as the manuscript's, so its
-   track, ticks and three lanes are drawn inside it and never over the list. The navigator is wider by that column, so the list keeps its width. */
+   track, ticks and three lanes are drawn inside it and never over the list, and as tall as the list (the row does not stretch to the
+   comparison's height). The navigator is wider by that column, so the list keeps its width. */
 .proposal-layout { display: grid; grid-template-columns: minmax(calc(240px + 4.75rem), calc(32% + 4.75rem)) minmax(0, 1fr); gap: 24px; }
-.proposal-navigator { display: grid; grid-template-columns: minmax(0, 1fr) 4.75rem; min-width: 0; }
+.proposal-navigator { display: grid; grid-template-columns: minmax(0, 1fr) 4.75rem; align-content: start; min-width: 0; }
 .proposal-navigator > .position-rail { position: relative; }
 .proposal-navigator-row { box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; overflow: hidden; border-bottom: 1px solid var(--boundary); cursor: pointer; }
 .proposal-navigator-row[aria-selected="true"] { outline: 2px solid var(--focus); outline-offset: -2px; }
