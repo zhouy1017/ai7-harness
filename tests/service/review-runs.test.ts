@@ -1455,7 +1455,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('carries the review card place when its original block was merged away (#1669)', async () => {
+  it('carries the review card place and rejects with a stale window start after a paragraph join (#1669, #1754)', async () => {
     await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const finding = run.findings.find((entry) => {
@@ -1479,10 +1479,15 @@ describe('a Review Run over the real store on exact sample1', () => {
       const decision = row.decision;
       if (decision?.kind !== 'reject') throw new Error('missing current-block reject input');
       expect(decision.input.windowStartBlockId).toBe(previous.blockId);
-      const clientDecisionId = randomUUID();
-      expect(() => session.store.recordChangeSuggestionDecision({ ...decision.input, clientDecisionId })).not.toThrow();
-      expect(storeError(() => session.store.recordChangeSuggestionDecision({ ...decision.input, windowStartBlockId: removed.blockId, clientDecisionId })))
-        .toMatchObject({ code: 'MARK_BINDING_CHANGED', message: '稿件窗口已变化，请刷新后再试。' });
+      const stale = { ...decision.input, windowStartBlockId: removed.blockId, clientDecisionId: randomUUID() };
+      const rejected = session.store.recordChangeSuggestionDecision(stale).card;
+      expect(rejected?.blockId).toBe(previous.blockId);
+      expect(rejected?.status).toBe('resolved');
+      expect(rejected?.suggestion?.decision?.disposition).toBe('rejected');
+      const retried = session.store.recordChangeSuggestionDecision(stale).card;
+      expect(retried?.suggestion?.decision?.decisionId).toBe(rejected?.suggestion?.decision?.decisionId);
+      const settled = workspace(session, book, run.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId);
+      expect(settled?.status).toBe('handled');
     });
   }, 300_000);
 
