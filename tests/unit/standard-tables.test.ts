@@ -23,14 +23,24 @@ describe('R5-L2 direct standard-table conversion', () => {
     const converted = await convertTable(Buffer.from(text), `table.${extension}`, 'house');
     expect(converted.rows?.[0]).toMatchObject({ recommended: '甲词', discouraged: ['乙词', '丙词'], rank: 3, condition: '限标题', source: '公开合成表', strength: 'dictionary', status: 'applied' });
   });
-  it('reads XLSX inline and shared strings, and DOCX table cells without a model', async () => {
-    const sheet = '<worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>不推荐写法</t></is></c></row><row><c r="A2" t="inlineStr"><is><t>甲词</t></is></c><c r="B2" t="s"><v>1</v></c></row></sheetData></worksheet>';
-    const xlsx = zipSync({ 'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>乙词</t></si></sst>'), 'xl/worksheets/sheet1.xml': strToU8(sheet) }, { mtime: fixedArchiveTime() });
+  it('reads matching XLSX sheets in number order, omitting empty sheets, relationship parts and phonetics', async () => {
+    const sheet = (term: string) => `<worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>不推荐写法</t></is></c></row><row><c r="A2" t="inlineStr"><is><t>${term}</t></is></c><c r="B2" t="s"><v>1</v></c></row></sheetData></worksheet>`;
+    const xlsx = zipSync({
+      'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t><rPh><t>tui4</t></rPh></si><si><r><t>乙</t></r><r><t>词</t></r><rPh><t>yi3ci2</t></rPh></si></sst>'),
+      'xl/worksheets/sheet10.xml': strToU8(sheet('丙词')),
+      'xl/worksheets/sheet3.xml': strToU8('<worksheet><sheetData/></worksheet>'),
+      'xl/worksheets/_rels/sheet2.xml.rels': strToU8('<Relationships><Relationship Id="rId1" Target="https://example.invalid/"/></Relationships>'),
+      'xl/worksheets/sheet2.xml': strToU8(sheet('甲词')),
+    }, { mtime: fixedArchiveTime() });
+    const result = await convertTable(xlsx, 'table.xlsx', 'national');
+    expect(result.rows?.map(row => [row.recommended, row.discouraged])).toEqual([['甲词', ['乙词']], ['丙词', ['乙词']]]);
+  });
+  it('selects DOCX tables with matching headers, skipping cover and empty tables', async () => {
     const cell = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
-    const docx = zipSync({ 'word/document.xml': strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr>${cell('规范字')}${cell('异体字')}</w:tr><w:tr>${cell('甲词')}${cell('乙词')}</w:tr></w:tbl></w:body></w:document>`) }, { mtime: fixedArchiveTime() });
-    for (const [name, bytes] of [['table.xlsx', xlsx], ['table.docx', docx]] as const) {
-      expect((await convertTable(bytes, name, 'national')).rows?.[0]).toMatchObject({ recommended: '甲词', discouraged: ['乙词'], strength: 'national', status: 'applied' });
-    }
+    const table = (...rows: string[][]) => `<w:tbl>${rows.map(row => `<w:tr>${row.map(cell).join('')}</w:tr>`).join('')}</w:tbl>`;
+    const docx = zipSync({ 'word/document.xml': strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${table(['封面'])}${table(['规范字', '异体字'], ['甲词', '乙词'])}${table([''])}</w:body></w:document>`) }, { mtime: fixedArchiveTime() });
+    const result = await convertTable(docx, 'table.docx', 'national');
+    expect(result.rows).toEqual([expect.objectContaining({ recommended: '甲词', discouraged: ['乙词'], strength: 'national', status: 'applied' })]);
   });
   it('reads the GF dash layout with appendix and notes, and holds conflicting recommendations', async () => {
     const text = '公开合成词表\n甲词——乙词\n附录：仅供参照\n丙词—丁词（限旧称）\n注：旧文引述保留。';

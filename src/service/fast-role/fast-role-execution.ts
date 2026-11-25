@@ -243,6 +243,8 @@ export type FastRoleAnswer =
 
 const OUTCOME_UNKNOWN_CODES: ReadonlySet<string> = new Set([AI7_FAILURE_CODES.OUTCOME_UNKNOWN, 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN']);
 
+export type ExecutedFlashTaskResult<Output> = FlashTaskResult<Output> & { readonly formattingParseFailure?: true };
+
 export class UnderlyingFlashService {
   readonly #children = new Set<UnderlyingFlashService>();
   #release: (() => void) | null = null;
@@ -252,7 +254,8 @@ export class UnderlyingFlashService {
   }
   readonly #deps: FastRoleExecutionDeps;
   #active: PrimaryAgentHarnessHandle | null = null;
-  #inFlight = false;
+  #tail = Promise.resolve();
+  #pending = 0;
   #disposed = false;
   #requestAbort: AbortController | null = null;
 
@@ -260,9 +263,9 @@ export class UnderlyingFlashService {
     this.#deps = deps;
   }
 
-  /** Whether a request is in flight; a database replacement waits for it as for a dialogue answer. */
+  /** A database replacement waits for active and queued requests as it waits for a dialogue answer. */
   get busy(): boolean {
-    return this.#inFlight || [...this.#children].some(child => child.busy);
+    return this.#pending > 0 || [...this.#children].some(child => child.busy);
   }
 
   /** Why a kind cannot be asked now, for the surfaces to show before anything is selected; `null` when it can. */
@@ -270,12 +273,14 @@ export class UnderlyingFlashService {
     return fastRoleRouteRefusal(this.#deps, kindId, sourceDigest);
   }
 
-  /** Refuse before anything is recorded or sent when the kind has no route here, or another request is in flight. */
+  /** Background work can queue. An interactive request needs an available owner before it is recorded. */
   requireReady(kindId: FastRoleKindId, sourceDigest?: string | null): void {
     const refusal = this.refusal(kindId, sourceDigest);
     if (refusal !== null) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', refusal);
     if (this.#disposed) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
-    if (this.#inFlight) throw new FastRoleError('FAST_ROLE_BUSY', '另一项润色或重新生成正在进行；请等它完成。');
+    if (this.#pending > 0 && !Object.hasOwn(FLASH_TASK_REGISTRY, kindId)) {
+      throw new FastRoleError('FAST_ROLE_BUSY', '这个模型还有其他工作未完成，请稍后重试。');
+    }
   }
 
   /** AI7 is closing: the request in flight is interrupted. */
@@ -291,20 +296,24 @@ export class UnderlyingFlashService {
    * Send the one message of a kind and read its answer. `step` names the request inside the development validation; the
    * caller has checked the route with `requireReady` and built `message` from verified words only.
    */
-  async execute<Input, Output>(contract: FlashTaskContract<Input, Output>, source: Input, step: string): Promise<FlashTaskResult<Output>> {
+  async execute<Input, Output>(contract: FlashTaskContract<Input, Output>, source: Input, step: string): Promise<ExecutedFlashTaskResult<Output>> {
     const kind = contract.kindId as keyof typeof STRUCTURED_FLASH_TASKS;
     if (kind === 'learning-sample-tidying') throw new FastRoleError('FLASH_LEARNING_SCOPE_REQUIRED', '学习样例需要已启用的学习范围。');
-    return runStructuredFlashTask(contract, source, async message => {
+    let receivedCompleteAnswer = false;
+    const result = await runStructuredFlashTask(contract, source, async message => {
       try {
         const answer = await this.#ask(kind, message, step);
         if (answer.kind === 'failed') return { reason: answer.message, outcomeUnknown: answer.outcomeUnknown };
         const failure = answer.binding.provenance?.failureCode;
-        return failure ? { reason: '模型没有返回完整结果。', outcomeUnknown: OUTCOME_UNKNOWN_CODES.has(failure) } : answer.text;
+        if (failure) return { reason: '模型没有返回完整结果。', outcomeUnknown: OUTCOME_UNKNOWN_CODES.has(failure) };
+        receivedCompleteAnswer = true;
+        return answer.text;
       } catch (error) {
         if (!(error instanceof FastRoleError)) throw error;
         return { reason: error.message };
       }
     });
+    return receivedCompleteAnswer && result.state === 'fallback' ? { ...result, formattingParseFailure: true } : result;
   }
 
   ask(kindId: Exclude<FastRoleKindId, keyof typeof STRUCTURED_FLASH_TASKS>, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
@@ -314,37 +323,49 @@ export class UnderlyingFlashService {
   async #ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
     this.requireReady(kindId);
     if (kindId === CONNECTION_TEST_KIND && message !== CONNECTION_TEST_POLICY.message) throw new FastRoleError('MODEL_CONNECTION_TEST_INVALID', '连接测试只接受固定的公开合成消息。');
-    this.#inFlight = true;
-    const cancellation = new AbortController();
-    this.#requestAbort = cancellation;
-    const operationTimer = kindId === 'guideline-clause-formatting'
-      ? setTimeout(() => cancellation.abort(new DOMException('规范整理超过时限。', 'TimeoutError')), GUIDELINE_FORMAT_TIMEOUT_MS) : undefined;
+    const live = this.#deps.live;
+    // Pin the admitted binding when the request enters the queue. The send checks that it is still current.
+    const route = live?.routes[kindId] ?? null;
+    const credentialReference = live?.credentialReference ?? '';
+    const credentialGeneration = live?.credentialGeneration?.();
+    const previous = this.#tail;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.#tail = promise;
+    this.#pending++;
+    let operationTimer: ReturnType<typeof setTimeout> | undefined;
     let producer: ModelRequestProducer | null = null;
     try {
+      await previous;
+      if (this.#disposed) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
+      const cancellation = new AbortController();
+      this.#requestAbort = cancellation;
+      if (kindId === 'guideline-clause-formatting') {
+        operationTimer = setTimeout(() => cancellation.abort(new DOMException('规范整理超过时限。', 'TimeoutError')), GUIDELINE_FORMAT_TIMEOUT_MS);
+      }
       if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
         key: `fast-role:${randomUUID()}`, kind: kindId === CONNECTION_TEST_KIND ? 'connection-test' : 'fast-role', lane: 'foreground',
       });
       const kind = FAST_ROLE_KINDS[kindId];
-      return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal, readMemory);
+      return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal,
+        { route, credentialReference, credentialGeneration }, readMemory);
     } finally {
       if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
       clearTimeout(operationTimer);
       this.#requestAbort = null;
-      this.#inFlight = false;
       this.#active = null;
+      this.#pending--;
+      resolve();
     }
   }
 
-  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
+  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal,
+    { route, credentialReference, credentialGeneration }: { route: AdmittedFastRoleRoute | null; credentialReference: string; credentialGeneration: string | null | undefined },
+    readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
-    const route = live === null ? null : live.routes[kind.kindId] ?? null;
     const recording = live !== null && !isOrdinaryProductionRuntime(live.runtime) && live.runtime.launch.recordingProvider !== undefined;
     if (recording && (SYNTHETIC_FLASH_RECORDING_KINDS as readonly string[]).includes(kind.kindId) && !isSyntheticRecordingInput(kind.kindId, message)) {
       throw new FastRoleError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
     }
-    // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
-    const credentialReference = live === null ? '' : live.credentialReference;
-    const credentialGeneration = live?.credentialGeneration?.();
     const memory = supportsEditorialMemoryPolicy(route?.providerProcessingVersion) && kind.kindId !== CONNECTION_TEST_KIND ? readMemory?.() ?? null : null;
     const isCurrent = (): boolean => route === null || live === null ||
       ((live.current?.(credentialReference, route) ?? true) &&

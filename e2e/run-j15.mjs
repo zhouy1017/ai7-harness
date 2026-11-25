@@ -520,6 +520,21 @@ async function main() {
     const executable = electronExecutable();
     const guidelinePath = resolve(runRoot, HOUSE_GUIDELINE_NAME);
     await writeFile(guidelinePath, HOUSE_GUIDELINE, 'utf8');
+    const tablePath = resolve(runRoot, '合成词表.xlsx');
+    await writeFile(tablePath, zipSync({
+      'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>甲词</t><rPh><t>jia3ci2</t></rPh></si></sst>'),
+      'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c></row></sheetData></worksheet>'),
+      'xl/worksheets/sheet2.xml': strToU8('<worksheet><sheetData/></worksheet>'),
+    }, { mtime: fixedArchiveTime() }));
+    const unstructuredTablePath = resolve(runRoot, '合成用语说明.txt');
+    await writeFile(unstructuredTablePath, '本社写作中推荐甲词，乙词需要改为甲词。', 'utf8');
+    const pickStandardTable = async (renderer) => {
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'standard-table-knowledge');
+      await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]')`, 'standard-table-knowledge-ready');
+      await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="standard-tables"]', 'standard-table-category');
+      await waitFor(renderer, `document.querySelectorAll('[data-standard-table-id]').length===4`, 'standard-table-library-ready');
+      await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="import"]', 'standard-table-pick');
+    };
     const launch = async (pickerPath = guidelinePath) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -539,7 +554,7 @@ async function main() {
     };
 
     at('initial-empty-book');
-    let manager = await launch();
+    let manager = await launch(tablePath);
     let renderer = await waitForRenderer(manager, 'initial-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
     await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
@@ -550,6 +565,17 @@ async function main() {
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
+    at('standard-table-workbook-preview');
+    await pickStandardTable(renderer);
+    await waitFor(renderer, `(() => {
+      const preview = document.querySelector('[data-standard-table-preview]');
+      const rows = preview?.querySelectorAll('[data-standard-table-row]');
+      return rows?.length === 1 && rows[0].firstElementChild?.textContent.startsWith('甲词 · ');
+    })()`, 'standard-table-workbook-clean-row');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="cancel-preview"]', 'standard-table-cancel');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('library'), 'standard-table-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'standard-table-returned');
+    at('initial-empty-book');
     const bookA = await createEmptyBook(renderer, 'J15 空图书甲');
     await assertRenderer(renderer, `document.querySelector('.native-artifact-card') === null && document.querySelector('[data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'book-capabilities-without-install');
     const freshWorkspace = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
@@ -1257,13 +1283,18 @@ async function main() {
         read.skills[0].revisionId===${JSON.stringify(firstRevision)};
     })()`, 'skill-rollback-selection-not-enablement');
     await closeBrowser();
-    manager = await launch();
+    manager = await launch(unstructuredTablePath);
     renderer = await waitForRenderer(manager, 'skill-rollback-restart-window');
     await openSkills('skill-rollback-restart');
     await assertRenderer(renderer, `(async () => {
       const read=await window.ai7.inspectImportedSkills({revisionId:null,before:null});
       return read.skills.length===1 && read.skills[0].revisionId===${JSON.stringify(firstRevision)} && read.skills[0].state==='installed-disabled' && document.querySelector('.imported-skill-list li')?.dataset.skillState==='installed-disabled';
     })()`, 'skill-rollback-survives-restart');
+
+    at('standard-table-unavailable');
+    await pickStandardTable(renderer);
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '这份文件需要模型整理。请在 设置 › 模型服务 选好可用的模型，再导入。'
+      && document.querySelector('[data-standard-table-preview]') === null`, 'standard-table-shows-model-setup-reason');
 
     at('word-persisted-source-lineage');
     const wordPath = resolve(runRoot, 'word-persisted-lineage.docx');
