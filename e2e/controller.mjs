@@ -1264,6 +1264,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-span-review-choices-gate',
     'local-common-word-check',
     'local-check-exact-sample1',
+    'review-reject-after-join',
     'review-keyboard-wide',
     'review-keyboard-gate',
     'marks-paging-wide',

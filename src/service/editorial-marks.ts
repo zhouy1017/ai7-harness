@@ -1318,7 +1318,7 @@ export class EditorialMarkStore {
       'MARK_ACTION_INVALID', '请在编辑修订卡片上应用或还原这处修改。');
     const prior = this.#db.prepare('SELECT 1 FROM proposal_item_decisions WHERE client_decision_id = ?').get(input.clientDecisionId);
     if (prior !== undefined) return this.#command(input, input.markId);
-    transact(this.#db, () => {
+    return transact(this.#db, () => {
       const mark = this.#liveMark(input);
       requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以这样处理。');
       requireMark(mark.status !== 'applied', 'MARK_DECISION_INVALID', '这条修改建议已经应用；要改回去，请准备撤销本次应用。');
@@ -1373,8 +1373,8 @@ export class EditorialMarkStore {
       new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
       this.#db.prepare('UPDATE editorial_marks SET status = ?, updated_at = ? WHERE mark_id = ?')
         .run(input.disposition === 'rejected' ? 'resolved' : 'open', now, input.markId);
+      return this.#command(input, input.markId);
     });
-    return this.#command(input, input.markId);
   }
 
   recordDecisionReason(input: RecordProposalDecisionReasonInput): EditorialMarkCommandProjection {
@@ -1712,9 +1712,16 @@ export class EditorialMarkStore {
   }
 
   #command(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string, gone = false): EditorialMarkCommandProjection {
-    const start = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, binding.windowStartBlockId) as SqlRow | undefined;
+    const orderKey = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    const live = gone ? undefined : this.#db.prepare(
+      `SELECT block_id, manuscript_id, branch_id FROM editorial_marks WHERE mark_id = ? AND status IN ${LIVE_STATUSES}`,
+    ).get(markId);
+    let start = orderKey.get(binding.branchId, binding.windowStartBlockId);
+    // A review card can still name a joined-away paragraph while its mark has followed the text.
+    if (start === undefined && live?.manuscript_id === binding.manuscriptId && live.branch_id === binding.branchId) {
+      start = orderKey.get(binding.branchId, text(live.block_id));
+    }
     requireMark(start !== undefined, 'MARK_BINDING_CHANGED', '稿件窗口已变化，请刷新后再试。');
-    const live = gone ? undefined : this.#db.prepare(`SELECT 1 FROM editorial_marks WHERE mark_id = ? AND status IN ${LIVE_STATUSES}`).get(markId);
     const startPosition = paragraphAtKey(this.#db, binding.branchId, integer(start.order_key));
     return {
       markId,
