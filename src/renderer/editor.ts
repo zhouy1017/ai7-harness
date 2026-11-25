@@ -57,8 +57,9 @@ export interface BoundedEditor {
   flush(): Promise<void>;
   captureContinuity(): EditorContinuity;
   /**
-   * Where the reader is (Issue #1703): the caret while its paragraph shows in the pane. Scrolled out of sight, or left on
-   * another window by paging, the caret is not where they read: the paragraph at the pane's middle answers, at its start.
+   * Where the reader is (Issue #1703): the caret while its paragraph shows in the pane. Once the reader has moved the pane by
+   * hand and the caret is out of sight, or was left on another window by paging, the caret is not where they read: the
+   * paragraph at the pane's middle answers, at its start.
    */
   readingPoint(): EditorPoint;
   /** Adopt the browser caret before decorating a completed click, even before selectionchange reaches the model. */
@@ -476,6 +477,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   options.scrollContainer.addEventListener('wheel', endSmoothJump, { passive: true });
   options.scrollContainer.addEventListener('pointerdown', endSmoothJump);
   options.scrollContainer.addEventListener('keydown', endSmoothJump);
+  // Whether the reader has moved the pane by hand — the wheel, a touch, the scrollbar — since this screen last arrived at a
+  // paragraph. Only then can the caret have been read away from (Issue #1703): a reflow or a scroll of the product's own
+  // that leaves the caret out of sight is not the reader reading on.
+  let readerMoved = false;
+  const noteReaderMove = (event: Event): void => { if (event.type !== 'pointerdown' || event.target === options.scrollContainer) readerMoved = true; };
+  for (const type of ['wheel', 'touchmove', 'pointerdown']) options.scrollContainer.addEventListener(type, noteReaderMove, { passive: true });
   // An arrival — the screen opening on its window — has no place on this screen to travel from: it stands at its paragraph at
   // once (Issue #1703). A jump within the screen still travels there.
   const scrollToTarget = (target: HTMLElement, arriving = false): void => {
@@ -715,6 +722,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }
     view.updateState(nextState);
     applyEditableState();
+    // An arrival at a named paragraph starts the reading there; paging, or a reload that keeps the place, continues it.
+    if (!continuity) readerMoved = false;
     // A restore superseded before its frame never runs: the later one speaks for the window now shown.
     if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
     const focusAtSchedule = document.activeElement;
@@ -1259,12 +1268,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       settlePendingRestore();
       // Paging leaves the caret on a window no longer shown; a jump still travelling has put it where the pane is going.
       const caret = deferredNavigationContinuity ? undefined : pointAtPosition(view.state.doc, view.state.selection.anchor);
-      if (caret && smoothJump) return caret;
+      if (caret && (!readerMoved || smoothJump)) return caret;
       const blocks = Array.from(view.dom.querySelectorAll<HTMLElement>('[data-block-id]'), (block) => {
         const box = block.getBoundingClientRect();
         return { blockId: block.dataset['blockId']!, top: box.top, bottom: box.bottom };
       });
-      const blockId = readingBlockId(options.scrollContainer.getBoundingClientRect(), blocks, caret?.blockId);
+      // A window paged to by a command, the pane not moved by hand, answers with its own first block, as since Issue #405.
+      const blockId = readerMoved ? readingBlockId(options.scrollContainer.getBoundingClientRect(), blocks, caret?.blockId) : blocks[0]?.blockId;
       requireEditor(blockId !== undefined, '稿件阅读位置无法解析。');
       return caret?.blockId === blockId ? caret : { blockId, grapheme: 0 };
     },
@@ -1435,6 +1445,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       options.scrollContainer.removeEventListener('wheel', endSmoothJump);
       options.scrollContainer.removeEventListener('pointerdown', endSmoothJump);
       options.scrollContainer.removeEventListener('keydown', endSmoothJump);
+      for (const type of ['wheel', 'touchmove', 'pointerdown']) options.scrollContainer.removeEventListener(type, noteReaderMove);
       stopSourceImages();
       destroyed = true;
       if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
