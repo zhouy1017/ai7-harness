@@ -214,13 +214,14 @@ export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 
 // after it is admitted there.
 export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
-// The window sizes UI evidence is taken at (Owner decision, 2026-11-25): a 1080p screen with the window at full size — the
-// maximised form — and with an ordinary restored window; the hosted Gate's size stays as the compatibility form. Each key is
-// an outer size for the guest runner's `-Window` (the E2E-only AI7_E2E_WINDOW); `viewport` is what a 1920×1080 desktop at
-// 100 % then gives the page (its work area trims the first to 1920×1032 outer). A smaller desktop trims every one of them, so
-// a Journey reads innerWidth / innerHeight and never these numbers.
+// The window sizes UI evidence is taken at (Owner decision, 2026-11-25): a 1080p screen with the window maximised and with
+// an ordinary restored window; the hosted Gate's size stays as the compatibility form. Each key is an outer size for the
+// guest runner's `-Window` (the E2E-only AI7_E2E_WINDOW); `viewport` is what a 1920×1080 desktop at 100 % then gives the
+// page. The product really maximises a Journey window asked for at the whole display (src/main/e2e-window.ts), so the
+// first is the size an editor gets by maximising. Another desktop gives other numbers, so a Journey reads innerWidth /
+// innerHeight and never these.
 export const E2E_WINDOW_BASELINES = Object.freeze({
-  '1920x1080': Object.freeze({ name: 'maximised', viewport: '1904x993' }),
+  '1920x1080': Object.freeze({ name: 'maximised', viewport: '1920x1009' }),
   '1440x900': Object.freeze({ name: 'window', viewport: '1424x861' }),
   '1024x720': Object.freeze({ name: 'hosted', viewport: '1008x681' }),
 });

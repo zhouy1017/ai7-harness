@@ -40,6 +40,8 @@ declare module 'electron' {
     isVisible(): boolean;
     isFocused(): boolean;
     loadFile(path: string): Promise<void>;
+    /** E2E-only: a Journey that asks for the whole display (src/main/e2e-window.ts). */
+    maximize(): void;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
     restore(): void;
@@ -102,6 +104,8 @@ declare module 'electron' {
     on(event: 'updated', listener: () => void): void;
     removeListener(event: 'updated', listener: () => void): void;
   };
+  /** E2E-only: the primary display's size, for the maximised Journey window (src/main/e2e-window.ts). */
+  export const screen: { getPrimaryDisplay(): { size: { width: number; height: number } } };
   export const session: { defaultSession: Session; fromPartition(partition: string): Session };
   export const shell: { showItemInFolder(path: string): void; openExternal(url: string): Promise<void> };
 }

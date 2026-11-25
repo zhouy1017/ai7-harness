@@ -15,6 +15,7 @@ import { createSourceOpener, lockWindowNavigation, registerSourceBrowserHandler,
 import { randomUUID } from 'node:crypto';
 import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
+import { e2eWindowSize, maximizeE2eWindow } from './e2e-window.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -3969,11 +3970,8 @@ export async function runApplication(): Promise<void> {
       injectedPickerPath: string | undefined,
       revealAndFocus: boolean,
     ): Promise<OwnedRendererWindow> => {
-      const e2eWindow = process.env.AI7_E2E_JOURNEY
-        ? /^([1-9]\d*)x([1-9]\d*)$/.exec(process.env.AI7_E2E_WINDOW ?? '') : null;
       const window = new BrowserWindow({
-        width: e2eWindow ? Number(e2eWindow[1]) : 1180,
-        height: e2eWindow ? Number(e2eWindow[2]) : 820,
+        ...e2eWindowSize({ width: 1180, height: 820 }),
         minWidth: 920,
         minHeight: 680,
         show: false,
@@ -4037,6 +4035,7 @@ export async function runApplication(): Promise<void> {
         });
       });
       await Promise.all([window.loadFile(resolve(__dirname, '..', 'renderer', 'index.html')), firstPaint]);
+      if (revealAndFocus) maximizeE2eWindow(window);
       if (productReady) window.webContents.send(MAIN_EVENTS.productReady);
       if (revealAndFocus) focusOwnedWindow(owned);
       return owned;
