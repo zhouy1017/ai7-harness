@@ -1151,6 +1151,28 @@ async function main() {
     // one journal entry shown at once; an Apply between them is an editor step of its own, which Ctrl+Z takes back first (#1654).
     at('structure-split');
     const structural = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => ![${JSON.stringify(first)}, ${JSON.stringify(second)}].includes(node.dataset.blockId) && node.querySelectorAll('.editorial-mark').length === 0 && Array.from(segmenter.segment((node.textContent ?? '').slice(0, 24))).length === 24); return clean.length >= 2 ? [clean[0].dataset.blockId, clean[1].dataset.blockId] : null; })()`);
+    // The position rail stands beside the 修改导航 list, in its own column: its track, ticks and lanes are drawn inside that column and
+    // never over a row, so a row's centre is the row's own. A real press there chooses the row, and a real key goes back.
+    await waitFor(renderer, `document.querySelector('.proposal-navigator > .position-rail .rail-marker') !== null`, 'proposal-rail-drawn');
+    const railBeside = await renderer.evaluate(`(() => {
+      const nav = document.querySelector('.proposal-navigator'), list = nav.querySelector('[role="listbox"]'), rail = nav.querySelector(':scope > .position-rail');
+      const box = (node) => { const r = node.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom].map((value) => Math.round(value * 10) / 10); };
+      const l = box(list), r = box(rail), line = box(rail.querySelector('.rail-line'));
+      const drawn = Array.from(rail.querySelectorAll('.rail-line, .rail-now, .rail-tick, .rail-gap, .rail-marker'), box).filter((b) => b[2] > b[0]);
+      return { position: getComputedStyle(rail).position, list: l, rail: r, line, view: [innerWidth, innerHeight], outside: drawn.filter((b) => b[0] < r[0] - 0.5 || b[2] > r[2] + 0.5).length,
+        beside: r[2] > r[0] && r[0] >= l[2] - 0.5 && r[2] <= innerWidth && Math.abs(r[1] - l[1]) < 1 && Math.abs(r[3] - l[3]) < 1 && Math.abs(line[1] - r[1]) < 1 && Math.abs(line[3] - r[3]) < 1 };
+    })()`);
+    requireJourney(railBeside?.position === 'relative' && railBeside.beside === true && railBeside.outside === 0, 'proposal-rail-beside-the-list', railBeside);
+    const navigatorRows = await renderer.evaluate(`(() => {
+      const rows = Array.from(document.querySelectorAll('.proposal-navigator [data-windowed-index]')), active = rows.find((row) => row.getAttribute('aria-selected') === 'true');
+      const index = Number(active?.dataset.windowedIndex), next = rows.find((row) => Number(row.dataset.windowedIndex) === index + 1), previous = rows.find((row) => Number(row.dataset.windowedIndex) === index - 1);
+      return active ? { active: active.id, other: (next ?? previous)?.id ?? null, back: next ? 'ArrowUp' : 'ArrowDown' } : null;
+    })()`);
+    requireJourney(typeof navigatorRows?.other === 'string' && navigatorRows.active === 'windowed-' + await renderer.evaluate('window.__j05WorkspaceMarkId'), 'proposal-navigator-rows', navigatorRows);
+    await pointerClick(renderer, waitFor, `[id="${navigatorRows.other}"]`, 'proposal-row-press', { scroll: false });
+    await waitFor(renderer, `'windowed-' + document.querySelector('[data-proposal-active]')?.dataset.proposalActive === ${JSON.stringify(navigatorRows.other)} && document.getElementById(${JSON.stringify(navigatorRows.other)})?.getAttribute('aria-selected') === 'true'`, 'proposal-row-press-chooses-the-row');
+    await press(renderer, navigatorRows.back);
+    await waitFor(renderer, `document.querySelector('[data-proposal-active]')?.dataset.proposalActive === window.__j05WorkspaceMarkId && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-row-key-returns');
     requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
     const [splitBlock, appliedBlock] = structural;
     await assertRenderer(renderer, `(async () => { window.__j05Structure = { split: window.__j05.text(${JSON.stringify(splitBlock)}), applied: window.__j05.text(${JSON.stringify(appliedBlock)}) }; const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); window.__j05Journal = (await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } })).journalSequence; return typeof window.__j05Structure.split === 'string'; })()`, 'structure-original-kept');
