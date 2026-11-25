@@ -1,6 +1,6 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { withReturnArrival } from './return-arrival.mjs';
-import { readingPlaceSurvivesOverview } from './reading-place.mjs';
+import { helpReturnsHere, readingPlaceSurvivesOverview } from './return-places.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
@@ -2099,6 +2099,8 @@ async function main() {
     await clickSelector(renderer, `.book-overview[data-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-action="open"]`, 'workspace-entry-overview-open');
     await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-again');
     requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore, 'workspace-entry-again-records-nothing');
+    // 帮助 from the workspace goes back to the workspace, the Book page it was pressed on, and not to 工作概览 (0.7.9 review, BUG-18).
+    await helpReturnsHere(renderer, waitFor, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-help-return');
 
     at('workspace-propose');
     // A click in one paragraph chooses it whole; with a 修改要求, 提出变更集 sends one dialogue turn, answered by the J-04 adapter.

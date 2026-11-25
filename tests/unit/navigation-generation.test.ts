@@ -116,7 +116,7 @@ function harness(api: object = {}) {
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
     mountBackgroundAnalysis: vi.fn(), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
     settleScreen: vi.fn(async () => true),
-    AGENT_WORKSPACE_RETURN_SECTIONS: {},
+    BOOK_SCREEN_SECTIONS: {},
     modelServiceChannel:null,modelChoices:new Map(),flashModelChoices:new Map(),effortOtherDrafts:new Map(),effortDrafts:new Map(),modelFilters:new Map(),favourites:[],
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
     KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',

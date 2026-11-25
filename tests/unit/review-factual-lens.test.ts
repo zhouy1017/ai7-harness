@@ -1189,6 +1189,16 @@ describe('the way back from a finding (#1525)', () => {
     expect(synthesis.goToText).toHaveBeenLastCalledWith(expect.objectContaining({ ordinal: 1, blockId: finding().blockId }));
   });
 
+  it('says the way back by the page 回到原文 was pressed on, and goes back to that page (0.7.9 review, BUG-18)', async () => {
+    const { leaveReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
+    const toFindings = vi.fn();
+    leaveReviewReturn(BOOK, jump, toFindings, '待办汇总');
+    const chip = reviewReturnButton(jump.manuscriptId, jump.branchId)!;
+    expect(chip.textContent).toBe('回到待办汇总');
+    chip.click();
+    expect(toFindings).toHaveBeenCalledOnce();
+  });
+
   it('leaves no numbered way back for a jump that came from no finding', async () => {
     const { leaveReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
     leaveReviewReturn(BOOK, jump, vi.fn());

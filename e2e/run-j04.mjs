@@ -1,6 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { checkRetainedFindingSources } from './retained-finding-sources.mjs';
 import { pressReachable } from './task-card-reach.mjs';
+import { findingsTextReturnsToFindings } from './return-places.mjs';
 import { capturePointerFailure, chooseDispatch, frozenModelWords, pointerClick, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
@@ -3208,6 +3209,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll('[data-findings-filter]').length===3 && !root.querySelector('select') && root.querySelector('.finding-row .finding-body .finding-why') && root.querySelector('.finding-row .finding-location'); })()`, 'findings-filter-row-layout');
+    // 回到原文 from a row leaves the way back to 待办汇总, said as 待办汇总 (0.7.9 review, BUG-18).
+    await findingsTextReturnsToFindings(renderer, waitFor, requireJourney, 'book-findings-text');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
 

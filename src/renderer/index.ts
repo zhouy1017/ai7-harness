@@ -10,7 +10,7 @@ import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFa
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
 import { createStatusSurface, followBottomControls, reportResult } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
-import { ScreenReturnHistory } from './screen-return.js';
+import { BOOK_SCREEN_SECTIONS, ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
 import { createModelServiceSettings } from './model-service-settings.js';
 import { createKnowledgeBase } from './knowledge-base.js';
@@ -90,7 +90,7 @@ import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 
 
 
-import { SHELL_LABELS } from './shell-labels.js';
+import { SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
@@ -953,17 +953,18 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const content = screen.firstElementChild;
   const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
   if (restore !== undefined) return restore;
-  const state = screen.dataset['screen'];
-  if (state === 'help') return renderHelp;
-  if (state === 'data-storage') return renderDataAndStorage;
+  const state = screen.dataset['screen'] ?? '';
+  // 帮助 and every page of 设置 open again as the settings navigation opens them.
+  const settingsPage = settingsPages()[state as SettingsRoute];
+  if (settingsPage !== undefined) return settingsPage;
   if (state === 'quality-learning') return () => renderQualityLearning();
   if (state === 'knowledge-base') return () => renderKnowledgeBase();
-  if (state === 'model-service') return renderModelServiceSettings;
   if (state === 'series-list' || state === 'series') return () => renderSeriesList(null);
-  if (state === 'evaluation-calibration') return () => renderEvaluationCalibration(null);
   const book = shell.currentBook();
-  if (book !== null && content instanceof HTMLElement && content.dataset['bookId'] === book.bookId) return () => openBookSection(book, 'overview');
-  return initializeStartup;
+  if (book === null || !(content instanceof HTMLElement) || content.dataset['bookId'] !== book.bookId) return initializeStartup;
+  // A Book page with no way back of its own opens again on its own tab, not on 工作概览.
+  if (state === 'agent-workspace') return () => openAgentWorkspace(book.bookId, agentWorkspaceReturn(book.bookId, book.title));
+  return () => openBookSection(book, BOOK_SCREEN_SECTIONS[state] ?? 'overview');
 }
 
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
@@ -2413,7 +2414,8 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     if (!suggestions.length) return;
     try { return await applyFindingBatches(suggestions, api); }
     catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
-  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); }, (target) => goToReviewText(bookId, bookTitle, target));
+  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); },
+  (target) => goToReviewText(bookId, bookTitle, target, { name: FINDINGS_CENTER_WORDS.heading, back: () => renderBookFindings(bookId, bookTitle) }));
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }
 
@@ -2497,14 +2499,15 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
   focusAfterLoad(item, { preventScroll: true });
 }
 
-async function goToReviewText(bookId: string, bookTitle: string, target: FindingTextTarget): Promise<void> {
+/** 回到原文 from a finding: the manuscript at its paragraph, leaving the way back to the page it was pressed on — 审阅 unless `from` names another. */
+async function goToReviewText(bookId: string, bookTitle: string, target: FindingTextTarget, from?: { name: string; back: () => void }): Promise<void> {
   const current = navigation.begin();
   const origin = screen.firstElementChild;
   const opened = await api.getManuscriptWindowAt({
     manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId },
   });
   if (!current.isCurrent()) return;
-  leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
+  leaveReviewReturn(bookId, target, () => { void leaveThen(async () => (from?.back ?? (() => renderBookReview(bookId, bookTitle)))()); }, from?.name);
   if (!current.isCurrent() || screen.firstElementChild !== origin) return;
   await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
 }
@@ -3184,19 +3187,6 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
   }
 }
 
-/** The Book sections a 返回 from the Agent 工作区 goes back to, by the screen the editor left (Issue #90, slice 13a). */
-const AGENT_WORKSPACE_RETURN_SECTIONS: Readonly<Record<string, ShellBookSection>> = Object.freeze({
-  'book-overview': 'overview',
-  imported: 'overview',
-  'book-analysis': 'analysis',
-  'book-review': 'review',
-  'book-evaluation': 'evaluation',
-  'book-deliverables': 'deliverables',
-  'book-derivatives': 'derivatives',
-  'book-findings': 'findings',
-  'book-sources': 'sources',
-});
-
 /**
  * Where 返回 leaves the Agent 工作区 for (Issue #90, slice 13a; AGENT-002): the work the editor left, read before the workspace
  * replaces it — the manuscript where it was being read, or the Book section on screen; 工作概览 otherwise.
@@ -3207,7 +3197,7 @@ function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
   const onScreen = content?.dataset['bookId'] ?? null;
   const restore = content !== null && onScreen === bookId ? agentWorkspaceReturns.get(content) : undefined;
   const reading = state === 'editor' && onScreen === bookId ? manuscriptOnScreen?.readingPlace() ?? null : null;
-  const section = onScreen === bookId ? AGENT_WORKSPACE_RETURN_SECTIONS[state] ?? null : null;
+  const section = onScreen === bookId ? BOOK_SCREEN_SECTIONS[state] ?? null : null;
   return () => void leaveThen(async () => {
     let current = navigation.route();
     try {
@@ -3398,7 +3388,9 @@ function renderEditorWindow(
       leaveGuard = () => surface.settle();
       agentWorkspaceReturns.set(content, async () => {
         const current = navigation.begin();
-        const opened = await api.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
+        // Where it was last read (RET-002, Issue #1703); its first page only when another manuscript was read since.
+        const { manuscriptId, branchId } = initialWindow, read = lastReadingPlace?.manuscriptId === manuscriptId && lastReadingPlace.branchId === branchId ? lastReadingPlace.blockId : null;
+        const opened = read === null ? await api.getManuscriptWindow({ manuscriptId, branchId, cursor: null }) : await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: read } });
         if (!current.isCurrent()) return;
         await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId, undefined, current);
       });

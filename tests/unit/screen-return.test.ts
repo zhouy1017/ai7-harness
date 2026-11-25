@@ -22,4 +22,23 @@ describe('screen origins', () => {
     expect(data).toHaveBeenCalledOnce(); expect(settings).toHaveBeenCalledOnce();
     await history.back('unknown', library); expect(library).toHaveBeenCalledOnce();
   });
+
+  it('reaches the page the editor came from after settings pages were visited back and forth, and 帮助 from a page its step opened (0.7.9 review, BUG-18)', async () => {
+    const history = new ScreenReturnHistory(); const manuscript = vi.fn(); const fallback = vi.fn();
+    const page = (screen: string) => vi.fn(() => history.enter(screen, fallback));
+    history.enter('editor', fallback); history.enter('model-service', manuscript);
+    history.enter('appearance', page('model-service')); history.enter('model-service', page('appearance'));
+    await history.back('model-service', fallback);
+    expect(manuscript).toHaveBeenCalledOnce();
+    // F1 from the manuscript, then a step of 帮助 opens 模型服务: 返回 is 帮助 first, the manuscript after it.
+    const help = page('help');
+    history.enter('editor', fallback); history.enter('help', manuscript); history.enter('model-service', help);
+    await history.back('model-service', fallback); expect(help).toHaveBeenCalledOnce();
+    await history.back('help', fallback); expect(manuscript).toHaveBeenCalledTimes(2);
+    // Another page opened since is no way back: 设置 from there returns there.
+    const review = vi.fn();
+    history.enter('book-review', fallback); history.enter('keyboard', review);
+    await history.back('keyboard', fallback); expect(review).toHaveBeenCalledOnce();
+    expect(fallback).not.toHaveBeenCalled();
+  });
 });
