@@ -174,6 +174,28 @@ it.each(['memory', 'preference'])('omits a %s without lifecycle metadata and lea
   expect(root.querySelector('[data-preference-editor="new"]')).not.toBeNull();
 });
 
+// 0.7.9 review BUG-19: 编辑偏好 replaced the rule's controls with a form that had no way out but saving.
+it.each(['取消', 'Escape'])('leaves 编辑偏好 by %s without saving, the controls back and 编辑偏好 in focus', async (way) => {
+  const setup = learning(); const root = host(); await mountEditorialMemory(root, setup.renderer, vi.fn());
+  for (const selector of ['[data-memory-item="active"]', '[data-review-preference="legacy"]']) {
+    const controls = root.querySelector(`${selector} .preference-actions`)!;
+    const before = Array.from(controls.children);
+    click(controls, '编辑偏好');
+    const form = controls.querySelector('form.preference-editor')!;
+    const text = form.querySelector('textarea')!;
+    expect([controls.children.length, document.activeElement === text, text.value.length > 0]).toEqual([1, true, true]);
+    text.value = '改到一半的句子';
+    if (way === '取消') click(form, '取消');
+    else (text as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+    expect(Array.from(controls.children)).toEqual(before);
+    expect(document.activeElement?.textContent).toBe('编辑偏好');
+  }
+  await settle();
+  expect(setup.api.recordLearningSupervision).not.toHaveBeenCalled();
+  // The form that adds a rule is always on the page and has nothing to go back to: it offers no 取消.
+  expect(Array.from(root.querySelectorAll('[data-preference-editor="new"] button'), (button) => button.textContent)).toEqual(['新增并启用偏好']);
+});
+
 it('applies the refusal refresh and issues a fresh action id for each distinct press', async () => {
   const setup = learning(); const root = host(); await mountEditorialMemory(root, setup.renderer, vi.fn());
   const row = () => root.querySelector('[data-memory-item="active"]')!;

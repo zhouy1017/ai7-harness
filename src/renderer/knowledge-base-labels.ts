@@ -10,6 +10,7 @@ import type {
   MaterialIndexProjection,
   MaterialIndexReason,
   MaterialSegmentsPageProjection,
+  RetrievalAssistMode,
   KnowledgeArtifactProjection,
   ExemplarBookProjection,
   ExemplarProjection,
@@ -337,7 +338,7 @@ export const LIBRARY_BOOKS_FIRST = '回到图书首页';
 export const libraryBookLabel = (title: string): string => `《${title}》`;
 export const libraryUseRecorded = (material: LibraryMaterialProjection, recorded: boolean): string => recorded
   ? `已记录「${material.title}」的决定：${libraryReferenceLine(material)}。`
-  : material.attribution === null ? '还没有选给谁用，任务不会参考它。' : `「${material.title}」的使用范围没有变化：${libraryReferenceLine(material)}。`;
+  : `「${material.title}」的使用范围没有变化：${libraryReferenceLine(material)}。`;
 export const LIBRARY_SERIES = '书系';
 /** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */
 export const LIBRARY_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把资料归到书系。';
@@ -434,11 +435,11 @@ export function libraryEligibilityLine(material: Pick<LibraryMaterialProjection,
 }
 
 /** Whose Tasks may list it under 允许参考 (KB-007), or what it still waits for. */
-export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility' | 'attribution'>): string {
+export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility' | 'attribution' | 'notUsed'>): string {
   if (material.reference.state === 'available') {
     return material.reference.scope === 'book' ? `《${material.reference.bookTitle}》的任务可参考` : '本社可参考';
   }
-  return material.eligibility?.choice === 'deferred' ? LIBRARY_USE_LATER : material.attribution === null ? '还不能参考：先选给谁用' : '还不能参考：请确认给谁用';
+  return material.notUsed !== undefined || material.eligibility?.choice === 'deferred' ? LIBRARY_USE_LATER : material.attribution === null ? '还不能参考：先选给谁用' : '还不能参考：请确认给谁用';
 }
 
 /** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
@@ -482,10 +483,21 @@ export const MATERIAL_INDEX_LAYER_TERMS: Readonly<Record<(typeof MATERIAL_INDEX_
 export const MATERIAL_INDEX_TERM = '资料索引';
 /** What a layer this build does not provide says: never imitated, never hidden (Owner 2026-10-09, option 乙). */
 export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖）';
-/** 相似段落检索 (Issue #892): ranked on this machine by words as soon as the index is built, nothing to build (R5-F2c). */
+/**
+ * 相似段落检索 (Issue #892): ranked by words on this machine as soon as the index is built, nothing to build (R5-F2c) — and,
+ * with a fast model connected, widened and re-ordered by it (R5-F2b), which sends the search words and the candidate snippets.
+ */
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
-export const MATERIAL_VECTORS_SEARCH_NOTE = '本机相似搜索仅供参考，原文以分段为准。';
+/** What a search may send, said beside every 相似段落检索 field before the editor searches (0.7.9 review 2.3). */
+export const RETRIEVAL_ASSIST_NOTE = '已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
+/** What left the machine for the search just answered, said beside its results: never 本机 when the words were sent. */
+export const RETRIEVAL_ASSIST_LINES: Readonly<Record<RetrievalAssistMode, string>> = {
+  'fast-model': '本次：快速模型参与了扩展和重排。',
+  'fast-model-unused': '本次：已发给快速模型，但没有用上，结果按本机字面检索。',
+  local: '本次：没有发送，只在本机按字面检索。',
+};
+export const MATERIAL_VECTORS_SEARCH_NOTE = `结果仅供参考，原文以分段为准。${RETRIEVAL_ASSIST_NOTE}`;
 export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
 /** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
 export const MATERIAL_TRANSLATION_REQUEST = '生成来源译文';
@@ -595,6 +607,14 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
       }
       return '没有提取出全文，无从分段';
   }
+}
+
+/**
+ * 来源译文 as ordinary mode reads it (0.7.9 review, BUG-19): its progress, that it is done, or why it stopped — the layer's own
+ * line, the failure's code left to the developer layer.
+ */
+export function materialTranslationLine(index: MaterialIndexProjection): string {
+  return `${MATERIAL_TRANSLATION_TERM}：${materialIndexLayerLine(index, 'translation').replace(/（[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+）/gu, '')}`;
 }
 
 /**

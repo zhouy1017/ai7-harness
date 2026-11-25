@@ -2,7 +2,8 @@ import { chooseImportTarget } from './import-page.mjs';
 import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
 import { chooseDispatch, pointerClick, EFFORT_WORDS, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { chooseEffort, effortKey, effortListFacts, openEffortList, pressEffortRow, reachPress, wheelClear } from './effort-list.mjs';
-import { assertReachable } from './task-card-reach.mjs';
+import { assertReachable, pressReachable as wheelPress } from './task-card-reach.mjs';
+import { pressEscape } from './ordinary-pages.mjs';
 import { helpReturnsHere, pressBack } from './return-places.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -1551,6 +1552,23 @@ async function main() {
       return Boolean(category&&scope&&text&&save)&&category.value==='style-and-format'&&category.disabled&&scope.value===''&&scope.disabled&&
         text.value===${JSON.stringify(preferenceText)}&&!save.disabled&&form.parentElement.children.length===1;
     })()`, 'ordinary-preference-edit-fields');
+    // 0.7.9 review BUG-19: an edit has a way out. 取消 (real pointer, asserted in the window before the press) and Escape (real
+    // key, from the sentence the editor is writing) each put the rule's controls back with 编辑偏好 in focus, and save nothing.
+    const preferenceCss = `[data-screen="quality-learning"] [data-editorial-memory] [data-review-preference="${createdRule.itemId}"]`;
+    const preferenceLeft = `(() => { const row=${preferenceRow(createdRule.itemId)}; const names=Array.from(row?.querySelectorAll('.preference-actions > button')??[], node=>node.textContent);
+      return Boolean(row)&&!row.querySelector('form')&&names.join(',')==='停用,编辑偏好'&&document.activeElement===row.querySelector('[data-preference-edit]')&&row.querySelector('p')?.textContent===${JSON.stringify(preferenceText)}; })()`;
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-cancel]`, 'ordinary-preference-edit-cancel');
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-cancelled');
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-reopen');
+    await waitFor(primary, `document.activeElement===${preferenceRow(createdRule.itemId)}?.querySelector('form.preference-editor textarea')`, 'ordinary-preference-edit-sentence-focus');
+    await primary.send('Input.insertText', { text: '（写到一半）' });
+    await assertRenderer(primary, `${preferenceRow(createdRule.itemId)}.querySelector('form.preference-editor textarea').value===${JSON.stringify(`${preferenceText}（写到一半）`)}`, 'ordinary-preference-edit-typed');
+    await pressEscape(primary);
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-escaped');
+    const untouchedPreference = await primary.evaluate(preferenceState(preferenceText));
+    requireJourney(untouchedPreference.items.length === 1 && untouchedPreference.directives === createdPreference.directives, 'ordinary-preference-edit-left-unsaved', untouchedPreference);
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-open-again');
+    await waitFor(primary, `${preferenceRow(createdRule.itemId)}?.querySelector('[data-preference-editor="${createdRule.itemId}"] textarea')?.value===${JSON.stringify(preferenceText)}`, 'ordinary-preference-edit-open-clean');
     await assertRenderer(primary, `(() => {
       const form=${preferenceRow(createdRule.itemId)}.querySelector('[data-preference-editor="${createdRule.itemId}"]');
       const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');

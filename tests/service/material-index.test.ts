@@ -119,15 +119,18 @@ describe('optional underlying Flash material search (R5-F2b)', () => {
   it('finds a synonym with no shared surface word, bounds the expansion, and assists the library search too', async () => {
     await withSearchMaterial(['愉悦。', '舒畅。'], async (store, bookId, materialId) => {
       const input = { bookId, query: '快乐', k: 8 };
-      expect((await store.searchReferableMaterials(input)).candidates).toEqual([]);
+      expect(await store.searchReferableMaterials(input)).toEqual({ candidates: [], assist: 'local' });
       const expand = vi.fn((query: string) => runStructuredFlashTask(queryExpansion, query,
         async () => '{"items":["喜悦","欢欣","愉悦","高兴","舒畅"]}'));
       store.useRetrievalAssist({ expand });
-      const found = (await store.searchReferableMaterials(input)).candidates;
+      const answer = await store.searchReferableMaterials(input);
+      // The answer itself says the fast model shaped it (0.7.9 review 2.3).
+      expect(answer.assist).toBe('fast-model');
+      const found = answer.candidates;
       expect(found.map(candidate => candidate.preview)).toEqual(['愉悦。']);
       expect(found[0]!.revisionOrIndexDigest).toBe(store.pinMaterialReference(bookId, materialId).indexDigest);
       const library = await store.searchLibraryMaterialVectors({ materialId, text: input.query, k: 8 });
-      expect(library.candidates.map(candidate => candidate.preview)).toEqual(['愉悦。']);
+      expect([library.assist, library.candidates.map(candidate => candidate.preview)]).toEqual(['fast-model', ['愉悦。']]);
       expect(expand).toHaveBeenCalledTimes(2);
       expect(expand).toHaveBeenCalledWith(input.query);
     });
@@ -171,22 +174,25 @@ describe('optional underlying Flash material search (R5-F2b)', () => {
           expand: query => runStructuredFlashTask(queryExpansion, query, async () => raw),
           rerank: source => runStructuredFlashTask(retrievalRerank, source, async () => raw),
         });
-        expect(await store.searchReferableMaterials(input)).toEqual(local);
-        expect(await store.searchLibraryMaterialVectors(libraryInput)).toEqual(libraryLocal);
+        // The words were sent and nothing usable came back: the same local candidates, never called local.
+        expect([local.assist, libraryLocal.assist]).toEqual(['local', 'local']);
+        expect(await store.searchReferableMaterials(input)).toEqual({ ...local, assist: 'fast-model-unused' });
+        expect(await store.searchLibraryMaterialVectors(libraryInput)).toEqual({ ...libraryLocal, assist: 'fast-model-unused' });
       });
     },
   );
 
-  it.each(['fallback', 'outcome-unknown', 'throw'] as const)('uses lexical results without retry when Flash returns %s', async state => {
+  it.each(['fallback', 'outcome-unknown', 'throw', 'not-asked'] as const)('uses lexical results without retry when Flash returns %s', async state => {
     await withSearchMaterial(['alpha beta', 'alpha gamma'], async (store, bookId) => {
       const input = { bookId, query: 'alpha', k: 1 };
       const local = await store.searchReferableMaterials(input);
       const unavailable = vi.fn(async () => {
         if (state === 'throw') throw new Error('synthetic offline transport');
-        return { state, value: [], reason: 'synthetic unavailable' };
+        return state === 'not-asked' ? null : { state, value: [], reason: 'synthetic unavailable' };
       });
       store.useRetrievalAssist({ expand: unavailable, rerank: unavailable });
-      expect(await store.searchReferableMaterials(input)).toEqual(local);
+      // Only an executor that did not ask the model leaves the search local; an answer or a throw means the words were sent.
+      expect(await store.searchReferableMaterials(input)).toEqual({ ...local, assist: state === 'not-asked' ? 'local' : 'fast-model-unused' });
       expect(unavailable).toHaveBeenCalledTimes(2);
     });
   });
@@ -199,7 +205,11 @@ describe('optional underlying Flash material search (R5-F2b)', () => {
       const governor = new ModelRequestGovernor();
       const owner = new UnderlyingFlashService({ fixture: null, live: null, requestGovernor: governor });
       try {
-        store.useRetrievalAssist({ expand: query => owner.execute(queryExpansion, query, 'search'), rerank: source => owner.execute(retrievalRerank, source, 'search') });
+        // Wired as the service wires it: a task the owner refuses is not asked, so nothing is sent and the answer stays local.
+        store.useRetrievalAssist({
+          expand: async query => owner.refusal('retrieval-query-expansion') === null ? owner.execute(queryExpansion, query, 'search') : null,
+          rerank: async source => owner.refusal('retrieval-rerank') === null ? owner.execute(retrievalRerank, source, 'search') : null,
+        });
         expect(await store.searchReferableMaterials(input)).toEqual(local);
         store.useRetrievalAssist(null);
         expect(await store.searchReferableMaterials(input)).toEqual(local);
@@ -217,7 +227,8 @@ describe('optional underlying Flash material search (R5-F2b)', () => {
       try {
         const local = await index.retrieve('阿长');
         const offline = async (): Promise<never> => { throw new Error('synthetic offline'); };
-        const found = await retrieveWithFlash(index, '阿长', 8, { expand: offline, rerank: offline });
+        const { candidates: found, assist } = await retrieveWithFlash(index, '阿长', 8, { expand: offline, rerank: offline });
+        expect(assist).toBe('fast-model-unused');
         expect(found).toEqual(local);
         expect(found.map(candidate => candidate.preview)).toEqual(['长妈妈。']);
         expect(index.exactFetch(found[0]!.candidateId).text).toBe('长妈妈。');
