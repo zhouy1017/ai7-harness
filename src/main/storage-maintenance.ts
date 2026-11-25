@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { dialog, type BrowserWindow } from 'electron';
+import { dialog } from 'electron';
 
 type Action = 'preflight' | 'upgrade' | 'resume' | 'rollback' | 'check-rollback';
 type MaintenanceResult = {
@@ -12,7 +12,7 @@ type MaintenanceResult = {
 
 export async function storageMaintenance(
   entry: string, root: string, action: Action,
-  progress?: { window: BrowserWindow; onStage: (stage: string) => void },
+  onStage?: (stage: string) => void,
 ): Promise<MaintenanceResult | undefined> {
   let result: MaintenanceResult;
   try {
@@ -23,9 +23,9 @@ export async function storageMaintenance(
         maxBuffer: 1024 * 1024,
         encoding: 'utf8',
       }, (error, output) => error ? reject(error) : resolve(output));
-      if (progress && child.stderr) {
+      if (onStage && child.stderr) {
         createInterface({ input: child.stderr }).on('line', (line: string) => {
-          if (line.startsWith('AI7_UPGRADE_STAGE/')) progress.onStage(line.slice('AI7_UPGRADE_STAGE/'.length));
+          if (line.startsWith('AI7_UPGRADE_STAGE/')) onStage(line.slice('AI7_UPGRADE_STAGE/'.length));
         });
       }
     });
@@ -40,10 +40,6 @@ export async function storageMaintenance(
     `如果备份已完成，可在此文件夹找到备份：${root}-backups`,
     result.message,
   ].filter(Boolean).join('\n');
-  if (message) {
-    const options = { type: result.ok ? 'info' : 'error', title: '书库升级', message, buttons: ['关闭'] };
-    if (progress && !progress.window.isDestroyed()) await dialog.showMessageBox(progress.window, options);
-    else await dialog.showMessageBox(options);
-  }
+  if (message) await dialog.showMessageBox({ type: result.ok ? 'info' : 'error', title: '书库升级', message, buttons: ['关闭'] });
   return result.ok && !result.restored ? result : undefined;
 }

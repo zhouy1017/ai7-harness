@@ -33,7 +33,7 @@ async function upgradeWithProgress(entry: string, root: string, action: 'upgrade
   try {
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(progressPage)}`);
     window.show();
-    return Boolean(await storageMaintenance(entry, root, action, { window, onStage: stage => {
+    return Boolean(await storageMaintenance(entry, root, action, stage => {
       const index = stepByStage.get(stage);
       if (index === undefined || window.isDestroyed()) return;
       void window.webContents.executeJavaScript(`{
@@ -41,7 +41,7 @@ async function upgradeWithProgress(entry: string, root: string, action: 'upgrade
         document.querySelectorAll('li')[${index}].setAttribute('aria-current', 'step');
         document.querySelector('[role="status"]').textContent = ${JSON.stringify(`正在${steps[index]}，请稍候。`)};
       }`).catch(() => undefined);
-    } }));
+    }));
   } finally {
     if (!window.isDestroyed()) window.destroy();
   }
