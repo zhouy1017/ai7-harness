@@ -784,6 +784,32 @@ describe('the control under a resting pointer stays where it stands when the car
     });
   });
 
+  it('keeps the page where it stood when the engine moves it as the whole card is replaced, with neither pointer nor focus in the card', async () => {
+    await laidOut(async (view, state, scroller) => {
+      await flush();
+      state.full = reading(['f-1', 'f-2']);
+      view.surface.refresh(); await flush();
+      scroller.scrollTop = 300;
+      const before = below(view.root).getBoundingClientRect().top;
+      expect(miniDocument.activeElement === null || !view.root.contains(miniDocument.activeElement as MiniElement)).toBe(true);
+      // An engine whose scroll anchoring lost its anchor with the old card takes another and moves the page by itself at the swap
+      // (J-04 `factual-correction-draft`: 57 px under 准备更正提案, with nothing changed in size).
+      const replaceWith = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'replaceWith')!;
+      let swaps = 0;
+      Object.defineProperty(MiniElement.prototype, 'replaceWith', { configurable: true, value(this: MiniElement, ...nodes: Array<MiniElement | string>): void {
+        (replaceWith.value as (...next: Array<MiniElement | string>) => void).apply(this, nodes);
+        if (this.className.split(' ').includes('review-workspace-card')) { swaps += 1; scroller.scrollTop -= 57; }
+      } });
+      try {
+        state.full = reading(['f-1', 'f-2'], 2);
+        view.surface.refresh(); await flush();
+      } finally { Object.defineProperty(MiniElement.prototype, 'replaceWith', replaceWith); }
+      expect(swaps).toBe(1);
+      expect(scroller.scrollTop).toBe(300);
+      expect(below(view.root).getBoundingClientRect().top).toBe(before);
+    });
+  });
+
   it('keeps whatever control lies under the pointer\'s last position at the draw', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();

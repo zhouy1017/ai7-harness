@@ -1142,6 +1142,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       : null;
     const putBack = screenPlace();
+    const page = scroller();
+    const stood = page?.scrollTop;
     measureProgress(next.run);
     const node = el('section', 'review-workspace-card');
     if (readFailure !== null) {
@@ -1203,6 +1205,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         node.querySelector<HTMLElement>('.review-filters button[aria-pressed="true"]:not(:disabled)')?.focus({ preventScroll: true });
       }
     }
+    // Every node of the card is new, so the engine's scroll anchoring has lost its anchor and moves the page as it takes another
+    // (57 px after a recorded decision, though nothing changed size): the page stays where it stood, whether or not the editor's
+    // focus or pointer is in the card, and `putBack` then makes the one move that is meant.
+    if (page != null && stood !== undefined && page.scrollTop !== stood) page.scrollTop = stood;
     putBack();
   }
 

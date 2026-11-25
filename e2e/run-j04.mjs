@@ -3812,6 +3812,16 @@ async function main() {
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="reason-suggestion"][aria-pressed="true"]') !== null`, 'factual-reason-selected');
     await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-more > summary`, 'factual-decision-more');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-more')?.open===true`, 'factual-decision-more-open');
+    // Recording a decision reads 审阅 again and draws its whole card anew. 准备更正提案 must stand where it stood when the decision
+    // showed as recorded: the watcher reads its top at that moment and again once the card has been replaced.
+    const prepareSelector = `${workspaceSelector} .evidence-decision-row [data-evidence-action="prepare-correction"]`;
+    await renderer.evaluate(`(() => { const seen = { card: null, top: null, repainted: false }; globalThis.__j04PreparePlace = seen;
+      new MutationObserver((_records, observer) => {
+        const card = document.querySelector('.review-workspace-card'), button = document.querySelector(${JSON.stringify(prepareSelector)});
+        if (seen.top === null) { if (button !== null && document.querySelector(${JSON.stringify(`${workspaceSelector} .evidence-decision-recorded`)}) !== null) { seen.card = card; seen.top = button.getBoundingClientRect().top; } }
+        else if (card !== seen.card) { seen.repainted = true; observer.disconnect(); }
+      }).observe(document.body, { childList: true, subtree: true });
+      return true; })()`);
     await pressInWindow(renderer, `${workspaceSelector} [data-decision-choice="keep-pending"]`, 'factual-decision-record');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-recorded')?.dataset.superseded==='false' && document.querySelector('${workspaceSelector} [data-decision-choice]')===null`, 'factual-decision-recorded');
     const decided = await renderer.evaluate(`window.ai7.inspectEvidenceWorkspace({ bookId: ${JSON.stringify(factualBook.bookId)}, resultId: ${JSON.stringify(sourced.resultId)}, sourcesAfter: null })`);
@@ -3823,7 +3833,12 @@ async function main() {
     // 准备更正提案 on a result below the formal gate: the Run's two variants and 自行编辑, the first chosen (Issue #1410 item 18); the range set holds the
     // finding's own words, included; saving makes one ordinary 修改建议 whose card keeps 证据核查未完成 (CORR-001 to CORR-011,
     // EASSURE-012).
-    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-row [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
+    await waitFor(renderer, `globalThis.__j04PreparePlace?.repainted === true`, 'factual-decision-repainted');
+    const preparePlace = await renderer.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => { const button = document.querySelector(${JSON.stringify(prepareSelector)});
+      resolve({ recorded: globalThis.__j04PreparePlace.top, repainted: button?.getBoundingClientRect().top ?? null, window: [innerWidth, innerHeight] }); })))`);
+    console.log(`FACT_PREPARE_PLACE/${JSON.stringify(preparePlace)}`);
+    requireJourney(typeof preparePlace.recorded === 'number' && typeof preparePlace.repainted === 'number' && Math.abs(preparePlace.repainted - preparePlace.recorded) < 1, 'factual-correction-place-kept', preparePlace);
+    await pressInWindow(renderer, prepareSelector, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
     await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.map((input)=>input.checked).join()==='true,false,false' && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===false; })()`, 'factual-correction-first-variant-chosen');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'factual-correction-choose');
