@@ -910,7 +910,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 ├─ 范例 · by Book, mirroring the deliverable structure · auto-archived at Publication Version · 仅本社 default
 ├─ 资料库 · editor-collected books / papers / documents / web captures · attribution + Learning Eligibility
 └─ 外部来源留存 · cross-Book index of SRC-013 retained sources · 有效 / 需复核 / 失效
-   └─ Material Index (资料库 and 外部来源留存) · 原件 · 元数据 · 提取全文 + 译文 · 分段与锚点 · 相似段落检索（向量）
+   └─ Material Index (资料库 and 外部来源留存) · 原件 · 元数据 · 提取全文 + 译文 · 分段与锚点 · 相似段落检索（按字词，无需构建）
 ```
 
 `字表与词表` is house-wide: every enabled table is offered to each Book's 规范用语核查, which pins the versions it used ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)). Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use. The seven classes, the five-layer index and the automatic archiving of Exemplars follow [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) (KB-006 to 010).

@@ -78,7 +78,7 @@ function harness(overrides: Partial<TaskComposerOptions> = {}) {
   const promoted: PromoteTaskIntentDraftInput[] = [];
   let latest: TaskIntentDraftProjection | null = null;
   const reads: TaskIntentDraftsProjection = { bookId: BOOK, bookTitle: '任务撰写', manuscript: { revisionLabel: 'r2', journalSequence: 9, pendingSave: true }, drafts: [] };
-  const opened: Array<[string, string, string]> = [];
+  const opened: Array<[string, string, string, string | undefined]> = [];
   const closed = vi.fn();
   const statuses: string[] = [];
   const options: TaskComposerOptions = {
@@ -101,7 +101,7 @@ function harness(overrides: Partial<TaskComposerOptions> = {}) {
     pickRange: async () => range('blk_000000000000000000000009', '再加一段'),
     openProcedures: vi.fn(),
     settle: async () => true,
-    openPlan: (bookId, kind, ref) => { opened.push([bookId, kind, ref]); },
+    openPlan: (bookId, kind, ref, view) => { opened.push([bookId, kind, ref, view]); },
     openNew: vi.fn(),
     close: closed,
     onChanged: vi.fn(),
@@ -205,7 +205,7 @@ describe('the Context-bound Task Composer', () => {
     // Saved, the same surface edits the draft: its version, and 准备计划 once nothing is unsaved.
     expect(root.dataset['taskComposer']).toBe('draft');
     expect(root.dataset['taskComposerDraft']).toBe(DRAFT);
-    expect(root.querySelector('h3')!.textContent).toBe('任务意图草稿 · 第 1 版');
+    expect(root.querySelector('h3')!.textContent).toBe('任务草稿 · 第 1 版');
     expect(action('promote')!.disabled).toBe(false);
     expect(action('save')!.disabled).toBe(true);
     expect(composer.held()).toEqual({ bookId: BOOK, bookTitle: '任务撰写', draftId: DRAFT, unsaved: false, promoted: false });
@@ -221,7 +221,7 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('.task-composer-note')!.textContent).toContain('不会读取稿件');
     expect(root.querySelector('.task-composer-no-ranges')).not.toBeNull();
     expect(root.querySelector('[data-task-composer-action="procedures"]')).toBeNull();
-    expect(TASK_PANEL_COMPOSE_OPEN).toBe('发起全书任务…');
+    expect(TASK_PANEL_COMPOSE_OPEN).toBe('描述要做的事…');
   });
 
   it('never prepares on an input method\'s Enter (TASK-009), and does on Ctrl+Enter outside a composition', async () => {
@@ -304,8 +304,8 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('[data-task-composer-pin]')).toBeNull();
   });
 
-  it('starts the exact prepared task from one click and keeps plan inspection optional', async () => {
-    const authorize = vi.fn(async () => ({}));
+  it.each(['plan', 'run'] as const)('opens the promoted task once in the %s view', async (view) => {
+    const authorize = vi.fn(async () => { if (view === 'plan') throw new Error('需要连接'); return {}; });
     const { composer, root, action, type, field, promoted, opened, options } = harness();
     options.api.inspectTaskPlan = vi.fn(async () => ({ start: { planEnvelopeDigest: 'f'.repeat(64), categoryDigests: [] } } as unknown as TaskPlanProjection));
     options.api.authorizeBaselineAnalysis = authorize as unknown as RendererApi['authorizeBaselineAnalysis'];
@@ -317,24 +317,22 @@ describe('the Context-bound Task Composer', () => {
     await settle();
     expect(promoted).toEqual([{ draftId: DRAFT, versionId: VERSION, choice: { kind: 'baseline', mode: 'first-baseline' } }]);
     expect(authorize).toHaveBeenCalledWith({ taskIntentId: 'c0000000-0000-4000-8000-000000000001', planEnvelopeDigest: 'f'.repeat(64) });
-    expect(opened).toEqual([]);
-    expect(root.dataset['taskComposer']).toBe('promoted');
-    action('open-plan')!.click();
-    expect(opened).toEqual([[BOOK, 'baseline-analysis', 'c0000000-0000-4000-8000-000000000001']]);
+    expect(opened).toEqual([[BOOK, 'baseline-analysis', 'c0000000-0000-4000-8000-000000000001', view]]);
+    if (view === 'plan') expect(root.querySelector('.task-composer-seed-note')?.textContent).toBe('任务已准备好，还没有开始：在计划里查看并开始。');
   });
 
 });
 
 describe('the composer\'s words', () => {
   it('keeps every new string byte for byte', () => {
-    expect(TASK_COMPOSER_TITLES).toEqual({ selection: '就这段发起任务', book: '发起全书任务', draft: '任务意图草稿' });
+    expect(TASK_COMPOSER_TITLES).toEqual({ selection: '就这段发起任务', book: '发起任务', draft: '任务草稿' });
     expect(TASK_COMPOSER_GOAL_LABEL).toBe('描述希望 AI7 完成的编辑工作');
     expect(TASK_COMPOSER_ACTIONS.prepare).toBe('准备任务');
     expect(TASK_COMPOSER_ACTIONS.promote).toBe('准备计划');
     expect(TASK_COMPOSER_ACTIONS.resume).toBe('返回继续');
     expect(taskComposerParkedLine('甲书')).toBe('《甲书》有一份没有完成的任务草稿，留在那本书里。');
     expect(taskPlanDraftSentence('统一人名')).toBe('你的要求：「统一人名」');
-    expect(DIALOGUE_PROMOTE_LABEL).toBe('转为任务意图草稿');
+    expect(DIALOGUE_PROMOTE_LABEL).toBe('转为任务草稿');
     expect(dialogueReasoningLine(0)).toBe('正在检索与所选文字相关的段落…');
     expect(dialogueReasoningLine(3)).toBe('正在比对检索到的 3 个段落…');
   });

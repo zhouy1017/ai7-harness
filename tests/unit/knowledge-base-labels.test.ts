@@ -1,4 +1,6 @@
+import { recordLibraryUse } from '../../src/renderer/library-materials.js';
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { nextIndexPollDelay, startsWaiting } from '../../src/renderer/library-materials.js';
 import {
   LIBRARY_EMPTY,
@@ -11,12 +13,11 @@ import {
   libraryPreviewFacts,
   libraryPreviewHeading,
   libraryReferenceLine,
+  libraryUseRecorded,
   librarySourceLine,
   MATERIAL_INDEX_LAYERS,
   MATERIAL_INDEX_NEEDS_DEPENDENCY,
-  MATERIAL_VECTORS_BUILD,
   materialAnchorLabel,
-  materialEmbeddingLabel,
   materialParagraphAnchorLabel,
   materialVectorResultsHeading,
   materialIndexCompletedReason,
@@ -54,21 +55,21 @@ import {
   guidelineVersionPill,
 } from '../../src/renderer/knowledge-base-labels.js';
 import { MAX_GUIDELINE_CLAUSES, parseGuidelineClauses } from '../../src/service/review-guidelines.js';
-import type { LibraryMaterialProjection, MaterialIndexProjection, MaterialTranslationProjection, MaterialVectorsProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
+import type { LibraryMaterialProjection, MaterialIndexProjection, MaterialTranslationProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
 
 const UNBUILT: MaterialIndexProjection = {
-  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
 };
 
 // Unit suite for 知识库's words (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-010) and the reading
 // of a guideline file's numbered clauses (KB-003).
 
 describe('知识库', () => {
-  it('names its eight classes in the specification\'s order, and says which arrive later', () => {
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存']);
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'evaluation', 'rules', 'memory', 'exemplars', 'library', 'house-words']);
-    expect(visibleKnowledgeBaseTabs(false).map((view) => view.tab)).toEqual(['guidelines', 'memory', 'exemplars', 'library', 'house-words']);
+  it('names its nine classes in the specification\'s order, and says which arrive later', () => {
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '字表与词表', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存']);
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'standard-tables', 'evaluation', 'rules', 'memory', 'exemplars', 'library', 'house-words']);
+    expect(visibleKnowledgeBaseTabs(false).map((view) => view.tab)).toEqual(['guidelines', 'standard-tables', 'memory', 'exemplars', 'library', 'house-words']);
     expect(visibleKnowledgeBaseTabs(true)).toEqual(KNOWLEDGE_BASE_TAB_VIEWS);
     for (const view of KNOWLEDGE_BASE_TAB_VIEWS) {
       expect(view.holds.length).toBeGreaterThan(0);
@@ -97,6 +98,11 @@ describe('知识库', () => {
     expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
     expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
       .toBe('「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。');
+    // 0.7.9 wording follow-up: an ordinary editor reads 事实核查规则; developer mode keeps the document's own name.
+    setTechnicalLayerVisible(false);
+    expect(guidelineFixedStatement({ use: 'factual-kind', appliedBy: [{ categoryId: 'f', label: '事实核查' }] }))
+      .toBe('「事实核查」按 AI7 固定的事实核查规则执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。');
+    setTechnicalLayerVisible(true);
     expect(guidelineFixedStatement({ use: 'factual-kind', appliedBy: [{ categoryId: 'f', label: '事实核查' }] }))
       .toBe('「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。');
     expect([guidelineCitations(0), guidelineCitations(4)]).toEqual(['未被引用', '被引用 4 次']);
@@ -192,7 +198,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect(artifactLine({ ...artifact, state: 'unavailable-needs-attention' })).toBe('本社方案 v2 · 不可用 · 需要处理');
   });
 
-  it('says a 资料库 item in the editor\'s words: what arrived, where it belongs, its eligibility, and whose Tasks may list it', () => {
+  it('says a 资料库 item in the editor\'s words: what arrived, where it belongs, its eligibility, and whose Tasks may list it', async () => {
     const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
     const source = { displayName: 'sample1.docx', format: 'DOCX' as const, bytes: 29_550, sha256: 'a'.repeat(64) };
     expect([libraryBytes(512), libraryBytes(29_550), libraryBytes(5 * 1024 * 1024), libraryBytes(3 * 1024 * 1024 * 1024)])
@@ -206,17 +212,17 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     };
     expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
-      .toEqual(['尚未定给谁用', '尚未定', '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。']);
+      .toEqual(['尚未定给谁用', '尚未定', '还不能参考：先选给谁用']);
     const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
     const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
     expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
-      .toEqual(['《甲书》', '稍后决定', '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
+      .toEqual(['《甲书》', '稍后决定', '暂不使用']);
     const own = {
       ...book,
       eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'book' as const, bookTitle: '甲书' },
     };
-    expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可以把它列进「允许参考」。']);
+    expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可参考']);
     const house = {
       ...pending,
       attribution: { scope: 'house' as const, decidedAt: '2026-09-25T02:00:00.000Z' },
@@ -224,7 +230,56 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       reference: { state: 'available' as const, scope: 'house' as const },
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
-      .toEqual(['本社', '纳入本社经验', '每本书的任务都可以把它列进「允许参考」。']);
+      .toEqual(['本社', '纳入本社经验', '本社可参考']);
+    // #1552: standing state × answer. Reconfirming reference access preserves learning choices and notes. 暂不使用 is its own
+    // decision (Issue #1671; 0.7.9 review BUG-03): sent for every item it does not already stand on — a new one with no
+    // attribution and one left for later included, which the page used to answer with nothing — and never sent twice.
+    const eligibility = (choice: 'book' | 'house' | 'excluded' | 'deferred') => ({ ...own.eligibility, choice });
+    const notUsed = { decidedAt: '2026-09-25T04:00:00.000Z' };
+    expect([libraryReferenceLine({ ...pending, notUsed }), libraryUseRecorded({ ...pending, notUsed }, false)])
+      .toEqual(['暂不使用', '「样书一」的使用范围没有变化：暂不使用。']);
+    const states: Array<[LibraryMaterialProjection, string[][]]> = [
+      [pending, [['A', 'eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...pending, notUsed }, [['A', 'eb'], ['B', 'eb'], ['H', 'eh'], []]],
+      [house, [['A', 'eb'], ['B', 'eb'], [], ['nu']]],
+      [{ ...house, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['A', 'eb'], ['B', 'eb'], ['eh'], ['nu']]],
+      [{ ...house, eligibility: eligibility('deferred'), reference: { state: 'pending' }, notUsed }, [['A', 'eb'], ['B', 'eb'], ['eh'], []]],
+      [{ ...book, decisionCount: 10 }, [['eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [own, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('excluded') }, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('house') }, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+    ];
+    const decisions = {
+      A: { kind: 'attribution', attribution: { scope: 'book', bookId: 'b' } },
+      B: { kind: 'attribution', attribution: { scope: 'book', bookId: 'other' } },
+      H: { kind: 'attribution', attribution: { scope: 'house' } },
+      eb: { kind: 'eligibility', choice: 'book', reason: null },
+      eh: { kind: 'eligibility', choice: 'house', reason: null },
+      nu: { kind: 'not-used' },
+    } as const;
+    for (const [start, expected] of states) for (const [index, answer] of ['book:b', 'book:other', 'house', 'deferred'].entries()) {
+      const calls: unknown[] = [];
+      let current = { ...start, decisionCount: 10 };
+      const initial = current;
+      const result = await recordLibraryUse({ decideLibraryMaterial: async (request) => {
+        calls.push(request);
+        const decision = request.decision;
+        current = { ...current, decisionCount: current.decisionCount + 1 };
+        const { notUsed: _stood, ...kept } = current;
+        if (decision.kind === 'attribution') current = { ...kept,
+          attribution: decision.attribution.scope === 'house' ? { scope: 'house', decidedAt: '' } : { ...decision.attribution, bookTitle: '甲书', decidedAt: '' }, eligibility: null };
+        else if (decision.kind === 'eligibility') current = { ...kept, eligibility: { ...own.eligibility, choice: decision.choice, reason: decision.reason } };
+        else current = { ...current, notUsed, reference: { state: 'pending' }, eligibility: current.attribution === null ? null : eligibility('deferred') };
+        return current;
+      } }, initial, answer, () => {});
+      expect(calls).toEqual(expected[index]!.map((key, offset) => ({ materialId: 'm', expectedDecisions: 10 + offset, decision: decisions[key as keyof typeof decisions] })));
+      if (expected[index]!.length === 0) expect(result).toBe(initial);
+      const recorded = expected[index]!.length !== 0;
+      const expectedStatus = recorded ? `已记录「样书一」的决定：${libraryReferenceLine(result)}。` : `「样书一」的使用范围没有变化：${libraryReferenceLine(start)}。`;
+      expect(libraryUseRecorded(result, recorded)).toBe(expectedStatus);
+      if (answer === 'deferred') expect([result.notUsed, libraryReferenceLine(result)]).toEqual([notUsed, '暂不使用']);
+    }
     // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
       .toEqual(['仅纳入《甲书》', '纳入本社经验', '明确排除', '稍后决定']);
@@ -244,22 +299,19 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
   it('says every layer waits while the index waits, and what is never provided says so from the start', () => {
     expect(materialIndexStateLine(UNBUILT)).toBe('等待建立索引');
     expect(materialIndexStateLine({ ...UNBUILT, state: 'indexing' })).toBe('正在本机建立索引…');
-    expect(lines(UNBUILT)).toEqual(['已原样保存在本机', '等待建立索引', '等待建立索引', '不需要：文件里就是文字', '等待提取全文', '等待提取全文', '等待建立索引']);
+    expect(lines(UNBUILT)).toEqual(['已原样保存在本机', '等待建立索引', '等待建立索引', '不需要：文件里就是文字', '等待提取全文', '等待提取全文']);
     expect(lines({ ...UNBUILT, state: 'indexing' })[2]).toBe('正在建立…');
     // A PDF waits for its text before recognition can be said needed or not (Issue #892).
     expect(materialIndexLayerLine({ ...UNBUILT, layers: { ...UNBUILT.layers, recognition: 'pending' } }, 'recognition')).toBe('等待建立索引');
     expect(MATERIAL_INDEX_NEEDS_DEPENDENCY).toBe('未提供（需要本地依赖）');
   });
 
-  const VECTORS: MaterialVectorsProjection = { state: 'not-built', embedding: 'ai7-embedding/stub-1', dimensions: 256, built: 0, total: 12, builtAt: null, expectedDigest: null };
-
-  it('states a complete index layer by layer, with the anchors as positions, and the two layers made on request (Issue #892)', () => {
+  it('states a complete index layer by layer, with the anchors as positions, its six layers, and 来源译文 made on request (Issue #892)', () => {
     const complete: MaterialIndexProjection = {
       state: 'complete', reason: null, builtAt: '2026-10-09T01:00:00.000Z', digest: 'c'.repeat(64),
       metadata: { documentTitle: '样书', language: 'zh', paragraphs: 12, headings: 2, sentences: 40, characters: 900, pages: null },
-      vectors: VECTORS,
       translation: null,
-      layers: { original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' },
+      layers: { original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' },
     };
     expect(materialIndexStateLine(complete)).toBe('已在本机建好');
     expect(lines(complete)).toEqual([
@@ -269,16 +321,10 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
       '不需要：文件里就是文字',
       '不需要：中文资料',
       '12 段 · 40 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）',
-      `未构建：可以「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`,
     ]);
-    // The vectors as they are made, once made, part made, and when the provider's model files are missing.
-    const vectorLine = (vectors: Partial<MaterialVectorsProjection> & Pick<MaterialVectorsProjection, 'state'>): string =>
-      materialIndexLayerLine({ ...complete, vectors: { ...VECTORS, ...vectors }, layers: { ...complete.layers, vectors: vectors.state } }, 'vectors');
-    expect(vectorLine({ state: 'building', built: 4 })).toBe('构建中… 4 / 12 段');
-    expect(vectorLine({ state: 'complete', built: 12 })).toBe('已构建：12 段 · 本机内置相似向量（按字词相近）');
-    expect(vectorLine({ state: 'not-built', built: 4 })).toBe(`未构建完：4 / 12 段；可以继续「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`);
-    expect(vectorLine({ state: 'needs-model', expectedDigest: 'e'.repeat(64) })).toBe(`需要模型文件：在 设置 › 本机 › 相似索引模型 放入摘要为 ${'e'.repeat(64)} 的模型文件`);
-    expect(vectorLine({ state: 'needs-model' })).toBe('需要模型文件：尚未选择嵌入依赖');
+    // 相似段落检索 is no layer and has nothing to build (R5-F2c): the six layers, and no line names a build, a vector or 设置.
+    expect(MATERIAL_INDEX_LAYERS).toEqual(['original', 'metadata', 'text', 'recognition', 'translation', 'segments']);
+    expect(lines(complete).join('\n')).not.toMatch(/构建|向量|设置/u);
     // A non-Chinese item's 来源译文: offered, and said not admitted exactly as the policy says; made; part made with why.
     const translation: MaterialTranslationProjection = { state: 'not-built', translated: 0, total: 12, model: null, request: { available: false, reason: '当前策略未开放来源译文' }, lastFailure: null };
     const english: MaterialIndexProjection = {
@@ -300,7 +346,6 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     expect(materialAnchorLabel(5, 2, { page: 3, paragraph: 1 })).toBe('第 3 页第 1 段第 2 句');
     expect(materialParagraphAnchorLabel(5, 3, 1)).toBe('第 3 页第 1 段');
     expect(materialParagraphAnchorLabel(5, null, null)).toBe('第 5 段');
-    expect(materialEmbeddingLabel('ai7-embedding/other')).toBe('本机模型 ai7-embedding/other');
     expect([materialVectorResultsHeading(0), materialVectorResultsHeading(3)]).toEqual(['没有找到相近的段落。', '相近段落：3 条（按相近程度排序；原文以分段为准）']);
   });
 
@@ -308,12 +353,12 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     const pdf: MaterialIndexProjection = {
       state: 'unsupported', reason: 'needs-local-dependency', builtAt: '2026-10-09T01:00:00.000Z', digest: 'd'.repeat(64),
       metadata: { documentTitle: null, language: null, paragraphs: 0, headings: 0, sentences: 0, characters: 0, pages: null },
-      vectors: null, translation: null,
-      layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
+      translation: null,
+      layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred' },
     };
     expect(materialIndexStateLine(pdf)).toBe('已建好可读的层；这种格式的文字未能提取');
     expect(lines(pdf)).toEqual(['已原样保存在本机', '已记录文件名、格式、大小与摘要', '未提供（需要本地依赖）', '未提供（需要本地依赖）：扫描件要先识别文字',
-      '没有提取出全文，无从翻译', '没有提取出全文，无从分段', '没有提取出全文，无从建立相似索引']);
+      '没有提取出全文，无从翻译', '没有提取出全文，无从分段']);
     // A PDF without a text layer needs recognition, which is said as not provided (Issue #892).
     const scan = { ...pdf, reason: 'needs-recognition' as const, layers: { ...pdf.layers, text: 'unsupported' as const, segments: 'unsupported' as const } };
     expect(materialIndexStateLine(scan)).toBe('已建好可读的层；扫描件需要先识别文字');
@@ -352,7 +397,7 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     expect(materialAnchorLabel(12, 3)).toBe('第 12 段第 3 句');
     expect(materialSegmentsHeading({ from: 17, total: 40, segments: Array.from({ length: 16 }, () => ({ ordinal: 0, kind: 'paragraph' as const, text: 'x', sentences: [], page: null, pageParagraph: null, translation: null })) }))
       .toBe('分段：第 17–32 段，共 40 段');
-    expect(materialIndexCompletedReason('complete')).toBe('资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。');
+    expect(materialIndexCompletedReason('complete')).toBe('资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪。');
     expect(materialIndexCompletedReason('unsupported')).toBe('资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。');
     expect(materialIndexCompletedReason('failed')).toBe('资料索引已建立，但没能提取文字：打开资料看原因。');
   });

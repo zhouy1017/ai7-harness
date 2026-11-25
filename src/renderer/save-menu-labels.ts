@@ -1,4 +1,5 @@
 import { MILESTONE_FORM_WORDS } from './deliverables-labels.js';
+import { IMPORT_ENTRY_WORDS } from './import-entry-labels.js';
 import { technicalWords } from './technical-layer.js';
 
 /** 已写入修订日志 ▾ (Issue #952; V2-UX-ED-050/052): two separate facts, never one generic 已保存. */
@@ -11,5 +12,6 @@ export const SAVE_MENU_WORDS = {
   changedSinceMilestone: (label: string) => `自里程碑版本「${label}」后有修改`,
   milestoneUnavailable: '里程碑版本状态暂不可用',
   milestone: `${MILESTONE_FORM_WORDS.summary}…`,
-  exportManuscript: '导出…',
+  importNewVersion: IMPORT_ENTRY_WORDS.newVersion,
+  exportDeliverables: '导出交付物…',
 } as const;

@@ -16,10 +16,21 @@ import { openPackageStore } from './database-exports.js';
  *
  * Known differences R5-6 must expect between the old store and the upgraded one (not implemented here):
  * - `tables.manuscript_revisions`: one 「升级时的稿件」 revision more per manuscript (ADR 0105 §5), so old + `manuscripts` rows;
- * - `tables.working_offset_nodes`: dropped by the position conversion (ADR 0105 §6), so 0 after the upgrade;
+ * - `tables.working_pages`: new with the position conversion (ADR 0105 §6, #1654) — 0 before, Σ ⌈blocks / 256⌉ per branch
+ *   after (a last page under 64 blocks stays with the one before it); the Fenwick offset nodes it replaces are not carried;
+ * - `tables.editor_steps`, `editor_step_parts`, `editor_step_effects`, `editor_step_mark_anchors`: new and empty after the
+ *   upgrade (#1654; pre-upgrade history is sealed, D7);
+ * - `tables.model_role_choices`: 0 before; 0, 1 or 2 after, from mapping the two selected connection groups (R5-F1a);
  * - `tables.store_versions`: one more row, the Data Version 2 record;
- * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands.
- * `entities` carries none of these, so it is compared by plain equality.
+ * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands;
+ * - the 字表与词表 library (R5-L1; ADR 0106 §9): a store at revision 116 has none of `standard_tables`,
+ *   `standard_table_versions` and `standard_table_entries` (counted as 0, and every count of `entities.library` is 0); the upgraded
+ *   store holds the four pre-installed tables at version 1 — tables 4, versions 4, entries 68,507 (8,105 + 3,558 + 382 +
+ *   56,462), source files 0. Those three `tables` counts and `entities.library` are compared as "old 0, new exactly these",
+ *   never by equality.
+ * - the similarity vectors (R5-F2c; ADR 0107 §4 point 5): a revision-116 store's vector rows are not carried — revision 117
+ *   has no vector table, so they are dropped, not copied, and the inventory counts them on neither side.
+ * Every other part of `entities` carries none of these, so it is compared by plain equality.
  */
 
 /** Tables that are carried by the upgrade and counted. Every table of a store is here or in `NOT_COUNTED`. */
@@ -89,6 +100,11 @@ export const INVENTORY_TABLES = [
   'edit_journal_entries',
   'editor_inline_revision_commands',
   'editor_inline_revision_marks',
+  'editor_step_effects',
+  'editor_step_mark_anchors',
+  'editor_step_parts',
+  'editor_step_restore_revisions',
+  'editor_steps',
   'editorial_learning_controls',
   'editorial_mark_replies',
   'editorial_marks',
@@ -173,11 +189,11 @@ export const INVENTORY_TABLES = [
   'material_index_builds',
   'material_index_segments',
   'material_index_translations',
-  'material_index_vectors',
   'material_translation_attempts',
   'milestone_signoff_records',
   'milestone_versions',
   'model_service_connections',
+  'model_role_choices', // R5-F1a
   'native_artifact_book_enablements',
   'native_artifact_installations',
   'plan_envelopes',
@@ -267,6 +283,9 @@ export const INVENTORY_TABLES = [
   'staged_import_structure_choices',
   'staged_import_text_box_paragraphs',
   'staged_word_revision_intakes',
+  'standard_table_entries',
+  'standard_table_versions',
+  'standard_tables',
   'store_versions',
   'task_artifact_pins',
   'task_input_checkpoints',
@@ -284,7 +303,7 @@ export const INVENTORY_TABLES = [
   'workflow_instances',
   'workflow_profiles',
   'working_blocks',
-  'working_offset_nodes',
+  'working_pages',
   'writing_drafts',
   'writing_tasks',
 ] as const;
@@ -371,6 +390,9 @@ export function inventoryStore(path: string): string {
           byAuthorKind: groups('editorial_marks', 'source_kind', ['editor', 'ai7', 'imported-author']),
         },
         memory: { versions: memory(false), currentItems: memory(true) },
+        // The 字表与词表 library (ADR 0106 §9); a source file is a version that holds an imported object.
+        library: { tables: tables.standard_tables, versions: tables.standard_table_versions, entries: tables.standard_table_entries,
+          sourceFiles: count('standard_table_versions', 'source_object_digest IS NOT NULL') },
         preferences,
         learningControls: Object.fromEntries(['switch', 'book'].map((kind) => [kind,
           groups('editorial_learning_controls', 'value', ['0', '1'], `kind = '${kind}'`)])),

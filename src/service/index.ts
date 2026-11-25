@@ -1,3 +1,5 @@
+import { guidelineClauses, standardsTable, queryExpansion, retrievalRerank } from './fast-role/flash-task-contract.js';
+import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
@@ -41,9 +43,10 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { armHostAllowanceSet, armSingleHostAllowance, armPerTicketHostAdmission, admitTicketHost, installNodeNetworkDenial } from '../shared/network-denial.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
+import { recordingHostAllowances } from './recording-launch.js';
 import {
   DEVELOPER_LIVE_POLICY_BINDING,
+  developerLiveBindingFor,
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
   ordinaryProductionHostAllowances,
@@ -155,6 +158,19 @@ interface FastRoleContext {
   readonly connectionTesting?: () => boolean;
 }
 
+/** New plans and turns resolve a current default, while starts and resumes of frozen plans keep their original effort. */
+function taskEffortRole(operation: ServiceRequest['op']): 'foreground-pro' | 'foreground-flash' | 'underlying-flash' | null {
+  switch (operation) {
+    case 'prepareBaselineAnalysis': case 'prepareCustomAnalysis': case 'prepareInitialEvaluation':
+    case 'prepareReadersReport': case 'prepareEvaluationRewrite': case 'prepareWritingTask': case 'prepareReviewRun':
+    case 'startQuickTasks': case 'promoteTaskIntentDraft': case 'redoTaskPlan': return 'foreground-pro';
+    case 'askAboutSelection': case 'continueDialogueAnswer': case 'regenerateDialogueAnswer':
+    case 'prepareGlobalAgentTurn': case 'regenerateProposalConflictUnit': case 'polishSelection': return 'foreground-flash';
+    case 'requestMaterialTranslation': return 'underlying-flash';
+    default: return null;
+  }
+}
+
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
@@ -185,6 +201,8 @@ async function dispatch(
   if (store.replacementWaiting() && !takenWhileReplacementWaits(request.op)) {
     throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
   }
+  const role = taskEffortRole(request.op);
+  if (role !== null && launchPolicy.operationalScope === 'ordinary-production') store.requireCurrentModelRoleEffort(role);
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
@@ -223,18 +241,34 @@ async function dispatch(
       store.selectBothRoleModels(request.input.route, request.input.modelId, request.input.reasoningEffort, request.input.fastReasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectUnderlyingModel':
+      store.selectUnderlyingModel(request.input);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectMainRoleModel':
+    case 'selectProModel':
       store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
-    case 'refreshModelServiceModels':
-      return { id: request.id, ok: true, op: request.op, result: await refreshModels(request.input.route) };
+    case 'selectFlashModel':
+      store.selectForegroundFlashModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'clearFlashModel':
+      store.clearFlashModel();
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'refreshModelServiceModels': {
+      const result = await refreshModels(request.input.route);
+      if (result.status === 'success') await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'getModelServiceStoredState':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)), modelRoles: store.getModelRoles() },
       };
     case 'saveModelServiceProxy': {
       const { probeRoute, ...input } = request.input;
@@ -262,7 +296,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)), modelRoles: store.getModelRoles() },
       };
     }
     case 'setModelServiceCredentialState': {
@@ -312,6 +346,8 @@ async function dispatch(
         op: request.op,
         result: await store.stageSelectedManuscript(request.input.selectionToken, request.input.selectedPath),
       };
+    case 'returnImportToEditing':
+      return { id: request.id, ok: true, op: request.op, result: store.returnImportToEditing(request.input.draftId, request.input.expectedDraftVersion) };
     case 'continueImportDraft':
       return {
         id: request.id,
@@ -463,11 +499,15 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
     case 'inspectBookFindings':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+      return { id: request.id, ok: true, op: request.op, result: bookFindingsChunk(store.inspectBookFindings(request.input.bookId, request.input), request.input.whole === true) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
-    case 'previewTaskLaunch':
-      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
+    case 'previewTaskLaunch': {
+      const launch = request.input.launch;
+      return { id: request.id, ok: true, op: request.op, result: launch.operation === 'startScopedAiEdit'
+        ? fastRoleCall(() => fastRole.requests.previewScopedEdit(request.input.bookId, launch.input))
+        : store.previewTaskLaunch(request.input, launchPolicy) };
+    }
     case 'launchBaselineAnalysis':
     case 'launchCustomAnalysis':
     case 'launchWritingTask':
@@ -625,7 +665,7 @@ async function dispatch(
           }
         }
         if (request.input.kind === 'review-run' && request.input.action === 'cancel') {
-          void analysisExecution.whenDone(runRecordId).then(() => store.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
+          void store.finishCancelledReviewRunWhenDone(analysisExecution, runRecordId);
         }
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input, analysisProgress) };
@@ -750,12 +790,28 @@ async function dispatch(
     case 'inspectDefaultExecutionRules':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
     // 知识库 › 审阅规范文件 (Issue #427, S79a).
+    case 'inspectStandardTables':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.inspectStandardTables(request.input) };
+    case 'inspectStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.inspectStandardTable(request.input) };
+    case 'previewStandardTableImport':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.previewStandardTableImport(request.input) };
+    case 'commitStandardTableImport':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.commitStandardTableImport(request.input) };
+    case 'saveStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.saveStandardTable(request.input) };
+    case 'setStandardTableEnabled':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.setStandardTableEnabled(request.input) };
+    case 'deleteStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.deleteStandardTable(request.input) };
+    case 'restorePreinstalledStandardTables':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.restorePreinstalledStandardTables(request.input) };
     case 'inspectReviewGuidelines':
       return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
     case 'previewReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
         ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
-        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path, request.input.formatConfirmed) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
@@ -852,9 +908,7 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.searchReferableMaterials(request.input) };
     case 'inspectLibraryMaterialSegments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterialSegments(request.input) };
-    // 构建相似索引, 相似段落检索 and 生成来源译文 (Issue #892).
-    case 'buildMaterialVectors':
-      return { id: request.id, ok: true, op: request.op, result: store.buildMaterialVectors(request.input.materialId) };
+    // 相似段落检索 and 生成来源译文 (Issue #892).
     case 'queryMaterialVectors':
       return { id: request.id, ok: true, op: request.op, result: await store.searchLibraryMaterialVectors(request.input) };
     case 'requestMaterialTranslation':
@@ -872,6 +926,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectFactualVerification(request.input) };
     case 'inspectEvidenceWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvidenceWorkspace(request.input) };
+    case 'inspectSourceAddress':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSourceAddress(request.input) };
     case 'recordVerificationReviewDecision':
       return { id: request.id, ok: true, op: request.op, result: store.recordVerificationReviewDecision(request.input) };
     case 'prepareCorrectionProposal':
@@ -894,6 +950,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.acceptEditorialMemory(request.input) };
     case 'deactivateEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
+    case 'reenableReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'reactivate') };
+    case 'deleteReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'retire') };
     case 'inspectHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
     case 'rebuildHouseReviewPreference':
@@ -944,7 +1004,7 @@ async function dispatch(
         result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
       };
     case 'inspectDataVersion':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectDataVersion(), canRollbackUpgrade: await store.hasLocalUpgradeSource() } };
     // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review), and off the
     // request: each answers at once with the export's activity, which the window follows (Issue #434 review, V2-UX-EXP-011).
     case 'prepareDatabaseExport':
@@ -1174,6 +1234,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'launchReviewRun': {
       const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      if (request.input.startWhen === 'idle' && launched.projection.run?.state === 'waiting') {
+        background.nudge();
+        const reviewRunId = launched.projection.run.reviewRunId;
+        void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
+      }
       driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
       if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
@@ -1421,6 +1486,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
     case 'getManuscriptRail':
       return { id: request.id, ok: true, op: request.op, result: store.getManuscriptRail(request.input.manuscriptId, request.input.branchId) };
+    case 'findPendingMark':
+      return { id: request.id, ok: true, op: request.op, result: store.findPendingMark(request.input) };
     case 'inspectProposalWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProposalWorkspace(request.input) };
     case 'saveProposalDecisionDraft':
@@ -1465,7 +1532,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target),
+        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target, request.input.marks),
       };
     case 'getOutline':
       return {
@@ -1546,6 +1613,12 @@ async function dispatch(
     // ⑥ 交付物 · 发稿 (Issue #414, plan slice S65): a Book-scoped read and one deterministic, local command.
     case 'inspectDeliverables':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDeliverables(request.input.bookId) };
+    case 'listBookVersions':
+      return { id: request.id, ok: true, op: request.op, result: store.listBookVersions(request.input) };
+    case 'viewBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.viewBookVersion(request.input) };
+    case 'restoreBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.restoreBookVersion(request.input) };
     case 'designatePublicationVersion':
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
     case 'inspectProductionDocuments':
@@ -1795,8 +1868,11 @@ async function dispatch(
           request.input.manuscriptId,
           request.input.branchId,
           request.input.expectedWorkingDigest,
+          request.input.expectedStepId,
         ),
       };
+    case 'inspectEditorHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditorHistory(request.input.manuscriptId, request.input.branchId) };
     case 'redoManuscript':
       return {
         id: request.id,
@@ -2022,8 +2098,8 @@ function configuredRoleBindingOf(store: EditorialStore): ConfiguredProviderBindi
 }
 
 /** The launch binding a configured route gives the ledgers: its exact facts, and a Run ceiling left to the editor (S16a). */
-function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null): OrdinaryProductionLaunchBinding | null {
-  const allowed = allowedProductionBindingOf(configured);
+function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null, flash = false): OrdinaryProductionLaunchBinding | null {
+  const allowed = flash ? allowedProductionBindingOf(configured, 'fast-interaction') : allowedProductionBindingOf(configured);
   return allowed === null || configured === null ? null : {
     scope: 'ordinary-production',
     route: allowed.route,
@@ -2077,14 +2153,22 @@ function reachServiceStartup(step: 'process' | 'store' | 'owners' | 'serving'): 
 }
 
 async function run(): Promise<void> {
+  if (process.argv[2] === '--storage-maintenance') {
+    installNodeNetworkDenial();
+    const { runStorageMaintenance } = await import('./storage-maintenance.js');
+    await runStorageMaintenance(process.argv.slice(3), fileURLToPath(new URL('../', import.meta.url)));
+    return;
+  }
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
   const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
     backgroundQuietMs, calibrationMinBooks, journalFaultArmed } = parseArguments(process.argv.slice(2));
-  if (launchForm.trustedOperationalScope === 'developer-live') {
-    // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
-    // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
+  const liveLaunch = launchForm.trustedOperationalScope === 'developer-live'
+    ? resolveDeveloperLiveLaunch(launchForm, fileURLToPath(new URL('../../', import.meta.url))) : null;
+  if (liveLaunch?.recordingProvider !== undefined) {
+    armHostAllowanceSet(recordingHostAllowances(liveLaunch.recordingProvider));
+  } else if (liveLaunch !== null) {
     const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
   } else if (launchForm.trustedOperationalScope === 'ordinary-production') {
@@ -2099,17 +2183,17 @@ async function run(): Promise<void> {
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
     { CooperativeJobOwner },
-    { resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync },
+    { resolveSourceCheckoutLaunchPolicySync },
     { BaselineAnalysisExecutionOwner, ModelRequestGovernor },
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner, dialogueLiveRoute, productionDialogueRoute },
-    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes, testModelServiceConnection },
+    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes, recordModelConnectionTest, testModelServiceConnection },
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
-    { materialTranslator, MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage, readMaterialTranslationAnswer },
+    { materialTranslator, evidenceTranslator, MATERIAL_TRANSLATION_KIND },
     { AgentWorkspace: AgentWorkspaceClass },
     { ServiceRequestLoop },
   ] =
@@ -2200,14 +2284,14 @@ async function run(): Promise<void> {
     if (buildIdentity.dataVersion !== DATA_VERSION) throw new Error('AI7_BUILD_IDENTITY_MISMATCH');
     // Under ordinary-production the policy is resolved again with the editor's configured binding once the store is open, and
     // again after every model-service settings change (Issue #811); under every other scope it is the launch's, once.
-    let launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
+    let launchPolicy = resolveSourceCheckoutLaunchPolicySync(codeRoot, launchForm.trustedOperationalScope, null, null, undefined, liveLaunch ?? undefined);
     // The developer-live runtime exists only when the requested scope actually verified; a denied policy
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
     // v5. The captured `fetch` travels with the launch facts and reaches no other owner. Either live scope reaches it through
     // the device's 网络代理 setting (Issue #854), read again for every request.
     const modelServiceFetch = proxyAwareFetch(nativeFetch, () => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; });
-    const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
-      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: modelServiceFetch }
+    const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live' && liveLaunch !== null
+      ? { launch: liveLaunch, nativeFetch: modelServiceFetch }
       : null;
     // Ordinary production (Issue #811): the captured transport and nothing of development — no Provider Result Cache, no
     // Provider Test Ledger and no validation intent is ever constructed under this scope.
@@ -2255,8 +2339,9 @@ async function run(): Promise<void> {
     const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
       if (production === null) return launchPolicy;
       const configured = configuredRoleBindingOf(openedStore);
-      productionState.fast = openedStore.getConfiguredModelRoleBinding('fast-interaction');
-      launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', configured, productionState.fast);
+      productionState.fast = openedStore.getConfiguredModelRoleBinding('foreground-flash');
+      launchPolicy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', configured, productionState.fast,
+        { pro: openedStore.getConfiguredModelRoleBinding('underlying-pro'), flash: openedStore.getConfiguredModelRoleBinding('underlying-flash') });
       productionState.live = launchPolicy.operationalScope === 'ordinary-production' && launchPolicy.providerProcessing.bindingState === 'configured'
         ? productionLaunchBindingOf(configured)
         : null;
@@ -2270,20 +2355,18 @@ async function run(): Promise<void> {
           operationalScope: 'ordinary-production',
           get policy() { return launchPolicy; },
           get live() { return productionState.live; },
+          learningBinding: role => productionLaunchBindingOf(openedStore.getConfiguredModelRoleBinding(role), role === 'underlying-flash'),
         }
       : developerLive === null
       ? { operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => openedStore.localFixtureRuntime() }
       : {
           operationalScope: 'developer-live',
           policy: launchPolicy,
-          live: {
-            route: DEVELOPER_LIVE_POLICY_BINDING.route,
-            model: DEVELOPER_LIVE_POLICY_BINDING.model,
-            endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
-            credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
-            credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-            runBudgetCeiling: developerLive.launch.runBudgetCeiling,
-          },
+          live: developerLiveBindingFor(developerLive.launch),
+          ...(developerLive.launch.recordingProvider === undefined ? {} : {
+            liveForKind: (kind: string) => developerLiveBindingFor(developerLive.launch, kind),
+            learningBinding: role => developerLiveBindingFor(developerLive.launch, role === 'underlying-pro' ? 'learning-curation' : 'learning-sample-tidying'),
+          }),
         };
     store.baselineAnalysisLedger.bindLaunch(launch);
     // 事实核查 is a Review Category executed on the factual kind's own ledger (Issue #417), which the one
@@ -2344,16 +2427,7 @@ async function run(): Promise<void> {
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
-      sourceTranslator: async ({ text }) => {
-        const owner = fastRole?.owner;
-        if (owner === undefined || owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
-        try {
-          const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
-          if (result.kind !== 'answered') return null;
-          const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
-          return translated == null ? null : { text: translated, route: result.binding.route, model: result.binding.model };
-        } catch { return null; }
-      },
+      sourceTranslator: evidenceTranslator(() => underlyingOwner),
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).
       factualRunStart: (input) => {
         guardedStore.recordFactualRunAssurance({ ...input,
@@ -2401,13 +2475,8 @@ async function run(): Promise<void> {
     } catch {
       // Reported where ②A's 自定义 tab reads the dimension.
     }
-    for (const runRecordId of store.cancellingLedgerRuns()) {
-      try {
-        analysisExecution.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
-        void analysisExecution.whenDone(runRecordId).then(() => store!.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
-      }
-      catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
-    }
+    // A Run of any other kind left cancelling is finished the same way, and its review category settles.
+    void store.finishStoppedReviewCancellations(analysisExecution);
     try {
       for (const launched of store.pendingLaunchedLedgerRuns()) {
         try { driveLaunchedLedgerRun(analysisExecution, launched); }
@@ -2444,7 +2513,7 @@ async function run(): Promise<void> {
         ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
         : production !== null
           ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
-            (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
+            (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('foreground-flash');
               return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
                   current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
             () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null,
@@ -2463,8 +2532,31 @@ async function run(): Promise<void> {
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
     // policy before one names it, which refuses it with 「当前策略未开放来源译文」.
+    const recording = developerLive?.launch.recordingProvider !== undefined;
+    const underlyingFlash = () => recording ? developerLiveBindingFor(developerLive!.launch, MATERIAL_TRANSLATION_KIND) : openedStore.getConfiguredModelRoleBinding('underlying-flash');
+    const underlyingOwner = production === null ? fastRoleOwner : fastRoleOwner.fork(productionFastRoleRoutes(production, () => launchPolicy,
+        () => underlyingFlash()?.credentialReference ?? null, createKeyringSecretResolver(),
+        (reference, route) => { const now = underlyingFlash(); return now?.credentialReference === reference && now.route === route.profile.route && now.model === route.modelProfile.model; },
+        () => openedStore.getModelServiceConnections().find(entry => entry.credentialReference === underlyingFlash()?.credentialReference)?.credentialUpdatedAt ?? null,
+        () => openedStore.getConfiguredModelRoleBinding('underlying-flash')?.reasoningEffort));
+    if (production !== null || recording) store.useStandardTableFormatter({
+      model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('standards-table-formatting') === null ? selected.route + ' / ' + selected.model : null; },
+      format: paragraphs => underlyingOwner.execute(standardsTable, paragraphs, 'standard-table-preview'),
+    });
+    if (production !== null || recording) store.useGuidelineFormatter({
+      model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('guideline-clause-formatting') === null ? selected.route + ' / ' + selected.model : null; },
+      format: paragraphs => underlyingOwner.execute(guidelineClauses, paragraphs, 'guideline-preview'),
+    });
+    store.useRetrievalAssist({
+      expand: async query => underlyingFlash() && underlyingOwner.refusal('retrieval-query-expansion') === null
+        ? underlyingOwner.execute(queryExpansion, query, 'material-search-expansion')
+        : null, // Not asked: nothing left the machine.
+      rerank: async input => underlyingFlash() && underlyingOwner.refusal('retrieval-rerank') === null
+        ? underlyingOwner.execute(retrievalRerank, input, 'material-search-rerank')
+        : null,
+    });
     store.useMaterialTranslator(materialTranslator(
-      fastRoleOwner,
+      underlyingOwner,
       developerLive !== null ? 'developer-live' : production !== null ? 'ordinary-production' : 'development-ci',
       () => (launchPolicy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length,
     ));
@@ -2476,6 +2568,7 @@ async function run(): Promise<void> {
     const reading = connectivityPath === undefined ? hostConnectivity : () => controlledConnectivity(connectivityPath);
     const reachesNetwork = (routeKind: string): boolean =>
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route ||
+      (recording && launchPolicy.providerProcessing.admittedRules?.some(rule => rule.route === routeKind) === true) ||
       (production !== null && ORDINARY_PRODUCTION_ALLOWED_BINDINGS.some((binding) => binding.route === routeKind)) ||
       (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
@@ -2567,7 +2660,9 @@ async function run(): Promise<void> {
         return failureResponse(id, error, StoreError);
       },
       onFatal: () => stop(),
-      probe: (input, execution) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
+      probe: (input, execution) => recording
+        ? recordModelConnectionTest(developerLive!, launchPolicy, input, createKeyringSecretResolver(), execution)
+        : testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
       probeCompleted: async () => { await modelServiceChanged(); },
       // 替换本机全部数据 waits for AI7's next start (Issue #434 review): the probe writes its result, so it is refused as dispatch refuses it.
       admitProbe: () => {

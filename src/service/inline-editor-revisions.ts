@@ -6,7 +6,7 @@ import type { JournalEditInput, UpdateEditorialMarkInput, EditorialMarkCommandPr
 import type { BoundedManuscriptStore } from './bounded-manuscript.js';
 import { EditorialMarkStore } from './editorial-marks.js';
 import { requireStore } from './store-records.js';
-import { transact } from './manuscript/bounded-kernel.js';
+import { recordInlineDecisionPart, withEditorStep } from './manuscript/editor-steps.js';
 
 /** Links the existing journal history to editor cards, without creating another text/history store. */
 export const INLINE_EDITOR_REVISION_SCHEMA_SQL = {
@@ -26,14 +26,6 @@ export const INLINE_EDITOR_REVISION_SCHEMA_SQL = {
   accepted INTEGER NOT NULL DEFAULT 0 CHECK(accepted IN (0, 1))
 ) STRICT`,
 } as const;
-export const INLINE_EDITOR_REVISION_FOREIGN_KEYS = {
-  editor_inline_revision_commands: ['command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE'],
-  editor_inline_revision_marks: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-};
-export function initializeInlineEditorRevisionSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_commands'").get()) return;
-  transact(db, () => { for (const sql of Object.values(INLINE_EDITOR_REVISION_SCHEMA_SQL)) db.exec(sql); });
-}
 
 /** Recover this session's original spans against the text just before the next journal write. Unrelated edits stay intact. */
 export function inlineRevisionBaseline(db: DatabaseSync, input: JournalEditInput, beforeText: string): string {
@@ -102,7 +94,8 @@ export function syncInlineEditorRevision(db: DatabaseSync, groupId: string): voi
 /** Pending edits already stand in the journal; accept keeps them, reject/undo writes their original words back. */
 export function decideInlineEditorRevision(db: DatabaseSync, manuscript: BoundedManuscriptStore, lifetimeId: string,
   input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {
-  return transact(db, () => {
+  // The decision is one editor step (Issue #1654): Ctrl+Z makes the card undecided again.
+  return withEditorStep(db, input.branchId, { kind: 'inline-decision', label: () => '处理编辑修订' }, () => {
     const link = db.prepare('SELECT session_id FROM editor_inline_revision_marks WHERE mark_id = ?').get(input.markId);
     requireStore(link !== undefined, 'MARK_ACTION_INVALID', '这不是就地编辑修订。');
     const marks = new EditorialMarkStore(db), card = marks.card(input.manuscriptId, input.branchId, input.markId);
@@ -111,6 +104,7 @@ export function decideInlineEditorRevision(db: DatabaseSync, manuscript: Bounded
       requireStore(card.status === 'open', 'MARK_ACTION_INVALID', '这处修订已处理。');
       db.prepare('UPDATE editor_inline_revision_marks SET accepted = 1 WHERE mark_id = ?').run(input.markId);
       db.prepare("UPDATE editorial_marks SET status = 'applied', updated_at = ? WHERE mark_id = ?").run(new Date().toISOString(), input.markId);
+      recordInlineDecisionPart(db, input.branchId, input.markId, card.blockId);
     } else {
       requireStore(input.action === 'revert-inline-revision', 'MARK_ACTION_INVALID', '修订操作无效。');
       const pin = manuscript.revisionPin(input.manuscriptId, input.branchId, card.blockId);
@@ -122,8 +116,9 @@ export function decideInlineEditorRevision(db: DatabaseSync, manuscript: Bounded
         editorRevision: { sessionId: String(link.session_id), autoApply: Number(session.auto_apply) === 1 } }, lifetimeId);
     }
     const window = manuscript.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: input.windowStartBlockId });
-    const live = window.marks.some((mark) => mark.markId === input.markId);
-    return { markId: input.markId, marks: window.marks, marksTruncated: window.marksTruncated, window,
+    // The mark's own status says whether it stands, as every mark command's answer does: the window may carry only its first page.
+    const live = db.prepare("SELECT 1 FROM editorial_marks WHERE mark_id = ? AND status IN ('open', 'resolved', 'applied')").get(input.markId) !== undefined;
+    return { markId: input.markId, marks: window.marks, marksTruncated: window.marksTruncated, ...(window.marksPage ? { marksPage: window.marksPage } : {}), window,
       card: live ? marks.card(input.manuscriptId, input.branchId, input.markId) : null };
   });
 }

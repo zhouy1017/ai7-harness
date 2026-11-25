@@ -1,5 +1,6 @@
 import { hasKeys, canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
+import { RETRIEVAL_LEXICAL } from '../retrieval/index.js';
 import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
 /**
@@ -284,14 +285,18 @@ export const PLATFORM_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.f
 /** SHA-256 over the canonical schema set; the composition descriptor pins it. */
 export const PLATFORM_TOOL_SCHEMA_DIGEST: string = sha256Hex(canonicalJson(PLATFORM_TOOL_SCHEMAS));
 
+const retrieveV1 = Object.freeze({
+  name: 'retrieve' as const, description: '在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。',
+  parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, k: { type: 'integer', minimum: 1, maximum: 8 },
+    sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false },
+});
 export const LEGACY_LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
   Object.freeze({ name: 'exact_fetch' as const, description: '精确取回检索候选在已固定来源版本中的原文。引用前必须调用。',
     parameters: { type: 'object', properties: { candidateId: { type: 'string' } }, required: ['candidateId'], additionalProperties: false } }),
-  Object.freeze({ name: 'retrieve' as const, description: '在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。',
-    parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, k: { type: 'integer', minimum: 1, maximum: 8 },
-      sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
+  retrieveV1,
 ]);
 export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LEGACY_LOCAL_TOOL_SCHEMAS));
+// The v1 bytes are pinned by existing plans' composition digests.
 export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
   ...LEGACY_LOCAL_TOOL_SCHEMAS,
   { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
@@ -322,12 +327,36 @@ function freezeSchema(value: unknown): void {
 }
 for (const schema of LOCAL_TOOL_SCHEMAS) freezeSchema(schema);
 
+export type ToolSchemaVersion = 1 | 2;
+
+const retrieveV2: PlatformToolSchema = {
+  ...retrieveV1,
+  parameters: {
+    ...retrieveV1.parameters,
+    properties: {
+      ...retrieveV1.parameters.properties,
+      queries: {
+        type: 'array', maxItems: RETRIEVAL_LEXICAL.maxQueries,
+        items: { type: 'string', minLength: 1, maxLength: 1000 },
+        description: '可选：为 query 补充同义词或改写的查询。各查询的检索结果合并排序。',
+      },
+    },
+  },
+};
+freezeSchema(retrieveV2);
+
 /** Preserve the exact web schemas, adding only the subset the selected rule names. */
-export function ruleNamedToolSchemas(web: boolean, local: boolean | LocalToolsRule | null | undefined): ReadonlyArray<PlatformToolSchema> {
+export function ruleNamedToolSchemas(web: boolean, local: boolean | LocalToolsRule | null | undefined, version: ToolSchemaVersion = 1): ReadonlyArray<PlatformToolSchema> {
   const names = typeof local === 'object' && local?.targetedRetrieval.allowed === true ? local.declarations?.map((entry) => entry.name) : undefined;
   const schemas = local === true || (typeof local === 'object' && local?.targetedRetrieval.allowed === true)
     ? names === undefined ? LEGACY_LOCAL_TOOL_SCHEMAS : LOCAL_TOOL_SCHEMAS.filter((schema) => names.includes(schema.name)) : [];
-  return [...(web ? PLATFORM_TOOL_SCHEMAS : []), ...schemas].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  return [...(web ? PLATFORM_TOOL_SCHEMAS : []), ...schemas.map((schema) => version === 2 && schema.name === 'retrieve' ? retrieveV2 : schema)]
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+}
+
+/** Freeze a version only when the new declaration changes the plan's registered tools. */
+export function toolSchemaPinForNewPlan(local: boolean | LocalToolsRule): { readonly toolSchemaVersion?: ToolSchemaVersion } {
+  return ruleNamedToolSchemas(false, local).some(({ name }) => name === 'retrieve') ? { toolSchemaVersion: 2 } : {};
 }
 
 /**
@@ -355,7 +384,7 @@ export function toolSetEqualsPlatformSchemas(tools: ReadonlyArray<unknown>, sche
 export type PlatformToolArguments =
   | { readonly tool: 'websearch'; readonly query: string }
   | { readonly tool: 'webfetch'; readonly url: string }
-  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
+  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'>; readonly queries?: ReadonlyArray<string> }
   | { readonly tool: 'exact_fetch'; readonly candidateId: string }
   | { readonly tool: 'read_blocks'; readonly blockId: string; readonly radius: number }
   | { readonly tool: 'baseline_facts'; readonly query: string }
@@ -445,7 +474,19 @@ export function canonicalToolArguments(name: string, input: unknown): PlatformTo
     const kinds = args.sourceKinds;
     if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
         !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
-    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }) };
+    // Loose by design: a lone string is one phrasing; a junk, empty or ill-formed entry is dropped, an over-long one cut first (never
+    // inside a surrogate pair); one phrasing per form the ranker reads (NFKC, lower case), none the query's own; the first four kept.
+    const forms = new Map<string, string>([[query.normalize('NFKC').toLowerCase(), query]]);
+    for (const entry of typeof args.queries === 'string' ? [args.queries] : Array.isArray(args.queries) ? args.queries : []) {
+      if (typeof entry !== 'string' || forms.size > RETRIEVAL_LEXICAL.maxQueries) continue;
+      let phrasing = entry.normalize('NFC').trim().slice(0, 1000);
+      if (/[\uD800-\uDBFF]$/.test(phrasing)) phrasing = phrasing.slice(0, -1);
+      const form = phrasing.normalize('NFKC').toLowerCase();
+      if (phrasing.length > 0 && phrasing.isWellFormed() && !forms.has(form)) forms.set(form, phrasing);
+    }
+    const queries = [...forms.values()].slice(1).sort();
+    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }),
+      ...(queries.length === 0 ? {} : { queries }) };
   }
   if (name === 'websearch') {
     if (!hasKeys(args, ['query']) || typeof args['query'] !== 'string') return null;

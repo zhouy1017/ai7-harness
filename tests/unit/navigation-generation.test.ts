@@ -1,4 +1,6 @@
 import { styleInput } from '../../src/renderer/components/controls.js';
+import { localDayTimeLabel } from '../../src/shared/report-wording.js';
+import { visibleGlobalAttention } from '../../src/renderer/global-attention.js';
 import { rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { finishedResultRoute } from '../../src/renderer/result-destination.js';
 import { showOnboardingCard } from '../../src/shared/preferences.js';
@@ -94,8 +96,8 @@ function harness(api: object = {}) {
   const shell = { leaveBook: vi.fn(), follow: vi.fn() };
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
- const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ showOnboardingCard, styleInput, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+ const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,inspectGlobalAttention:async()=>({groups:[]}),inspectTaskOverview:async()=>({groups:[]}),getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
+  context = createContext({ localDayTimeLabel, visibleGlobalAttention, technicalLayerVisible: false, showOnboardingCard, styleInput, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion, AUTO_RESULT_KEY: 'ai7.task-overview.auto-result',
     notice: { raise: vi.fn(), settle: vi.fn(), summarize: vi.fn() }, finished: [], needing: [], standing: new Set(), returning: false,
     options: { get api() { return guardedApi; }, drawerView: () => (context['taskDrawer'] as { view(): unknown }).view(), openWindow: (entry: unknown) => (context['openOverviewResult'] as (entry: unknown) => void)(entry) },
@@ -114,8 +116,8 @@ function harness(api: object = {}) {
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
     mountBackgroundAnalysis: vi.fn(), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
     settleScreen: vi.fn(async () => true),
-    AGENT_WORKSPACE_RETURN_SECTIONS: {},
-    modelServiceChannel:null,modelChoices:new Map(),modelFilters:new Map(),favourites:[],
+    BOOK_SCREEN_SECTIONS: {},
+    modelServiceChannel:null,generation:0,opened:0,modelChoices:new Map(),flashModelChoices:new Map(),effortOtherDrafts:new Map(),effortDrafts:new Map(),modelFilters:new Map(),favourites:[],
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
     KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
     mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),
@@ -838,27 +840,27 @@ it('does not let an older library page overwrite a newer filter result', async (
  const more=Promise.withResolvers<object>(),filtered=Promise.withResolvers<object>();
  const page=harness({listBooks:({after}:{after:string|null})=>after===null?filtered.promise:more.promise});
  runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
- page.context['book']={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
+ page.context['book']={bookId:'book-a',title:'原有图书',people:{authors:[],editors:[],related:[]},internalNumber:null,manuscriptStateLabel:'有稿件'};
  await page.run("renderLanding([],undefined,{items:[book],nextCursor:'next'})");
  const pending=page.actions.get('加载更多图书')!();
  const input=page.screen.querySelector<HTMLInputElement>('[id="book-filter-text"]')!;input.value='筛选图书';
  (input as unknown as MiniElement).dispatchEvent({type:'input'});
  (page.screen.querySelector('form') as unknown as MiniElement).dispatchEvent({type:'submit'});
- filtered.resolve({items:[{bookId:'book-b',title:'筛选图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});
+ filtered.resolve({items:[{bookId:'book-b',title:'筛选图书',people:{authors:[],editors:[],related:[]},internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});
  await Promise.resolve();await Promise.resolve();
- more.resolve({items:[{bookId:'book-c',title:'旧的下一页',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});await pending;
+ more.resolve({items:[{bookId:'book-c',title:'旧的下一页',people:{authors:[],editors:[],related:[]},internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});await pending;
  expect(page.screen.textContent).toContain('筛选图书');expect(page.screen.textContent).not.toContain('旧的下一页');
 });
 
-it('does not let a pending first-use read restore an older cleared filter', async () => {
+it('keeps filtering in place without rereading first-use settings when cleared', async () => {
  const preference=Promise.withResolvers<object>(),readPreference=vi.fn(()=>preference.promise);
- const book={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
+ const book={bookId:'book-a',title:'原有图书',people:{authors:[],editors:[],related:[]},internalNumber:null,manuscriptStateLabel:'有稿件'};
  const page=harness({getPreferences:readPreference,listBooks:async({filter}:{filter?:object})=>({items:[{...book,title:filter?'新的筛选结果':'旧的全部图书'}],nextCursor:null})});
  runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
  page.context['book']=book;
  await page.run("renderLanding([],undefined,{items:[book],nextCursor:null},{field:'all',text:'原有'})");
  page.actions.get('显示全部图书')!(); await new Promise(resolve=>setImmediate(resolve));
- expect(readPreference).toHaveBeenCalledOnce();
+ expect(readPreference).not.toHaveBeenCalled();
  const input=page.screen.querySelector<HTMLInputElement>('[id="book-filter-text"]')!;input.value='新的';
  (input as unknown as MiniElement).dispatchEvent({type:'input'});
  (page.screen.querySelector('form') as unknown as MiniElement).dispatchEvent({type:'submit'});
@@ -870,7 +872,7 @@ it('does not let a pending first-use read restore an older cleared filter', asyn
 it('reports a library-card error after its requested Book committed', async () => {
  const page=harness({openBookWorkbench:async()=>({target:'requesting-window',route:{kind:'book',bookId:'book-a',bookTitle:'图书'}}),getBookOverview:async()=>({book:{bookId:'book-a'},manuscriptAnchor:null})});
  runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
- page.context['book']={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
+ page.context['book']={bookId:'book-a',title:'原有图书',people:{authors:[],editors:[],related:[]},internalNumber:null,manuscriptStateLabel:'有稿件'};
  await page.run("renderLanding([],undefined,{items:[book],nextCursor:null})");
  page.context['renderBookOverview']=()=>{page.replaceScreen('book-overview');throw new Error('paint failed');};
  await page.actions.get('原有图书')!();

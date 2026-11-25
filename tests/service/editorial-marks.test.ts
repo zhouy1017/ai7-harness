@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -6,10 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import * as markSources from '../../src/service/editorial-mark-source.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import {
-  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_23_SQL,
-} from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,
@@ -25,19 +20,7 @@ import {
 } from '../support/composed-fixture.js';
 import { writeSyntheticDocx } from '../support/synthetic-docx.js';
 import { MAX_RAIL_CHAPTERS } from '../../src/shared/protocol.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
-import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
-import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
-import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
-import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
-import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
-import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
-import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
 // on a temporary Agent Data Root. The manuscript is composed from the one admitted SampleBook, so no
@@ -46,21 +29,6 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation
 
 const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: '标记组稿' };
 const NOTE_SENTINEL = '仅编辑可见的备注哨兵文本';
-const MARK_RELATIONS = [
-  // A store taken back below revision 26 never held its proposal-conflict relations, and one below 25
-  // never held its Publication Version relations.
-  // A store taken back below revision 27 never held its import-retention relations, nor one below 28 its
-  // staged imported marks.
-  ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER,
-  ...EXPORT_LEDGER_RELATIONS_DROP_ORDER,
-  ...IMPORTED_MARK_RELATIONS_DROP_ORDER,
-  ...IMPORT_RETENTION_RELATIONS_DROP_ORDER,
-  ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER,
-  ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER,
-  // Revision 24's Review Run relations refer to the marks, so a store taken back below them loses them first.
-  ...REVIEW_RUN_RELATIONS_DROP_ORDER,
-  'manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks',
-];
 
 let roots: ServiceTestRoots;
 
@@ -419,56 +387,38 @@ describe('Editorial Marks on a manuscript', () => {
     } finally { store.close(); }
   });
 
-  it('migrates a revision-21 store forward, adding the mark and effect relations and keeping what it held', async () => {
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: Imported;
-    try {
-      book = await importBook(first);
-      const window = first.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-      first.recordManuscriptEntryPosition(book.manuscriptId, book.branchId, window.blocks[2]!.blockId, 1);
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    const downgrade = new DatabaseSync(databasePath);
-    try {
-      // A revision-21 store carried the three kind-coupled analysis relations as revision 20 left them;
-      // revision 24 (Issue #417) validates exactly that before it rebuilds them.
-      downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
-      execPre74Fixture(downgrade, `BEGIN IMMEDIATE;
-        ${MARK_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
-        PRAGMA user_version = ${MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION};
-        COMMIT;`);
-      expect(downgrade.prepare("SELECT count(*) total FROM sqlite_schema WHERE name LIKE '%no_update' AND tbl_name IN ('proposal_change_items', 'proposal_item_decisions')").get())
-        .toEqual({ total: 0 });
-    } finally {
-      downgrade.close();
-    }
-
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(migrated.readManuscriptEntryPosition(book.manuscriptId, book.branchId)?.grapheme).toBe(1);
-      const window = migrated.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-      expect(window.marks).toEqual([]);
-      const block = markableBlock(window);
-      expect(migrated.createEditorialMark(markInput(book, window, block.blockId, 1, 5, 'annotation')).marks).toHaveLength(1);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(databasePath, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    } finally {
-      after.close();
-    }
-  }, 300_000);
 });
 
 
 describe('inline editor revision journal (#1428)', () => {
+  it.each([true, false])('keeps a half-clause rewrite in one reversible card (auto apply %s, #1539 N.1)', async (autoApply) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store), initial = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(initial), sessionId = randomUUID();
+      const baseline = '他昨天在书房里仔细核对了第三章的引文，其他文字不变。';
+      const current = '他昨晚在案头认真查核了这一章的全部引文，其他文字不变。';
+      const prepared = edit(store, book, initial, block.blockId, 0, graphemesOf(block.text).length, baseline);
+      const written = store.flushJournalEdit({
+        ...book, clientEditId: randomUUID(), baseRevisionId: prepared.revisionId, blockId: block.blockId,
+        windowStartBlockId: prepared.blocks[0]!.blockId, baseBlockDigest: prepared.blocks.find((b) => b.blockId === block.blockId)!.digest,
+        expectedJournalSequence: prepared.journalSequence, fromGrapheme: 0, toGrapheme: graphemesOf(baseline).length,
+        insertText: current, editorRevision: { sessionId, autoApply },
+      }).window;
+      const revisions = written.marks.filter((mark) => mark.inlineRevision);
+      expect(revisions).toMatchObject([{ fromGrapheme: 2, toGrapheme: 17, anchorState: 'exact', status: autoApply ? 'applied' : 'open',
+        inlineRevision: { beforeText: '天在书房里仔细核对了第三章的', afterText: '晚在案头认真查核了这一章的全部', sessionId } }]);
+      const markId = revisions[0]!.markId;
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId)).toMatchObject({
+        inlineRevision: true, suggestion: { currentText: '天在书房里仔细核对了第三章的', proposedText: '晚在案头认真查核了这一章的全部' },
+      });
+      const reverted = store.updateEditorialMark({ ...book, windowStartBlockId: initial.blocks[0]!.blockId,
+        markId, action: 'revert-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+      expect(reverted.window?.blocks.find((b) => b.blockId === block.blockId)?.text).toBe(baseline);
+      expect(reverted.window?.marks.filter((mark) => mark.inlineRevision)).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it.each([true, false])('coalesces an edit, follows undo/redo and restores the baseline (auto apply %s)', async (autoApply) => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

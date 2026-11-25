@@ -16,6 +16,13 @@ import {
   type RendererApi,
 } from '../shared/protocol.js';
 import {
+  LIBRARY_USE,
+  LIBRARY_USE_LATER,
+  LIBRARY_USE_CONFIRM,
+  LIBRARY_USE_SELECTED,
+  LIBRARY_BOOKS_FIRST,
+  libraryBookLabel,
+  libraryUseRecorded,
   LIBRARY_ADD,
   LIBRARY_ADD_CONFIRM,
   LIBRARY_ATTRIBUTE,
@@ -67,14 +74,14 @@ import {
   MATERIAL_TRANSLATION_FAILED,
   MATERIAL_TRANSLATION_REQUEST,
   MATERIAL_TRANSLATION_TERM,
-  MATERIAL_VECTORS_BUILD,
-  MATERIAL_VECTORS_BUILD_FAILED,
   MATERIAL_VECTORS_SEARCH,
   MATERIAL_VECTORS_SEARCH_FAILED,
   MATERIAL_VECTORS_SEARCH_LABEL,
   MATERIAL_VECTORS_SEARCH_NOTE,
+  RETRIEVAL_ASSIST_LINES,
   materialAnchorLabel,
   materialIndexLayerLine,
+  materialTranslationLine,
   materialIndexStateLine,
   materialParagraphAnchorLabel,
   materialSegmentsHeading,
@@ -99,15 +106,16 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * position anchor. While an index waits or is being built its item alone is read again, every second, and only the card's index
  * is drawn again, until it is built.
  *
- * Issue #892 adds the two layers made on request: `构建相似索引` makes the item's similarity vectors on this machine, and once
- * they are built `相似段落检索` finds its paragraphs nearest a text the editor writes; `生成来源译文` asks for a non-Chinese item's
+ * Once the index is built, `相似段落检索` finds the item's paragraphs that best match the words the editor writes, ranked on this
+ * machine with nothing to build (R5-F2c) and, with a fast model connected, widened and re-ordered by it; the field says what a
+ * search may send and each answer says what this one sent (0.7.9 review 2.3). Issue #892 adds the layer made on request: `生成来源译文` asks for a non-Chinese item's
  * machine translation — shown disabled, with why, when the selected policy names no rule for it — and 查看分段 shows each
- * paragraph's 来源译文 beneath it, labelled. While either is being made the item is read again as an index being built is.
+ * paragraph's 来源译文 beneath it, labelled. While it is being made the item is read again as an index being built is.
  */
 export interface MountLibraryMaterialsOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLibraryMaterials' | 'inspectLibraryMaterial' | 'previewLibraryMaterial' | 'addLibraryMaterial' |
-    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments' | 'buildMaterialVectors' |
+    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments' |
     'queryMaterialVectors' | 'requestMaterialTranslation'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -118,6 +126,7 @@ export interface MountLibraryMaterialsOptions {
 
 type Chooser =
   | { readonly materialId: string; readonly kind: 'attribution'; choice: string | null; book: { bookId: string; title: string } | null }
+  | { readonly materialId: string; readonly kind: 'use'; choice: string | null; book: { bookId: string; title: string } | null }
   | { readonly materialId: string; readonly kind: 'eligibility'; choice: LearningEligibilityChoice | null; reason: string };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -176,13 +185,37 @@ export function startsWaiting(waiting: ReadonlyArray<string>, polled: ReadonlySe
 
 /** Whether a card's index is still being made: built, or one of its two on-request layers (Issue #892). */
 const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing' ||
-  material.index.vectors?.state === 'building' || material.index.translation?.state === 'building';
+  material.index.translation?.state === 'building';
 
 /** What a read of a waiting card compares to say whether its index moved. */
 function indexSignature(material: LibraryMaterialProjection): string {
   const { index } = material;
-  return JSON.stringify([index.state, index.digest, index.vectors?.state ?? null, index.vectors?.built ?? null, index.translation?.state ?? null,
+  return JSON.stringify([index.state, index.digest, index.translation?.state ?? null,
     index.translation?.translated ?? null, index.translation?.request.available ?? null, index.translation?.lastFailure ?? null]);
+}
+
+/** Record the same decisions offered by the developer choosers, using each returned revision. */
+export async function recordLibraryUse(
+  api: Pick<RendererApi, 'decideLibraryMaterial'>, material: LibraryMaterialProjection, value: string,
+  updated: (material: LibraryMaterialProjection) => void,
+): Promise<LibraryMaterialProjection> {
+  let now = material;
+  const target = value.startsWith('book:') ? { scope: 'book' as const, bookId: value.slice(5) } : { scope: 'house' as const };
+  const same = now.attribution?.scope === target.scope && (target.scope === 'house' ||
+    (now.attribution?.scope === 'book' && now.attribution.bookId === target.bookId));
+  const send = async (decision: LibraryMaterialDecisionInput): Promise<void> => {
+    now = await api.decideLibraryMaterial({ materialId: now.materialId, expectedDecisions: now.decisionCount, decision });
+    updated(now);
+  };
+  // 暂不使用 is its own decision (Issue #1671): recorded with or without an attribution, it takes the item out of 待我处理.
+  if (value === 'deferred') {
+    if (now.notUsed === undefined) await send({ kind: 'not-used' });
+    return now;
+  }
+  if (same && now.reference.state === 'available') return now;
+  if (!same) await send({ kind: 'attribution', attribution: target });
+  if (now.eligibility?.choice !== target.scope || now.eligibility.reason !== null) await send({ kind: 'eligibility', choice: target.scope, reason: null });
+  return now;
 }
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
@@ -296,7 +329,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > details.knowledge-file-more > section.material-index`);
       section?.replaceWith(indexSection(next));
       const warning = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] .knowledge-file-index`);
-      if (warning) warning.textContent = `索引：${materialIndexStateLine(next.index)}`;
+      if (warning) warning.textContent = `${technicalWords('索引：')}${materialIndexStateLine(next.index)}`;
     }
     pollDelay = nextIndexPollDelay(pollDelay, moved);
     schedulePoll();
@@ -401,7 +434,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
     node.append(heading);
     const summary = el('p', 'knowledge-file-summary', libraryReferenceLine(material));
-    summary.append(' · ', el('span', 'knowledge-file-index', `索引：${materialIndexStateLine(material.index)}`));
+    summary.append(' · ', el('span', 'knowledge-file-index', `${technicalWords('索引：')}${materialIndexStateLine(material.index)}`));
     node.append(summary);
     const more = el('details', 'knowledge-file-more');
     more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
@@ -410,13 +443,25 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
       el('dt', undefined, LIBRARY_ELIGIBILITY_TERM), el('dd', 'library-eligibility', libraryEligibilityLine(material)),
     );
-    more.append(facts);
+    if (technicalLayerVisible) more.append(facts);
     if (material.eligibility?.reasonHasMore) more.append(reasonReader(material.materialId, material.eligibility.ordinal));
-    if (material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
+    if (technicalLayerVisible && material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
     more.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
     more.append(indexSection(material));
-    if (refusal?.materialId === material.materialId) more.append(alert(refusal.message));
-    if (chooser?.materialId === material.materialId) {
+    if (technicalLayerVisible && refusal?.materialId === material.materialId) more.append(alert(refusal.message));
+    if (!technicalLayerVisible) {
+      const use = action(LIBRARY_USE, 'secondary', 'use', () => {
+        chooser = { materialId: material.materialId, kind: 'use', choice: null, book: null };
+        if (books === null) void loadBooks(material);
+        else paint(`[data-material-id="${material.materialId}"] .library-use-chooser input`);
+      });
+      use.disabled = busy || preview !== null || chooser !== null;
+      const row = el('div', 'button-row library-card-actions');
+      row.append(use);
+      node.append(row);
+      if (chooser?.materialId === material.materialId && chooser.kind === 'use') node.append(useChooser(material, chooser));
+      if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
+    } else if (chooser?.materialId === material.materialId && chooser.kind !== 'use') {
       more.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
     } else {
       const row = el('div', 'button-row library-card-actions');
@@ -444,7 +489,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, '文件 SHA-256'), el('dd', 'technical-identity', material.source.sha256),
       el('dt', undefined, '记录摘要'), el('dd', 'technical-identity', material.digest)));
     more.append(history);
-    more.open = chooser?.materialId === material.materialId || options.focusMaterialId === material.materialId;
+    more.open = (chooser?.materialId === material.materialId && chooser.kind !== 'use') || options.focusMaterialId === material.materialId;
     node.append(more);
     return node;
   };
@@ -466,10 +511,15 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     // The layered index and its boundary are the developer layer's (Issue #1431 item 86); reading, translating and searching stay.
     section.append(heading);
     if (technicalLayerVisible) section.append(layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
+    // Ordinary mode still reads how 来源译文 stands — its progress, that it is done, or why it stopped (0.7.9 review, BUG-19).
+    else if (index.translation !== null) {
+      const line = el('p', 'material-translation-progress', materialTranslationLine(index));
+      line.dataset['translationState'] = index.translation.state;
+      section.append(line);
+    }
     const layerActions = indexActions(material);
     if (layerActions !== null) section.append(layerActions);
-    if (index.vectors?.state === 'complete') section.append(vectorSearch(material));
-    if (index.state === 'complete') section.append(segmentsReader(material));
+    if (index.state === 'complete') section.append(vectorSearch(material), segmentsReader(material));
     if (index.digest !== null) {
       section.append(technicalDetails('material-index-facts', el('dt', undefined, '资料索引摘要'), el('dd', 'technical-identity', index.digest)));
     }
@@ -477,19 +527,14 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /**
-   * The two on-request layers' actions (Issue #892): 构建相似索引 while the vectors are not complete, and 生成来源译文 while a
-   * non-Chinese item's translation is not — disabled, with the reason beside it, when it cannot be asked now.
+   * The on-request layer's action (Issue #892): 生成来源译文 while a non-Chinese item's translation is not complete — disabled,
+   * with the reason beside it, when it cannot be asked now.
    */
   const indexActions = (material: LibraryMaterialProjection): HTMLElement | null => {
-    const { vectors, translation } = material.index;
+    const { translation } = material.index;
     const row = el('div', 'button-row material-index-actions');
-    if (vectors !== null && (vectors.state === 'not-built' || vectors.state === 'building')) {
-      const build = action(MATERIAL_VECTORS_BUILD, 'secondary', 'build-vectors', () => void layerRequest(material, 'vectors'));
-      build.disabled = busy || vectors.state === 'building';
-      row.append(build);
-    }
     if (translation !== null && translation.state !== 'complete') {
-      const request = action(MATERIAL_TRANSLATION_REQUEST, 'secondary', 'request-translation', () => void layerRequest(material, 'translation'));
+      const request = action(MATERIAL_TRANSLATION_REQUEST, 'secondary', 'request-translation', () => void layerRequest(material));
       request.disabled = busy || !translation.request.available;
       row.append(request);
       if (!translation.request.available && translation.request.reason !== null) {
@@ -505,27 +550,25 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     return wrapper;
   };
 
-  /** 构建相似索引 or 生成来源译文: asked once; the item as it then reads, and its index read again while it is made. */
-  const layerRequest = async (material: LibraryMaterialProjection, layer: 'vectors' | 'translation'): Promise<void> => {
+  /** 生成来源译文: asked once; the item as it then reads, and its index read again while it is made. */
+  const layerRequest = async (material: LibraryMaterialProjection): Promise<void> => {
     if (busy) return;
     busy = true;
     refusal = null;
-    setStatus(layer === 'vectors' ? `正在请求${MATERIAL_VECTORS_BUILD}…` : `正在请求${MATERIAL_TRANSLATION_REQUEST}…`, 'busy');
+    setStatus(`正在请求${MATERIAL_TRANSLATION_REQUEST}…`, 'busy');
     paint(null);
     const focus = `[data-material-id="${material.materialId}"] .material-index-heading h4`;
     try {
-      const now = layer === 'vectors'
-        ? await api.buildMaterialVectors({ materialId: material.materialId })
-        : await api.requestMaterialTranslation({ materialId: material.materialId });
+      const now = await api.requestMaterialTranslation({ materialId: material.materialId });
       if (!root.isConnected) return;
       replace(now);
       busy = false;
-      setStatus(layer === 'vectors' ? `已开始在本机${MATERIAL_VECTORS_BUILD}：「${material.title}」。` : `已开始${MATERIAL_TRANSLATION_REQUEST}：「${material.title}」。`, 'success');
+      setStatus(`已开始${MATERIAL_TRANSLATION_REQUEST}：「${material.title}」。`, 'success');
       paint(focus);
     } catch (error) {
       if (!root.isConnected) return;
       busy = false;
-      const message = errorMessage(error, layer === 'vectors' ? MATERIAL_VECTORS_BUILD_FAILED : MATERIAL_TRANSLATION_FAILED);
+      const message = errorMessage(error, MATERIAL_TRANSLATION_FAILED);
       refusal = { materialId: material.materialId, message };
       setStatus(message, 'error');
       try {
@@ -539,8 +582,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /**
-   * 相似段落检索 (Issue #892): the item's paragraphs nearest a text the editor writes, by the vectors built on this machine,
-   * each with its anchor and its first words. The ranking is a lead, never the text: 查看分段 shows the paragraph itself.
+   * 相似段落检索 (Issue #892): the item's paragraphs that best match the words the editor writes, ranked by words on this machine
+   * as soon as the index is built (R5-F2c), each with its anchor and its first words. The ranking is a lead, never the text: 查看分段 shows the paragraph itself.
    */
   const vectorSearch = (material: LibraryMaterialProjection): HTMLElement => {
     const section = el('section', 'material-vector-search');
@@ -566,7 +609,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
           document.createTextNode(` ${candidate.preview}`));
         list.append(item);
       }
-      results.replaceChildren(el('p', 'material-vector-results-heading', materialVectorResultsHeading(projection.candidates.length)), list);
+      const mode = el('p', 'material-vector-mode', RETRIEVAL_ASSIST_LINES[projection.assist]);
+      mode.dataset['retrievalAssist'] = projection.assist;
+      results.replaceChildren(el('p', 'material-vector-results-heading', materialVectorResultsHeading(projection.candidates.length)), mode, list);
     };
     if (saved?.result !== undefined && saved.result !== null) show(saved.result);
     const run = action(MATERIAL_VECTORS_SEARCH, 'secondary', 'vector-search', () => void search());
@@ -683,12 +728,63 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const cancel = action(LIBRARY_CANCEL, 'quiet', 'cancel-decision', () => {
       const kind = chooser?.kind;
       chooser = null;
-      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
+      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'use' ? 'use' : kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
     });
     cancel.disabled = busy;
     row.append(confirm, cancel);
     section.append(row);
     return confirm;
+  };
+
+  const useChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'use' }>): HTMLElement => {
+    const section = el('section', 'library-chooser library-use-chooser');
+    const fieldset = el('fieldset');
+    fieldset.append(el('legend', undefined, LIBRARY_ATTRIBUTION_TERM));
+    let confirm: HTMLButtonElement;
+    const chosen = (value: string): void => {
+      state.choice = value;
+      state.book = books?.find((book) => `book:${book.bookId}` === value) ?? state.book;
+      confirm.disabled = busy;
+    };
+    const name = `library-use-${material.materialId}`;
+    fieldset.append(choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen),
+      choice(name, 'deferred', LIBRARY_USE_LATER, state.choice === 'deferred', busy, chosen));
+    const bookList = el('div', 'library-use-books');
+    if (state.book !== null && state.choice === `book:${state.book.bookId}` && !books?.some((book) => book.bookId === state.book!.bookId)) {
+      bookList.append(choice(name, state.choice, `${LIBRARY_USE_SELECTED}：${libraryBookLabel(state.book.title)}`, true, busy, chosen));
+    }
+    for (const book of books ?? []) bookList.append(choice(name, `book:${book.bookId}`, libraryBookLabel(book.title), state.choice === `book:${book.bookId}`, busy, chosen));
+    if (booksCursor !== null) bookList.append(action(LIBRARY_BOOKS_MORE, 'quiet', 'more-books', () => void loadBooks(material)));
+    if (!onFirstBooksPage) bookList.append(action(LIBRARY_BOOKS_FIRST, 'quiet', 'first-books', () => void loadBooks(material, true)));
+    fieldset.append(bookList);
+    section.append(fieldset);
+    confirm = chooserActions(section, material, LIBRARY_USE_CONFIRM, 'confirm-use', () => { if (state.choice !== null) void decideUse(material, state.choice); });
+    confirm.disabled = busy || state.choice === null;
+    return section;
+  };
+
+  // Attribution resets eligibility; each subsequent request uses the returned count.
+  const decideUse = async (material: LibraryMaterialProjection, value: string): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    refusal = null;
+    setStatus(LIBRARY_STATUS.deciding, 'busy');
+    paint(null);
+    try {
+      const now = await recordLibraryUse(api, material, value, (next) => { if (root.isConnected) replace(next); });
+      if (!root.isConnected) return;
+      chooser = null;
+      setStatus(libraryUseRecorded(now, now.decisionCount !== material.decisionCount), 'success');
+    } catch (error) {
+      if (!root.isConnected) return;
+      chooser = null;
+      refusal = { materialId: material.materialId, message: errorMessage(error, LIBRARY_STATUS.decideFailed) };
+      setStatus(refusal.message, 'error');
+      try { const now = await api.inspectLibraryMaterial({ materialId: material.materialId }); if (!root.isConnected) return; replace(now); } catch { /* The refusal remains visible. */ }
+      if (!root.isConnected) return;
+    }
+    busy = false;
+    paint(`[data-material-id="${material.materialId}"] h3`);
   };
 
   /** 定归属: one Book, a Series once Series exist, or the house — the first Book listed chosen to begin with. */
@@ -991,7 +1087,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         const target = options.focusMaterialId === null ? undefined : shown().find((material) => material.materialId === options.focusMaterialId);
         paint(target === undefined
           ? null
-          : `[data-material-id="${target.materialId}"] [data-library-action="${target.attribution === null ? 'attribute' : 'eligibility'}"]`);
+          : `[data-material-id="${target.materialId}"] [data-library-action="${!technicalLayerVisible ? 'use' : target.attribution === null ? 'attribute' : 'eligibility'}"]`);
       } catch (error) {
         if (!root.isConnected) return;
         root.dataset['library'] = 'failed';

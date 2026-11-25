@@ -15,7 +15,7 @@ import { CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibra
 import { ViewPreferences, renderViewSettings } from './layout.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { type ShellPlace } from './shell.js';
-import { mountHelp } from './help.js';
+import { focusFirstReview, mountHelp, type HelpCommands } from './help.js';
 import { HELP_OPENED } from './help-labels.js';
 import { SETTINGS_HUB_GROUPS, type SettingsRoute } from './shell-labels.js';
 import type { RendererApi } from '../shared/protocol.js';
@@ -37,6 +37,8 @@ interface Options {
   renderDiagnostics: () => void;
   appearance: { ready: Promise<void>; readonly preference: import("../shared/appearance.js").ThemePreference; subscribe(listener: () => void): () => boolean; choose(value: import("../shared/appearance.js").ThemePreference): Promise<void>; };
   viewPreferences: ViewPreferences;
+  /** What 帮助's 第一次审稿 buttons press: the command registry the palette and F1 share. */
+  commands: HelpCommands;
 }
 
 export function createSettingsScreens(state: Options) {
@@ -216,9 +218,24 @@ function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
   };
 }
 
-/** A settings page with the navigation beside it; any other page is itself. */
+/** The screen last laid out; every screen passes through `settingsLayout`, so this is the one the editor is leaving. */
+let laidOut: string | undefined;
+
+/**
+ * A settings page with the navigation beside it; any other page is itself. The window's document is the one scroll container
+ * every page shares, so a page keeps whatever offset the screen before it had left (模型服务 opened from the middle of 帮助 began
+ * at its second step). A settings page that follows another screen therefore opens at the top, whether it is reached from a
+ * 帮助 step, the settings navigation or a command; a repaint of the page on show (a saved key, a refreshed list) keeps the
+ * editor's place. 返回 re-opens the page it came from through this same path, so it opens at the top as well.
+ */
 function settingsLayout(state: string, content: HTMLElement): HTMLElement {
+  const leaving = laidOut;
+  laidOut = state;
   if (!SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) return content;
+  if (leaving !== state) {
+    const page = document.scrollingElement;
+    if (page) page.scrollTop = 0;
+  }
   const layout = element('div', 'settings-layout');
   layout.append(settingsNavigation(state), content);
   return layout;
@@ -261,19 +278,21 @@ function renderSettingsHome(notice?: string): void {
  * 使用帮助 · 隐私说明 · 第三方许可 tab set and the 关于 line. Its versions come from the same service read 设置 › 数据与存储
  * uses, so the two screens cannot disagree.
  */
-function renderHelp(): void {
+function renderHelp(focus?: 'first-review'): void {
   const content = panel();
   content.classList.add('help-screen');
   mountHelp({
     root: content,
     loadVersions: () => api.inspectDataVersion(),
+    commands: state.commands,
     modeChanged: () => {
       renderHelp();
       screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
     },
   });
   replaceScreen('help', content);
-  content.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
+  if (focus === 'first-review') focusFirstReview(content);
+  else content.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
   setStatus(HELP_OPENED);
 }
 

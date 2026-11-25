@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
@@ -90,6 +91,18 @@ const settingsInView = (width, height, form) => `(() => {
   return box.width>0 && box.height>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
 })()`;
 
+// #1554: the icons the engine really draws. Every rendered icon matching the selector is 18 × 18, resolves through its <use> to a <symbol> of
+// the sprite that holds at least one shape, takes the specification's 1.8 stroke from the stylesheet, and no two of them share a symbol.
+const drawnIcons = (selector) => `(() => {
+  const icons=[...document.querySelectorAll(${JSON.stringify(selector)})].filter((svg)=>svg.getClientRects().length>0), ids=[];
+  for(const svg of icons){
+    const box=svg.getBoundingClientRect(), id=(svg.querySelector('use')?.getAttribute('href')??'').replace(/^#/,''), symbol=id===''?null:document.querySelector('#editor-icon-sprite symbol[id="'+id+'"]');
+    if(Math.abs(box.width-18)>0.5||Math.abs(box.height-18)>0.5||!symbol||symbol.childElementCount<1||getComputedStyle(svg).strokeWidth!=='1.8px') return false;
+    ids.push(id);
+  }
+  return ids.length>0 && new Set(ids).size===ids.length;
+})()`;
+
 async function checkSettingsPinned(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -100,6 +113,7 @@ async function checkSettingsPinned(renderer) {
         await waitFor(renderer, `document.documentElement.dataset.sidebar==='icons'`, `sidebar-settings-icons-${width}`);
       }
       await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
+      await assertRenderer(renderer, drawnIcons('.sidebar-link svg.icon'), `sidebar-icons-drawn-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
       await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `sidebar-settings-opened-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
@@ -110,6 +124,8 @@ async function checkSettingsPinned(renderer) {
       }
     }
   }
+  // The manuscript screen stands again here, at the smaller size: its right edge draws one distinct symbol per entry.
+  await waitFor(renderer, drawnIcons('[data-edge-entry] svg.icon'), 'edge-icons-drawn');
   await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
 
@@ -422,6 +438,16 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, `${label('nav.library')}===${JSON.stringify(libraryDefault)} && ${label('nav.series')}===${JSON.stringify(seriesDefault)} && document.querySelector('[data-shortcut-command="edit.save"]')?.textContent.startsWith(${JSON.stringify(darwin ? 'Command+S' : 'Ctrl+S')})`, 'keyboard-defaults');
   await assertRenderer(renderer, `document.querySelector('.keyboard-always-on')?.textContent.includes('始终有效')`, 'keyboard-always-on');
 
+  // #1548: F1 opens 帮助 from a page with no Book open. It is listed here with its chord and answers a real key press; with no Book the
+  // steps that act inside one say so instead of offering a button; the settings navigation beside Help leads back.
+  at('help-f1');
+  await assertRenderer(renderer, `${label('help.open')}==='F1'`, 'help-f1-listed');
+  await pressKey(renderer, F1_KEY);
+  await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, 'help-f1-opened');
+  await assertRenderer(renderer, `document.querySelectorAll('[data-help-step]').length===5 && document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, 'help-f1-no-book-steps');
+  await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="keyboard"]', 'help-f1-back-keyboard');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'help-f1-keyboard-ready');
+
   // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
   await assertRenderer(renderer, `['command.palette','book.switch','review.new','evaluation.start','nav.tasks'].every(id=>document.querySelector('[data-keyboard-command="'+id+'"]'))`, 'quick-shortcuts-listed');
   // #1522: on a global page the palette lists only what does something there — no Book commands, no editing commands — and an
@@ -546,6 +572,7 @@ async function clickSelector(renderer, selector, name) {
 const TAB_KEY = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 };
 const ENTER_KEY = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
 const ESCAPE_KEY = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
+const F1_KEY = { key: 'F1', code: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112 };
 
 /** One real key press through the renderer's input pipeline; Enter carries its text so it activates a button. */
 async function pressKey(renderer, descriptor) {
@@ -612,7 +639,7 @@ async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-explicit');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
@@ -1136,6 +1163,7 @@ async function main() {
       JSON.stringify(compact.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
         发送: '不发送，无模型用量。',
+        预计: '只记录这次运行，不调用模型。',
         会得到: '一条运行记录（不派发）。',
         不会: '不运行、改稿、导出发布、存里程碑、读书外内容。',
         中途: '只记录本次授权，无需中途参与。',
@@ -1154,7 +1182,7 @@ async function main() {
       const rows=Array.from(drawer.querySelectorAll('[data-task-plan-row]'));
       return head?.children.length===3 && head.children[0].contains(drawer.querySelector('h2')) && head.children[0].contains(drawer.querySelector('.task-drawer-pill')) &&
         head.children[1].classList.contains('task-drawer-modes') && head.children[2].getAttribute('aria-label')==='关闭' && head.children[2].textContent==='' &&
-        rows.length===5 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
+        rows.length===6 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
         [...drawer.querySelector('.task-bar-summary').textContent].length<=40;
     })()`, 'drawer-prototype-density');
 
@@ -1237,7 +1265,7 @@ async function main() {
     await pressKey(renderer, TAB_KEY);
     await assertRenderer(renderer, `document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.matches(':focus-visible')`, 'drawer-tab-compact');
     await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='compact' && document.querySelectorAll('#task-drawer [data-task-plan-row]').length===5 && document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.getAttribute('aria-pressed')==='true'`, 'drawer-enter-compact');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='compact' && document.querySelectorAll('#task-drawer [data-task-plan-row]').length===6 && document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.getAttribute('aria-pressed')==='true'`, 'drawer-enter-compact');
     await pressKey(renderer, TAB_KEY);
     await assertRenderer(renderer, `document.activeElement?.dataset.taskDrawerControl==='mode-full'`, 'drawer-tab-full');
     await pressKey(renderer, ENTER_KEY);

@@ -1,9 +1,10 @@
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { mountDeliverables } from '../../src/renderer/deliverables.js';
 import { mountManuscriptSwitcher } from '../../src/renderer/manuscript-switcher.js';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { insertLegacyPackageVersion } from '../support/legacy-package-version.js';
 import { installMiniDom } from '../support/mini-dom.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -13,19 +14,13 @@ import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-  REIMPORT_GROUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL,
-} from '../../src/service/task-authorization.js';
-import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   type ProductionDocumentDeliveryVersionInput,
   type ProductionDocumentRecipientKind,
   type ProductionDocumentProjection,
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004,
 // WORK-013, MILE-014, EXP-024) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft a document starts
@@ -145,7 +140,8 @@ function switcherSurface(store: EditorialStore, book: Book, pickerPath?: string)
     abandonImportDraft: vi.fn(async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion)),
     createProductionDocument: async (input) => store.createProductionDocument({ ...input, bookId: book.bookId }),
   };
-  const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
+  const toolbar = document.createElement('header'); root.append(toolbar);
+  const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', toolbar, api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
     currentDocumentId: null, setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败',
     awaitServiceJob: async (job) => job, openPrimary: async () => {}, openDocument: opened, openLaunch: vi.fn(), openWritingPlan: () => {} });
   root.append(surface.element);
@@ -216,80 +212,6 @@ async function afterReopen(run: (store: EditorialStore) => void | Promise<void>)
   try { await run(reopened); reopened.markCleanShutdown(); } finally { reopened.close(); }
 }
 
-// Unique pre-37/pre-38 paths: the owning migration suites start at 56/57 or newer.
-function plantRevision36(): void {
-  withDatabase((planted) => {
-    // Revision 36's `manuscripts`: `book_id UNIQUE`, the primary role only, and no partial index.
-    planted.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-    execPre74Fixture(planted, `BEGIN IMMEDIATE;
-      ${PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n')}
-      DROP INDEX manuscripts_one_primary_per_book;
-      ALTER TABLE manuscripts RENAME TO manuscripts_v37;
-      CREATE TABLE manuscripts (
-        manuscript_id TEXT PRIMARY KEY,
-        book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-        role TEXT NOT NULL CHECK(role = 'primary'),
-        created_at TEXT NOT NULL
-      ) STRICT;
-      INSERT INTO manuscripts SELECT * FROM manuscripts_v37 ORDER BY rowid;
-      DROP TABLE manuscripts_v37;
-      PRAGMA user_version = ${REIMPORT_GROUP_SCHEMA_VERSION};
-      COMMIT;`);
-    downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-    planted.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
-  });
-}
-
-function plantRevision37(): void {
-  withDatabase((planted) => {
-    // Revision 37: everything as it is, but no Delivery Records, no package versions (revision 39) and no workflow
-    // (revision 40).
-    planted.exec('PRAGMA foreign_keys = OFF');
-    execPre74Fixture(planted, `BEGIN IMMEDIATE;
-      DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
-      DROP TABLE database_merges;
-      DROP TABLE database_replacements;
-      DROP TABLE scheduled_backup_removals;
-      DROP TABLE scheduled_backups;
-      DROP TABLE backup_preferences;
-      DROP TABLE database_export_receipts;
-      DROP TABLE database_export_approvals;
-      DROP TABLE database_export_preparations;
-      DROP TABLE store_versions;
-      DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
-      DROP TABLE series_knowledge_revisions;
-      DROP TABLE series_knowledge_candidates;
-      DROP TABLE series_knowledge_items;
-      DROP TABLE series_membership_changes;
-      DROP TABLE series;
-      DROP TABLE evaluation_preferences;
-      DROP TABLE publication_actuals;
-      DROP TABLE learning_eligibility_decisions;
-      DROP TABLE proposal_decision_feedback;
-      DROP TABLE analysis_feedback_signals;
-      DROP TABLE evaluation_record_entries;
-      DROP TABLE evaluation_records;
-      DROP TABLE library_material_decisions;
-      DROP TABLE library_materials;
-      DROP TABLE review_guideline_versions;
-      DROP TABLE book_people_versions;
-      DROP TABLE maintenance_case_revisions;
-      DROP TABLE maintenance_errata_versions;
-      DROP TABLE maintenance_cases;
-      DROP TABLE production_document_origin_readings;
-      DROP TABLE book_delivery_package_export_files;
-      DROP TABLE book_delivery_package_exports;
-      DROP TABLE production_document_phase_transitions;
-      DROP TABLE production_document_workflow_instances;
-      DROP TABLE book_delivery_package_versions;
-      DROP TABLE production_document_deliveries;
-      PRAGMA user_version = ${PRODUCTION_DOCUMENT_SCHEMA_VERSION};
-      COMMIT;`);
-    downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-    planted.exec('PRAGMA foreign_keys = ON');
-  });
-}
-
 describe('Production Documents', () => {
   it('creates only a house type from material imported as a source', async () => {
     await withBook(async (store, book) => {
@@ -353,10 +275,16 @@ describe('Production Documents', () => {
         await vi.waitFor(() => expect(view.opened).toHaveBeenCalledTimes(1));
         // An imported file is named after itself when the editor wrote no title of their own (Issue #1404).
         expect(view.opened.mock.calls[0]![0].title).toBe('同页材料');
+        // The status line names the document the editor's menu made, as the management page's does.
+        expect(view.status).toHaveBeenCalledWith('已创建「同页材料」', 'success');
         expect(acknowledge).toHaveBeenCalledTimes(1);
         expect(abandon).not.toHaveBeenCalled();
         expect((await store.getImportStartup()).state).toBe('none');
-        expect(store.listPriorWork()).toEqual(before);
+        const after = store.listPriorWork();
+        const beforeWorked = before[0]?.library?.lastWorkedAt;
+        const afterWorked = after[0]?.library?.lastWorkedAt;
+        expect(after.map(({ library, ...rest }) => ({ ...rest, ...(library && beforeWorked !== undefined ? { library: { ...library, lastWorkedAt: beforeWorked } } : library ? { library } : {}) }))).toEqual(before);
+        expect(typeof afterWorked === 'string' && typeof beforeWorked === 'string' && afterWorked >= beforeWorked).toBe(true);
       } finally { view.close(); acknowledge.mockRestore(); abandon.mockRestore(); }
     });
   });
@@ -380,21 +308,28 @@ describe('Production Documents', () => {
     });
   });
 
-  it('focuses the package condition document rather than the first same-type document', async () => {
+  it('shows a derivative with a saved version ticked, and a package stored before Issue #1639 with its times in the local format', async () => {
     await withBook(async (store, book) => {
-      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'A' })).document!;
-      const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'B' })).document!;
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const news = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: null });
+      const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(book.bookId).content.digest });
+      // The package as it was stored before: delivery-based, its time the raw instant of its record.
+      const storedAt = '2026-03-04T05:06:07.000Z';
+      insertLegacyPackageVersion(join(roots.dataRoot, 'store', 'ai7.sqlite'), prepared.package.versions[0]!.packageVersionId, storedAt);
       const view = documentSurface(store, book);
-      const { root, surface } = view;
       try {
-        surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(root.querySelector<HTMLButtonElement>(`.production-document-row[data-document-id="${first.documentId}"] [data-document-action="deliver"]`)!.disabled).toBe(false);
-        root.querySelector<HTMLButtonElement>(`.package-condition-list li[data-document-id="${second.documentId}"] [data-package-route="document"]`)!.click();
-        expect(document.activeElement?.closest<HTMLElement>('.production-document-row')?.dataset['documentId']).toBe(second.documentId);
-        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('deliver');
-        // New documents are made on 稿件 (Issue #1403): the technical card of a type without one keeps 本书不做.
-        root.querySelector<HTMLButtonElement>('.package-condition-list li[data-type-id="promotion-article"] [data-package-route="document"]')!.click();
-        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('notForThisBook');
+        view.surface.start(); await vi.waitFor(() => expect(view.root.querySelector('.package-version-meta')).not.toBeNull());
+        const box = view.root.querySelector<HTMLInputElement>(`.package-document-choices li[data-document-id="${news.documentId}"] [data-package-field="document"]`)!;
+        expect(box.checked).toBe(true);
+        // No 不包含 list, and the stored package's time reads in the local format, never as the stored instant.
+        expect(view.root.querySelector('.package-excluded')).toBeNull();
+        const stored = Array.from(view.root.querySelectorAll('.package-version-meta'), (meta) => meta.textContent ?? '');
+        expect(stored).toHaveLength(2);
+        expect(stored[0]).toContain(localInstantLabel(storedAt));
+        expect(stored[0]).not.toContain(storedAt);
       } finally { view.close(); }
     });
   });
@@ -543,23 +478,6 @@ describe('Production Documents', () => {
     }
   }, 180_000);
 
-  it('preserves a revision-36 Manuscript and permits a separate production document after migration', async () => {
-    let book: Book;
-    let before: unknown;
-    await withBook(async (store, imported) => {
-      book = imported;
-      before = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-    });
-    plantRevision36();
-    await afterReopen(async (migrated) => {
-      expect(migrated.getManuscriptWindow(book!.manuscriptId, book!.branchId, null)).toEqual(before);
-      expect(migrated.inspectProductionDocuments(book!.bookId).types.every((type) => type.document === null)).toBe(true);
-      const sourceVersionId = await importSource(migrated, book!.bookId, await compose('新闻稿初稿', [21, 22]));
-      const created = await migrated.createProductionDocument({ bookId: book!.bookId, typeId: 'news-release', sourceVersionId });
-      expect(created.document!.documentId).not.toBe(book!.manuscriptId);
-      expect(migrated.getManuscriptWindow(book!.manuscriptId, book!.branchId, null)).toEqual(before);
-    });
-  }, 120_000);
 });
 
 
@@ -695,21 +613,6 @@ describe('交付 of a Production Document (S66b)', () => {
     await afterReopen((store) => expect(store.inspectProductionDocuments(bookId!)).toEqual(before));
   });
 
-  it('adds empty Delivery Records to a revision-37 store while preserving its documents', async () => {
-    let bookId: string;
-    let before: string;
-    await withDocument(async ({ store, book }) => {
-      bookId = book.bookId;
-      before = JSON.stringify(store.inspectProductionDocuments(bookId));
-    });
-    plantRevision37();
-    await afterReopen((store) => {
-      const documents = store.inspectProductionDocuments(bookId!);
-      // Pre-origin-reading stores cannot report how many marks their material left behind (#547).
-      expect(JSON.stringify(documents)).toBe(before!.replaceAll('"marksNotCarried":0', '"marksNotCarried":null'));
-      expect(documents.types[0]!.document!.deliveries).toEqual([]);
-    });
-  }, 120_000);
 });
 
 

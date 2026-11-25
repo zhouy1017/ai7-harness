@@ -1,6 +1,7 @@
 import { completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import type { TaskOverviewItemProjection } from '../shared/protocol.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import {
   BASELINE_ANALYSIS_MODE_LABELS,
   GLOBAL_ATTENTION_COUNTED_GROUPS,
@@ -15,11 +16,11 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
+import { RESTART_PAUSED_REASON, RESTART_QUEUED_REASON, RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
-import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
+import { LIBRARY_USE, LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
 import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
 
 /**
@@ -54,6 +55,11 @@ export const GLOBAL_ATTENTION_HEADING = '待我处理';
 /** Nothing waits for the editor: the page says so once, beside the way to start a task. */
 export const GLOBAL_ATTENTION_NONE = '现在没有需要你处理的事项。';
 export const GLOBAL_ATTENTION_START = '发起任务';
+/** Below the groups, or alone beside 发起任务 when nothing waits (Issue #1680): the tasks in progress are the 任务 page's. */
+export function globalAttentionInProgressLine(count: number): string {
+  return `有 ${count} 项任务正在进行。`;
+}
+export const GLOBAL_ATTENTION_VIEW_TASKS = '查看任务';
 export const GLOBAL_ATTENTION_LEDE = '所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。';
 /** IA-013: a Book's own findings stay in that Book's 待办汇总; this view keeps only what crosses Books. */
 export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「待办汇总」里。';
@@ -181,8 +187,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
   // A 资料库 item waiting for the editor (Issue #427, S79c; ATTN-009), in the words the material table placed them under.
   get 'library-attribution-pending'() { return technicalWords('资料库归属待定', '资料给谁用待定'); },
-  get 'learning-eligibility-pending'() { return technicalWords('学习准入待定', '是否可用于学习待定'); },
-  get 'learning-eligibility-deferred'() { return technicalWords('学习准入待定 · 稍后决定', '是否可用于学习待定 · 稍后决定'); },
+  get 'learning-eligibility-pending'() { return technicalWords('学习准入待定', '资料给谁用待定'); },
+  get 'learning-eligibility-deferred'() { return technicalWords('学习准入待定 · 稍后决定', '资料给谁用待定 · 稍后决定'); },
   // A Book's Learning Material (Issue #61, S26b; LEARN-002): the words of the spec's attention item.
   get 'learning-materials-pending'() { return technicalWords('学习准入待处理', '学习材料待处理'); },
   get 'learning-materials-deferred'() { return technicalWords('学习准入待处理 · 稍后决定', '学习材料待处理 · 稍后决定'); },
@@ -204,7 +210,7 @@ export function globalAttentionStateLabel(item: Pick<GlobalAttentionItemProjecti
     return `任务已中断 · ${RESUMABLE_STOP_REASON_LABELS[item.facts.stopReason]}`;
   }
   if (item.state === 'analysis-completed-with-gaps' && item.facts.completion !== undefined) {
-    return completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total);
+    return serviceWords(completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total));
   }
   return item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0
     ? technicalWords('该单元结果未知', '部分任务结果待确认') : GLOBAL_ATTENTION_STATE_LABELS[item.state];
@@ -288,7 +294,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'resolve-conflict': RESOLVE_CONFLICT_LABEL,
   'answer-clarification': '回答问题',
   // The drawer's own action for a Run the ceiling stopped (Issue #51, S16a; MODEL-017).
-  'adjust-budget-redo': '调整预算并重做',
+  'adjust-budget-redo': TASK_BAR_REDO,
   // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
   'resolve-model-service': '处理模型服务',
   'open-network-proxy': '去设置 › 模型服务 › 网络代理',
@@ -306,8 +312,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'maintenance-write-errata': MAINTENANCE_NEXT_STEP_LABELS['write-errata'],
   'maintenance-conclude': MAINTENANCE_NEXT_STEP_LABELS.conclude,
   // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
-  'set-library-attribution': LIBRARY_ATTRIBUTE,
-  'set-learning-eligibility': LIBRARY_ELIGIBILITY,
+  get 'set-library-attribution'() { return technicalWords(LIBRARY_ATTRIBUTE, LIBRARY_USE); },
+  get 'set-learning-eligibility'() { return technicalWords(LIBRARY_ELIGIBILITY, LIBRARY_USE); },
   get 'decide-learning-materials'() { return technicalWords('定学习准入…', '处理学习材料…'); },
   'open-dialogue': DIALOGUE_OPEN_LABEL,
   // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
@@ -435,15 +441,15 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     // Issue #541: under developer-live the launch set the ceiling, and the plan cannot raise it.
     case 'analysis-budget-reached':
       return item.nextStep === 'redo'
-        ? '已到本次启动的预算上限，保留结果后停下；提高启动预算后可重做。'
-        : '已到你设的预算上限，保留结果后停下；调整预算后可重做。';
+        ? '已到本次启动的预算上限，保留结果后停下；提高启动预算后可以重新开始。'
+        : technicalWords('已到你设的预算上限，保留结果后停下；调整预算后可以重新开始。', '已到你设的用量上限，保留结果后停下；调整用量后可以重新开始。');
     case 'analysis-account-limit':
       return '模型服务的账户限额已用尽，处理后可从已保存的进度继续。';
     case 'analysis-outcome-unknown':
     case 'analysis-outcome-unconfirmed':
       return '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
     case 'analysis-blocked':
-      return '模型服务当前不可用，任务尚未开始。';
+      return facts.stopReason === 'shutdown' ? RESTART_QUEUED_REASON : '模型服务当前不可用，任务尚未开始。';
     case 'analysis-orphaned':
       return 'AI7 在运行时关闭，已完成的结果与未完成的范围均已保留。';
     case 'review-failed':
@@ -452,7 +458,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-plan-revision':
       return '计划依据已有变化，请确认新计划后再开始。';
     case 'analysis-plan-moved':
-      return '等待联网期间计划依据已有变化，需要另做一份计划。';
+      return '等待联网期间计划依据已有变化，需要重新开始。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
       if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题，回答后或等待 24 小时后接着处理。';
@@ -481,7 +487,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-pausing':
       return '当前步骤完成后暂停，已完成的结果会保留。';
     case 'analysis-paused':
-      return technicalWords('已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。', '已暂停：已完成的部分都已保存；继续时接着处理，也可以取消它。');
+      return facts.stopReason === 'shutdown' ? RESTART_PAUSED_REASON : technicalWords('已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。', '已暂停：已完成的部分都已保存；继续时接着处理，也可以取消它。');
     case 'analysis-resumable': {
       const reason = facts.stopReason;
       if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后继续。';
@@ -525,11 +531,11 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
       }
     // A 资料库 item (Issue #427, S79c; KB-007, LEARN-006): what it waits for; nothing about it is inferred meanwhile.
     case 'library-attribution-pending':
-      return technicalWords('放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。', '还没有定给谁用和是否可用于学习：定好后，任务才能参考它。');
+      return technicalWords('放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。', '还没有定给谁用：定好后，任务才能参考它。');
     case 'learning-eligibility-pending':
-      return technicalWords('归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。', '还没有定是否可用于学习：定好前，它不会用来学习，任务也不能参考它。');
+      return technicalWords('归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。', '还没有确认给谁用：确认后，任务才能参考它。');
     case 'learning-eligibility-deferred':
-      return technicalWords('学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。', '是否可用于学习稍后决定：决定之前，它不会用来学习，任务也不能参考它。');
+      return technicalWords('学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。', '你选了暂不使用：确认给谁用之前，任务不会参考它。');
     // A Book's Learning Material (Issue #61, S26b; LEARN-002, LEARN-006): nothing of it is used to learn until the editor says.
     case 'learning-materials-pending':
       return technicalWords('你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。', '你的反馈与改动里有可以用来学习的材料：没有你的决定，它们不会用来学习。');
@@ -638,7 +644,7 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
 export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
   { material: 'external-source-retention-failed', label: '外部来源留存失败', group: 'exceptions' },
   { material: 'library-attribution-pending', get label() { return technicalWords('资料库归属待定', '资料给谁用待定'); }, group: 'decisions' },
-  { material: 'learning-eligibility-pending', get label() { return technicalWords('学习准入待定', '是否可用于学习待定'); }, group: 'decisions' },
+  { material: 'learning-eligibility-pending', get label() { return technicalWords('学习准入待定', '资料给谁用待定'); }, group: 'decisions' },
   { material: 'learning-materials-pending', get label() { return technicalWords('学习准入待处理', '学习材料待处理'); }, group: 'decisions' },
   { material: 'indexing-completed', label: '索引完成', group: 'recent' },
 ] as const satisfies ReadonlyArray<{ material: string; label: string; group: GlobalAttentionGroupKey }>;

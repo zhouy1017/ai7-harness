@@ -1,11 +1,14 @@
+import { standardTableInputs } from './standard-tables/schemas.js';
+import { validBookFindingsFilters } from './book-findings.js';
 import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
-import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { validReasoningEffort, validRuntimeExecutionConfig, validTaskRelaunchSource } from '../shared/runtime-execution-config.js';
 import { canonicalPlanEdits } from './analysis/plan-edits.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
+import { EDITORIAL_MARK_CATEGORIES } from '../shared/editorial-mark-category.js';
 import { MAX_AI_EDIT_LOCK_TARGETS, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS } from '../shared/protocol/scoped-edit.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
@@ -249,6 +252,7 @@ function validLibraryDecision(value: unknown): boolean {
       : attribution.scope === 'book' && hasExactKeys(attribution, ['scope', 'bookId']) &&
         isBoundedString(attribution.bookId, 36) && UUID_PATTERN.test(attribution.bookId);
   }
+  if (value.kind === 'not-used') return hasExactKeys(value, ['kind']);
   return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
     (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
     (value.reason === null || isBoundedString(value.reason, MAX_FRAME_BYTES, true));
@@ -390,6 +394,7 @@ function validExportFormat(value: unknown): boolean {
 function validExportTarget(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
+  if (value.kind === 'revision') return hasExactKeys(value, ['kind', 'revisionId']) && validUuid(value.revisionId);
   // One recorded version of a 审阅报告 (Issue #500, S64b part 2).
   if (value.kind === 'report') return hasExactKeys(value, ['kind', 'reportId']) && validUuid(value.reportId);
   // One saved version of a Production Document (Issue #415, S66b).
@@ -458,7 +463,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = value.input;
       if (!isRecord(input) || Object.keys(input).some(key => key !== 'bookId' && key !== 'launch') || !validUuid(input.bookId) ||
           !isRecord(input.launch) || Object.keys(input.launch).some(key => key !== 'operation' && key !== 'input') ||
-          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite'].includes(String(input.launch.operation)) ||
+          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'startScopedAiEdit'].includes(String(input.launch.operation)) ||
           !isRecord(input.launch.input) || Object.hasOwn(input.launch.input, 'bookId')) throw new ProtocolError(tentativeId);
       decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: input.launch.operation, input: { ...input.launch.input, bookId: input.bookId } })));
       break;
@@ -470,7 +475,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReadersReport':
     case 'launchEvaluationRewrite': {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
-      const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, ...task } = value.input;
+      const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, relaunchOf, redoOf, ...task } = value.input;
+      if (relaunchOf !== undefined && !validTaskRelaunchSource(relaunchOf) || redoOf !== undefined && redoOf !== null && !validUuid(redoOf)) throw new ProtocolError(tentativeId);
       if (startWhen !== undefined && startWhen !== 'now' && startWhen !== 'idle' && startWhen !== 'when-online') throw new ProtocolError(tentativeId);
       if (planEdits !== undefined && (!isRecord(planEdits) ||
           !Object.keys(planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling', 'evidenceAssuranceLevel'].includes(key)) || canonicalPlanEdits({
@@ -482,7 +488,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (rememberedChoice !== undefined && typeof rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);
       // The task's existing input validator owns its editorial contract; launch metadata is validated above.
       decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: op.replace(/^launch/u, 'prepare'),
-        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false } : task })));
+        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false, ...(redoOf === undefined ? {} : { redoOf }) } : task })));
       break;
     }
     case 'ready':
@@ -490,6 +496,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getImportStartup':
     case 'listPriorWork':
     case 'getModelServiceStoredState':
+    case 'clearFlashModel':
     case 'getSearchBackendSettings':
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAgent':
@@ -611,8 +618,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectFastRoleModel':
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
+    case 'selectUnderlyingModel':
+    case 'selectProModel':
+    case 'selectFlashModel':
     case 'testModelServiceConnection': {
-      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && isRecord(value.input) && value.input.inherit === true) {
+        const input = requireInput(value.input, ['roleId', 'inherit'], tentativeId);
+        if (input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
+        break;
+      }
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : value.op === 'selectUnderlyingModel' ? ['reasoningEffort', 'roleId'] : ['reasoningEffort'], tentativeId);
+      if (value.op === 'selectUnderlyingModel' && input.roleId !== 'underlying-pro' && input.roleId !== 'underlying-flash') throw new ProtocolError(tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
       if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
@@ -744,6 +760,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'returnImportToEditing':
     case 'continueImportDraft':
     case 'abandonImportDraft': {
       const input = requireInput(value.input, ['draftId', 'expectedDraftVersion'], tentativeId);
@@ -880,8 +897,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectBookFindings': {
-      const input = requireInput(value.input, ['bookId', 'offset'], tentativeId);
-      if (!validUuid(input.bookId) || !isSafeInteger(input.offset, 0)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['offset', 'since', 'filters', 'whole'], tentativeId);
+      if (!validUuid(input.bookId) || input.offset !== undefined && !isSafeInteger(input.offset, 0) ||
+          input.since !== undefined && !(typeof input.since === 'string' && /^[a-f0-9]{64}$/u.test(input.since)) ||
+          input.whole !== undefined && typeof input.whole !== 'boolean' ||
+          input.filters !== undefined && !validBookFindingsFilters(input.filters)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectParagraphAnalysis': {
@@ -1020,6 +1040,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectStandardTables':
+    case 'inspectStandardTable':
+    case 'previewStandardTableImport':
+    case 'commitStandardTableImport':
+    case 'saveStandardTable':
+    case 'setStandardTableEnabled':
+    case 'deleteStandardTable':
+    case 'restorePreinstalledStandardTables':
+      if (!standardTableInputs[value.op as keyof typeof standardTableInputs].safeParse(value.input).success) throw new ProtocolError(tentativeId);
+      break;
     case 'inspectReviewGuidelines': {
       const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
       if (Object.hasOwn(input, 'page')) {
@@ -1038,7 +1068,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // The picker path starts a preview; an exact preview ID reads another bounded clause page.
     case 'previewReviewGuidelineVersion': {
-      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage', 'formatConfirmed'], tentativeId);
+      if (input.formatConfirmed !== undefined && (input.formatConfirmed !== true || Object.hasOwn(input, 'previewId'))) throw new ProtocolError(tentativeId);
       const validSource = Object.hasOwn(input, 'previewId')
         ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
           (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))
@@ -1086,14 +1117,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 构建相似索引 and 生成来源译文 (Issue #892): one item.
-    case 'buildMaterialVectors':
+    // 生成来源译文 (Issue #892): one item.
     case 'requestMaterialTranslation': {
       const input = requireInput(value.input, ['materialId'], tentativeId);
       if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 相似段落检索 (Issue #892): one item, the editor's text within its bound, and how many candidates.
+    // 相似段落检索 (Issue #892): one item, the editor's text within the lexical ranker's bound, and how many candidates (R5-F2c).
     case 'queryMaterialVectors': {
       const input = requireInput(value.input, ['materialId', 'text', 'k'], tentativeId);
       if (!validUuid(input.materialId) || !isBoundedString(input.text, MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS) ||
@@ -1138,6 +1168,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectEvidenceWorkspace': {
       const input = requireInput(value.input, ['bookId', 'resultId', 'sourcesAfter'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.resultId) || !(input.sourcesAfter === null || isSafeInteger(input.sourcesAfter, 0))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 在浏览器中打开 (Issue #1641): exactly one identity form — a result's source card, or a retained source — and nothing else.
+    case 'inspectSourceAddress': {
+      const byEvidence = isRecord(value.input) && Object.hasOwn(value.input, 'evidenceId');
+      const input = requireInput(value.input, byEvidence ? ['bookId', 'evidenceId'] : ['bookId', 'resultId', 'cardId'], tentativeId);
+      if (!validUuid(input.bookId) || !(byEvidence ? validUuid(input.evidenceId)
+        : validUuid(input.resultId) && typeof input.cardId === 'string' && /^src_[0-9a-f]{20}$/u.test(input.cardId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'recordVerificationReviewDecision': {
@@ -1606,8 +1644,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
         if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
       } else {
-        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
-        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation', 'offerDigest'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || typeof input.offerDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.offerDigest) || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
         if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
             !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
       }
@@ -1634,6 +1672,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = value.op === 'acceptEditorialMemory' ? requireInput(value.input, ['itemId', 'expectedVersionId', 'actionId'], tentativeId)
         : requireInputWithOptional(value.input, ['itemId', 'expectedVersionId'], ['actionId'], tentativeId);
       if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId) || input.actionId !== undefined && !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'reenableReviewPreference':
+    case 'deleteReviewPreference': {
+      const input = requireInput(value.input, ['itemId', 'expectedRevisionId', 'actionId'], tentativeId);
+      if (!isBoundedString(input.itemId, 180) || !isBoundedString(input.expectedRevisionId, 180) || !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectHouseReviewPreference':
@@ -1836,13 +1880,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen'] : [])], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen', 'relaunchOf', 'planEdits'] : [])], tentativeId);
+      if (input.relaunchOf !== undefined && !validTaskRelaunchSource(input.relaunchOf)) throw new ProtocolError(tentativeId);
       if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
-      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'when-online') ||
+      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'idle' && input.startWhen !== 'when-online') ||
           (input.evidenceAssuranceLevel !== undefined && (!EVIDENCE_ASSURANCE_LEVELS.some(level => level === input.evidenceAssuranceLevel) ||
             !Array.isArray(input.categoryIds) || !input.categoryIds.includes('factual-review'))))) throw new ProtocolError(tentativeId);
+      if (input.planEdits !== undefined && (!isRecord(input.planEdits) ||
+          !Object.keys(input.planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling'].includes(key)) ||
+          canonicalPlanEdits({ removedSteps: input.planEdits.removedSteps, disallowedAdaptations: input.planEdits.disallowedAdaptations,
+            askFirstAdaptations: input.planEdits.askFirstAdaptations, runBudgetCeiling: input.planEdits.runBudgetCeiling }) === null)) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);
@@ -2252,7 +2301,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'resolveAcknowledgedManuscriptReimportReplay':
     case 'commitManuscriptReimport': {
-      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], ['acceptDegradation'], tentativeId);
+      if (input.acceptDegradation !== undefined && typeof input.acceptDegradation !== 'boolean') throw new ProtocolError(tentativeId);
       if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
           !isSafeInteger(input.expectedDraftVersion, 1) ||
           !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
@@ -2428,6 +2478,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (
         !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'findPendingMark': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'from', 'direction', 'categories', 'models'], tentativeId);
+      const from = input.from;
+      if (
+        !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+        !isRecord(from) || !hasExactKeys(from, ['blockId', 'grapheme', 'markId']) ||
+        !isBoundedString(from.blockId, 28) || !MARK_BLOCK_PATTERN.test(from.blockId) || !isSafeInteger(from.grapheme, -1) ||
+        !(from.markId === null || (isBoundedString(from.markId, 36) && UUID_PATTERN.test(from.markId))) ||
+        (input.direction !== 'next' && input.direction !== 'previous') ||
+        !Array.isArray(input.categories) || input.categories.length > 16 ||
+        !input.categories.every((key) => typeof key === 'string' && Object.hasOwn(EDITORIAL_MARK_CATEGORIES, key)) ||
+        !Array.isArray(input.models) || input.models.length > 64 || !input.models.every((model) => isBoundedString(model, 256))
       ) {
         throw new ProtocolError(tentativeId);
       }
@@ -2627,13 +2695,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'getManuscriptWindowAt': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'target'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['manuscriptId', 'branchId', 'target'], ['marks'], tentativeId);
+      const marks = input.marks;
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
-        !isRecord(input.target)
+        !isRecord(input.target) ||
+        // A later page of the window's marks (Issue #1604): an ordinal of the window's order and the digest the window named.
+        (marks !== undefined && !(isRecord(marks) && hasExactKeys(marks, ['afterOrdinal', 'digest']) && isSafeInteger(marks.afterOrdinal) &&
+          isBoundedString(marks.digest, 64) && HEX_DIGEST_PATTERN.test(marks.digest)))
       ) {
         throw new ProtocolError(tentativeId);
       }
@@ -2775,6 +2847,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDeliverables': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'listBookVersions':
+    case 'viewBookVersion':
+    case 'restoreBookVersion': {
+      const keys = op === 'restoreBookVersion' ? ['revisionId', 'expectedBase', 'expectedDigest'] : op === 'viewBookVersion' ? ['revisionId', 'cursor'] : ['offset'];
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', ...keys], tentativeId);
+      if (![input.bookId, input.manuscriptId, input.branchId].every(validUuid) || (op !== 'listBookVersions' && !validUuid(input.revisionId)) ||
+        (op === 'restoreBookVersion' && (!validUuid(input.expectedBase) || typeof input.expectedDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.expectedDigest))) ||
+        (op === 'listBookVersions' && !isSafeInteger(input.offset)) || (op === 'viewBookVersion' && !(input.cursor === null || isBoundedString(input.cursor, 1024)))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'designatePublicationVersion': {
@@ -3212,15 +3294,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'undoManuscript':
     case 'redoManuscript': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], tentativeId);
+      // `expectedStepId` (Issue #1654): the review page's 撤销本批应用 names the batch step it means.
+      const input = requireInputWithOptional(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], value.op === 'undoManuscript' ? ['expectedStepId'] : [], tentativeId);
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
         !isBoundedString(input.expectedWorkingDigest, 64) ||
-        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest)
+        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest) ||
+        (Object.hasOwn(input, 'expectedStepId') && !(isBoundedString(input.expectedStepId, 36) && UUID_PATTERN.test(input.expectedStepId as string)))
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectEditorHistory': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) || !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId)) {
         throw new ProtocolError(tentativeId);
       }
       break;

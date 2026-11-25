@@ -44,27 +44,34 @@ export function pointerFailureDetail(value) {
   return JSON.stringify(detail).length <= 4096 ? detail : null;
 }
 
-async function capturePointerFailure(renderer, selector) {
+export async function capturePointerFailure(renderer, selector, { includeTargetAncestors = false } = {}) {
   try {
-    const detail = await renderer.evaluate(`(async () => {const describe=${pointerElementDescription.toString()},frames=[],coveringAncestors=[];let target=null;for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect(),x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;target=describe(node);const hit=r?document.elementFromPoint(x,y):null;if(index===0)for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});if(ancestor.hasAttribute?.('data-screen'))break;}frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)});}return {viewport:[innerWidth,innerHeight],target,frames,coveringAncestors};})()`);
+    const detail = await renderer.evaluate(`(async () => {const describe=${pointerElementDescription.toString()},frames=[],coveringAncestors=[];let target=null;for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect(),x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;target=describe(node);const hit=r?document.elementFromPoint(x,y):null;if(index===0){const ancestors=[],append=(start)=>{for(let ancestor=start;ancestor&&ancestors.length<12;ancestor=ancestor.parentElement){if(!ancestors.includes(ancestor))ancestors.push(ancestor);if(ancestor.hasAttribute?.('data-screen'))break;}};if(${includeTargetAncestors})append(node?.parentElement);append(hit?.parentElement);for(const ancestor of ancestors){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}}frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)});}return {viewport:[innerWidth,innerHeight],target,frames,coveringAncestors};})()`);
     return pointerFailureDetail(detail) ?? { unavailable: true };
   } catch { return { unavailable: true }; }
 }
 
 /** Real pointer interaction: wait for layout motion, then require a visible, topmost target. */
-export async function pointerClick(renderer, waitFor, selector, name, { rest = false } = {}) {
+export async function pointerClick(renderer, waitFor, selector, name, { rest = false, scroll = true } = {}) {
   try {
     const query = JSON.stringify(selector);
-    await renderer.evaluate(`document.querySelector(${query})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);
-    const pointExpression = `(() => {const node=document.querySelector(${query});if(!node)return null;node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    const reposition = scroll ? "node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});" : '';
+    if (scroll) await renderer.evaluate(`document.querySelector(${query})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);
+    const measure = (move) => `(() => {const node=document.querySelector(${query});if(!node)return null;${move}const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
       return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(x,y))?{x,y,width:r.width,height:r.height}:null;})()`;
+    const pointExpression = measure(reposition);
     // A closed drawer changes the body's padding over several frames (#1490). A hit-test during
     // that transition can be true while its coordinates already belong to the next moving frame.
     const stableExpression = `new Promise(resolve=>requestAnimationFrame(()=>{const before=${pointExpression};
       requestAnimationFrame(()=>{const after=${pointExpression};resolve(before!==null&&after!==null&&
         before.x===after.x&&before.y===after.y&&before.width===after.width&&before.height===after.height);});}))`;
     await waitFor(renderer, stableExpression, `${name}-pointer-target`);
-    const ready = await renderer.evaluate(pointExpression);
+    // The press point is read from the page as it rests, never by scrolling it once more. A control in a sticky bar that is stuck
+    // to the window's edge keeps its place on screen while each scripted scroll moves the page one step, so it passes the check
+    // above; the step that brings the bar to its own place moves the control at once, while a panel the page places against the
+    // bar follows only on the scroll event of the next frame — measured in that instant the panel covers the control (J-11
+    // `evaluation-rewrite-run`, 选项 under the open 先看计划 panel). No editor scrolls and presses within one frame.
+    const ready = await renderer.evaluate(measure(''));
     if (ready === null) throw new Error(`${name}-target-moved-before-press`);
     let point = { x: ready.x, y: ready.y };
     if (rest) {
@@ -93,26 +100,70 @@ export async function pointerClick(renderer, waitFor, selector, name, { rest = f
   }
 }
 
-export async function chooseDispatch(renderer, waitFor, selector, name, { model = 'next', effort = 'first', reset = false } = {}) {
+/** 思考强度's ordinary words, by the value a request carries (`off`: the request carries none). */
+export const EFFORT_WORDS = Object.freeze({ off: '模型默认', none: '不启用思考', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '更高', max: '最高' });
+export const EFFORT_UNKNOWN_SENTENCE = '还没有查到这个模型的可选强度。';
+export const EFFORT_STALE_SENTENCE = '之前选的强度现在不可用，请重新选择。';
+
+/**
+ * A frozen `名称@档位` label as the page shows it now: ordinary mode says the level in the list's word (`名称@高`), developer mode
+ * keeps the record's own level name (`名称@high`). The record itself always holds the level name.
+ */
+export async function frozenModelWords(renderer, label) {
+  const ordinary = (await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='false'`)) === true;
+  const at = label.lastIndexOf('@'), level = at < 0 ? '' : label.slice(at + 1);
+  return ordinary && level !== 'off' && Object.hasOwn(EFFORT_WORDS, level) ? `${label.slice(0, at)}@${EFFORT_WORDS[level]}` : label;
+}
+
+/**
+ * What the engine shows of an open chooser's 思考强度: the list, the value chosen, the words on its trigger, and the sentence under
+ * it with whether it lies inside the window and on top. Geometry comes from `innerWidth` / `innerHeight`; nothing is scrolled.
+ */
+export async function dispatchEffortFacts(renderer, selector) {
+  return renderer.evaluate(`(() => {const root=document.querySelector(${JSON.stringify(selector)}),panel=root?.querySelector('.dispatch-chooser-panel'),select=root?.querySelector('select[aria-label="本次任务的思考强度"]');
+    if(!panel||!select)return null;
+    const inside=(node)=>{const r=node.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&panel.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));};
+    const trigger=select.nextElementSibling,note=panel.querySelector('.dispatch-chooser-effort-note'),sentence=note?.querySelector('[data-effort-note="reason"],[data-effort-note="stale"]');
+    const shown=sentence instanceof HTMLElement&&getComputedStyle(note).display!=='none';
+    return {values:Array.from(select.options).map(option=>option.value),labels:Array.from(select.options).map(option=>option.textContent),selected:select.value,state:select.dataset.effortState??null,
+      shown:trigger?.matches('.ui-select-trigger')?trigger.firstElementChild.textContent:null,triggerInside:trigger instanceof HTMLElement&&inside(trigger),
+      note:shown?sentence.textContent:'',noteKind:shown?sentence.dataset.effortNote:null,noteInside:shown?inside(sentence):null,noteDisplay:note instanceof HTMLElement?getComputedStyle(note).display:null,typed:panel.querySelector('input:not(.ui-select-filter)')!==null,window:[innerWidth,innerHeight]};})()`);
+}
+
+/**
+ * Chooses a Task's model and 思考强度 with the real pointer. `effort: 'first'` takes the model's first own level, and leaves 模型默认
+ * where the model offers no level (0.8.0 stage one); a named value or word must be offered. Before the chooser closes, its 思考强度
+ * is read at engine level and checked: 模型默认 first, no typed value, its trigger in the window, and a list of 模型默认 alone always
+ * with its sentence in view. `seen` receives those facts for the Journey's own assertions.
+ */
+export async function chooseDispatch(renderer, waitFor, selector, name, { model = 'next', effort = 'first', reset = false, press = pointerClick, excludeModel = null, seen = null } = {}) {
   const root = JSON.stringify(selector);
-  if (!(await renderer.evaluate(`document.querySelector(${root})?.open===true`))) await pointerClick(renderer, waitFor, `${selector} > summary`, `${name}-open`);
+  if (!(await renderer.evaluate(`document.querySelector(${root})?.open===true`))) await press(renderer, waitFor, `${selector} > summary`, `${name}-open`);
   await waitFor(renderer, `(() => {const panel=document.querySelector(${root})?.querySelector('.dispatch-chooser-panel');if(!panel)return false;
     const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&panel.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));})()`, `${name}-panel-visible`);
   const pick = async (label, choice) => {
     const select = `${selector} select[aria-label=${JSON.stringify(label)}]`;
-    const index = await renderer.evaluate(`(() => {const select=document.querySelector(${JSON.stringify(select)}),options=Array.from(select.options);
-      return ${JSON.stringify(choice)}==='next'?options.findIndex((option,index)=>!option.disabled&&index!==select.selectedIndex):${JSON.stringify(choice)}==='first'?options.findIndex(option=>!option.disabled&&option.value!=='off'):options.findIndex(option=>option.textContent===${JSON.stringify(choice)}||option.value===${JSON.stringify(choice)});})()`);
+    const index = await renderer.evaluate(`(() => {const select=document.querySelector(${JSON.stringify(select)}),options=Array.from(select.options),plain=(option)=>option.textContent.replace(/^★ /u,'');
+      return ${JSON.stringify(choice)}==='next'?options.findIndex((option,index)=>!option.disabled&&index!==select.selectedIndex&&(${JSON.stringify(label)}!=='本次任务的模型'||plain(option)!==${JSON.stringify(excludeModel)})):${JSON.stringify(choice)}==='first'?options.findIndex(option=>!option.disabled&&option.value!=='off'):options.findIndex(option=>plain(option)===${JSON.stringify(choice)}||option.value===${JSON.stringify(choice)});})()`);
     if (index < 0) throw new Error(`${name}-choice-unavailable/${label}`);
-    await pointerClick(renderer, waitFor, `${select} + .ui-select-trigger`, `${name}-${label}-select`);
-    await pointerClick(renderer, waitFor, `${select} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-${label}-option`);
+    await press(renderer, waitFor, `${select} + .ui-select-trigger`, `${name}-${label}-select`);
+    await press(renderer, waitFor, `${select} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-${label}-option`);
     await waitFor(renderer, `(() => {const sheet=document.querySelector(${root})?.closest('dialog.review-sheet'),progress=sheet?.querySelector('.review-preparation-progress');return !progress||progress.hidden;})()`, `${name}-${label}-choice-settled`);
   };
-  if (reset) await pointerClick(renderer, waitFor, `${selector} .dispatch-chooser-panel > button`, `${name}-reset`);
+  if (reset) await press(renderer, waitFor, `${selector} .dispatch-chooser-panel > button`, `${name}-reset`);
   else {
     await pick('本次任务的模型', model);
-    if (await renderer.evaluate(`!document.querySelector(${root}).querySelector('select[aria-label="本次任务的思考强度"]').closest('label').hidden`)) await pick('本次任务的思考强度', effort);
+    const levels = await renderer.evaluate(`Array.from(document.querySelector(${root}).querySelector('select[aria-label="本次任务的思考强度"]').options).filter(option=>option.value!=='off').length`);
+    if (effort !== 'first' || levels > 0) await pick('本次任务的思考强度', effort);
   }
+  await waitFor(renderer, `(() => {const panel=document.querySelector(${root})?.querySelector('.dispatch-chooser-panel');if(!panel)return false;
+    const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, `${name}-panel-settled`);
+  const facts = await dispatchEffortFacts(renderer, selector);
+  console.log(`DISPATCH_EFFORT/${name}/${JSON.stringify(facts === null ? null : { values: facts.values, selected: facts.selected, state: facts.state, noteKind: facts.noteKind, noteInside: facts.noteInside, triggerInside: facts.triggerInside, window: facts.window })}`);
+  if (facts === null || facts.values[0] !== 'off' || !facts.labels[0].startsWith(EFFORT_WORDS.off) || facts.values.includes('__other') || facts.typed || facts.triggerInside !== true ||
+      !facts.values.includes(facts.selected) || (facts.values.length === 1 && (facts.note === '' || facts.noteInside !== true))) throw new Error(`${name}-effort-list`);
+  if (seen !== null) await seen(facts);
   const label = await renderer.evaluate(`document.querySelector(${root}).querySelector('summary').textContent`);
-  await pointerClick(renderer, waitFor, `${selector} > summary`, `${name}-close`);
+  await press(renderer, waitFor, `${selector} > summary`, `${name}-close`);
   return label;
 }

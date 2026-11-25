@@ -1,0 +1,525 @@
+{
+ "search_backend_connections": [
+  {
+   "backend_id": "search-tinyfish",
+   "credential_reference": null,
+   "credential_operation_state": "missing",
+   "selected": 1,
+   "selected_at": "<instant>",
+   "always_use_selected": 0
+  },
+  {
+   "backend_id": "search-deepseek",
+   "credential_reference": null,
+   "credential_operation_state": "missing",
+   "selected": null,
+   "selected_at": "<instant>",
+   "always_use_selected": 0
+  },
+  {
+   "backend_id": "search-brave",
+   "credential_reference": null,
+   "credential_operation_state": "missing",
+   "selected": null,
+   "selected_at": "<instant>",
+   "always_use_selected": 0
+  },
+  {
+   "backend_id": "search-parallel",
+   "credential_reference": null,
+   "credential_operation_state": "missing",
+   "selected": null,
+   "selected_at": "<instant>",
+   "always_use_selected": 0
+  },
+  {
+   "backend_id": "search-bochaai",
+   "credential_reference": null,
+   "credential_operation_state": "missing",
+   "selected": null,
+   "selected_at": "<instant>",
+   "always_use_selected": 0
+  }
+ ],
+ "procedure_definitions": [
+  {
+   "procedure_id": "ai7-procedure/review-typos-and-usage",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-typos-and-usage\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-style-and-format",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-style-and-format\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-plot-consistency",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-plot-consistency\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-factual-review",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-factual-review\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-academic-integrity",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-academic-integrity\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-publication-risk",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-publication-risk\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-literary-expression",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-literary-expression\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-series-consistency",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-series-consistency\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-cross-deliverable-consistency",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-cross-deliverable-consistency\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/baseline-analysis",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/baseline-analysis\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/local-text-check",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/local-text-check\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/factual-claim-check",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/factual-claim-check\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/evaluation",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/evaluation\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/readers-report",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/readers-report\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/evaluation-rewrite",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/evaluation-rewrite\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/writing",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/writing\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/review-run-synthesis",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/review-run-synthesis\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "procedure_id": "ai7-procedure/full-review",
+   "pre_installed": 1,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"preInstalled\":true,\"procedureId\":\"ai7-procedure/full-review\"}",
+   "sha256": "<sha256 of canonical_json>"
+  }
+ ],
+ "procedure_definition_versions": [
+  {
+   "version_id": "ai7-procedure/review-typos-and-usage@1",
+   "procedure_id": "ai7-procedure/review-typos-and-usage",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-typos-and-usage\",\"outputKinds\":[\"change-suggestion\"],\"role\":\"找出错别字、语病与不规范的数字、标点和字形，逐条给出修改建议；可以一次确认、批量应用。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"错别字与规范用语审阅工序\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"4be7d8ca9fbfc8b312fc163e9d1ee57b53372366adb576207ce6ee31741e4e5d\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-typos-and-usage\",\"version\":1,\"versionId\":\"ai7-procedure/review-typos-and-usage@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-style-and-format@1",
+   "procedure_id": "ai7-procedure/review-style-and-format",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-style-and-format\",\"outputKinds\":[\"annotation\"],\"role\":\"检查标题层级、序号、数字与时间写法、引文与专名的呈现是否全书一致，以批注指出。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"体例与格式审阅工序\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"c18a236a7d304876fd229cf225bdbbb2812206ad248b7a0b7b07a3e718419545\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-style-and-format\",\"version\":1,\"versionId\":\"ai7-procedure/review-style-and-format@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-plot-consistency@1",
+   "procedure_id": "ai7-procedure/review-plot-consistency",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-plot-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"把基线分析里前后不一致的线索和未决事项变成稿件上的批注；不调用模型。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"baseline-leads\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"线索转批注\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"20aee9cffceabb4f4b017b6dc38c2716125157fa5b87b47b3eba18e4d9a5be50\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-plot-consistency\",\"version\":1,\"versionId\":\"ai7-procedure/review-plot-consistency@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-factual-review@1",
+   "procedure_id": "ai7-procedure/review-factual-review",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-factual-review\",\"outputKinds\":[\"annotation\"],\"role\":\"逐段列出可以核查的事实断言并精确定位原文；外部核查接入前，每条都标为「未外部复核」。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.factual-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":true},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.factual-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"断言列举与引文定位\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"eea930f9f8b889903cef79e842adb975247e24ba2f6179fd4ce5d10bfbe2769d\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-factual-review\",\"version\":1,\"versionId\":\"ai7-procedure/review-factual-review@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-academic-integrity@1",
+   "procedure_id": "ai7-procedure/review-academic-integrity",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-academic-integrity\",\"outputKinds\":[\"annotation\"],\"role\":\"指出引用标注的缺漏与疑似未注明来源的表述；只标「需人工复核的风险点」，不作结论。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":true},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"引用风险点标注\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"94c66e71b769be61fc6538326927813d53a4b8cd40bfd231f14c5a8d9d387b8d\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-academic-integrity\",\"version\":1,\"versionId\":\"ai7-procedure/review-academic-integrity@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-publication-risk@1",
+   "procedure_id": "ai7-procedure/review-publication-risk",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-publication-risk\",\"outputKinds\":[\"annotation\"],\"role\":\"指出需要按出版单位制度人工复核的内容；只标「需人工复核的风险点」，不作结论。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"出版风险点标注\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"717e6ae02ad31623ed13fb2118444288191e08f90b662d80a5e8b5b6700a7554\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-publication-risk\",\"version\":1,\"versionId\":\"ai7-procedure/review-publication-risk@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-literary-expression@1",
+   "procedure_id": "ai7-procedure/review-literary-expression",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-literary-expression\",\"outputKinds\":[\"change-suggestion\"],\"role\":\"对重复、生硬与含混的表达给出改写建议；逐条预览、逐条决定，不批量应用。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"文学性与表达改进工序\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"5a985dffd1604301a652c878aff0225e48a67cd6acd53650d94b64822b1a70cf\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-literary-expression\",\"version\":1,\"versionId\":\"ai7-procedure/review-literary-expression@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-series-consistency@1",
+   "procedure_id": "ai7-procedure/review-series-consistency",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-series-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"以书系知识为依据，检查跨书的人物、设定与时间线。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"书系一致性检查\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"56e09d79d3f792e6db7bae778b3b4c55883f9b74fd0fd7750a2aa544cf896454\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-series-consistency\",\"version\":1,\"versionId\":\"ai7-procedure/review-series-consistency@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-cross-deliverable-consistency@1",
+   "procedure_id": "ai7-procedure/review-cross-deliverable-consistency",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-cross-deliverable-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"检查稿件与它的编辑交付物之间说法是否一致。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"跨交付物一致性检查\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"450b0c6d3c1f6e2862009e85e71b46000144fa648ff2b4dfdabcad73e17e83e1\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-cross-deliverable-consistency\",\"version\":1,\"versionId\":\"ai7-procedure/review-cross-deliverable-consistency@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/baseline-analysis@1",
+   "procedure_id": "ai7-procedure/baseline-analysis",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/baseline-analysis\",\"outputKinds\":[\"record\"],\"role\":\"稿件分析结果集修订版（基线稿件分析契约 v1）\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\",\"cross-unit-results\"],\"outputTemplateId\":\"ai7.baseline-manuscript-analysis.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"基线分析\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"795dae717d0a8b23a971efac44bb777063452941b4d940c5ee98cbe7cbf5a1fd\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/baseline-analysis\",\"version\":1,\"versionId\":\"ai7-procedure/baseline-analysis@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-typos-and-usage@2",
+   "procedure_id": "ai7-procedure/review-typos-and-usage",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-typos-and-usage\",\"outputKinds\":[\"change-suggestion\"],\"role\":\"找出错别字、语病与不规范的数字、标点和字形，逐条给出修改建议；可以一次确认、批量应用。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"错别字与规范用语审阅工序\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "4be7d8ca9fbfc8b312fc163e9d1ee57b53372366adb576207ce6ee31741e4e5d",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"425942e4eb81fe6684b44fe00d95ff68f6a265429169413867f96132fc7e2b46\",\"previousDocumentDigest\":\"4be7d8ca9fbfc8b312fc163e9d1ee57b53372366adb576207ce6ee31741e4e5d\",\"procedureId\":\"ai7-procedure/review-typos-and-usage\",\"version\":2,\"versionId\":\"ai7-procedure/review-typos-and-usage@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-style-and-format@2",
+   "procedure_id": "ai7-procedure/review-style-and-format",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-style-and-format\",\"outputKinds\":[\"annotation\"],\"role\":\"检查标题层级、序号、数字与时间写法、引文与专名的呈现是否全书一致，以批注指出。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"体例与格式审阅工序\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "c18a236a7d304876fd229cf225bdbbb2812206ad248b7a0b7b07a3e718419545",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"f017819a7d4a9967f7a73de6a77a2bc052aebb438e1f78fedb27b10ebaa3a1f9\",\"previousDocumentDigest\":\"c18a236a7d304876fd229cf225bdbbb2812206ad248b7a0b7b07a3e718419545\",\"procedureId\":\"ai7-procedure/review-style-and-format\",\"version\":2,\"versionId\":\"ai7-procedure/review-style-and-format@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-academic-integrity@2",
+   "procedure_id": "ai7-procedure/review-academic-integrity",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-academic-integrity\",\"outputKinds\":[\"annotation\"],\"role\":\"指出引用标注的缺漏与疑似未注明来源的表述；只标「需人工复核的风险点」，不作结论。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":true},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"引用风险点标注\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "94c66e71b769be61fc6538326927813d53a4b8cd40bfd231f14c5a8d9d387b8d",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"dab622eca8a68d7784aa0cf25bd9649fe918f52f167e030a96ca4a1eee719213\",\"previousDocumentDigest\":\"94c66e71b769be61fc6538326927813d53a4b8cd40bfd231f14c5a8d9d387b8d\",\"procedureId\":\"ai7-procedure/review-academic-integrity\",\"version\":2,\"versionId\":\"ai7-procedure/review-academic-integrity@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-publication-risk@2",
+   "procedure_id": "ai7-procedure/review-publication-risk",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-publication-risk\",\"outputKinds\":[\"annotation\"],\"role\":\"指出需要按出版单位制度人工复核的内容；只标「需人工复核的风险点」，不作结论。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"出版风险点标注\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "717e6ae02ad31623ed13fb2118444288191e08f90b662d80a5e8b5b6700a7554",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"1db3aa18870ae8483132362b2a07c083c918654e386d34dcf24c3bc1b1212da6\",\"previousDocumentDigest\":\"717e6ae02ad31623ed13fb2118444288191e08f90b662d80a5e8b5b6700a7554\",\"procedureId\":\"ai7-procedure/review-publication-risk\",\"version\":2,\"versionId\":\"ai7-procedure/review-publication-risk@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-literary-expression@2",
+   "procedure_id": "ai7-procedure/review-literary-expression",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-literary-expression\",\"outputKinds\":[\"change-suggestion\"],\"role\":\"对重复、生硬与含混的表达给出改写建议；逐条预览、逐条决定，不批量应用。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"文学性与表达改进工序\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "5a985dffd1604301a652c878aff0225e48a67cd6acd53650d94b64822b1a70cf",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"fe17d89cdcab3c2d2b0de9e22b89200bf9f556ebb54454e81dd853f85bdaf6ed\",\"previousDocumentDigest\":\"5a985dffd1604301a652c878aff0225e48a67cd6acd53650d94b64822b1a70cf\",\"procedureId\":\"ai7-procedure/review-literary-expression\",\"version\":2,\"versionId\":\"ai7-procedure/review-literary-expression@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-series-consistency@2",
+   "procedure_id": "ai7-procedure/review-series-consistency",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-series-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"以书系知识为依据，检查跨书的人物、设定与时间线。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"书系一致性检查\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "56e09d79d3f792e6db7bae778b3b4c55883f9b74fd0fd7750a2aa544cf896454",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"3939d721d439ff4f7e9c0ebacc0a38282870f232c73ffcd490bd53290b433d92\",\"previousDocumentDigest\":\"56e09d79d3f792e6db7bae778b3b4c55883f9b74fd0fd7750a2aa544cf896454\",\"procedureId\":\"ai7-procedure/review-series-consistency\",\"version\":2,\"versionId\":\"ai7-procedure/review-series-consistency@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-cross-deliverable-consistency@2",
+   "procedure_id": "ai7-procedure/review-cross-deliverable-consistency",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-cross-deliverable-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"检查稿件与它的编辑交付物之间说法是否一致。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"跨交付物一致性检查\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "450b0c6d3c1f6e2862009e85e71b46000144fa648ff2b4dfdabcad73e17e83e1",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"49a4ca7bfd17b16d940a05b62fef2b5f57348e33fa27cce4b9130194b74b0813\",\"previousDocumentDigest\":\"450b0c6d3c1f6e2862009e85e71b46000144fa648ff2b4dfdabcad73e17e83e1\",\"procedureId\":\"ai7-procedure/review-cross-deliverable-consistency\",\"version\":2,\"versionId\":\"ai7-procedure/review-cross-deliverable-consistency@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/local-text-check@1",
+   "procedure_id": "ai7-procedure/local-text-check",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/local-text-check\",\"outputKinds\":[\"annotation\"],\"role\":\"以五项有限规则生成供编辑复核的精确批注\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"frozen-local-plan\"],\"outputTemplateId\":\"ai7.review.local-result/1\",\"parallelism\":1,\"stageType\":\"deterministic-check\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"本地文字检查\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"460087c422f89fe6b63c41887302946062a7222df43214558bb6f52b48409fbe\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/local-text-check\",\"version\":1,\"versionId\":\"ai7-procedure/local-text-check@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/local-text-check@2",
+   "procedure_id": "ai7-procedure/local-text-check",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/local-text-check\",\"outputKinds\":[\"annotation\"],\"role\":\"以五项有限规则及编辑明确选定的本社字面词表生成供编辑判断的精确批注\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"frozen-local-plan\"],\"outputTemplateId\":\"ai7.review.local-result/2\",\"parallelism\":1,\"stageType\":\"deterministic-check\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"本地文字检查\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "460087c422f89fe6b63c41887302946062a7222df43214558bb6f52b48409fbe",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"a6ef9cdc6c2895e42a7d7bb0a8dd225226c0ba32b721d9ae4f2e11b8545d1822\",\"previousDocumentDigest\":\"460087c422f89fe6b63c41887302946062a7222df43214558bb6f52b48409fbe\",\"procedureId\":\"ai7-procedure/local-text-check\",\"version\":2,\"versionId\":\"ai7-procedure/local-text-check@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/local-text-check@3",
+   "procedure_id": "ai7-procedure/local-text-check",
+   "version": 3,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/local-text-check\",\"outputKinds\":[\"annotation\",\"change-suggestion\"],\"role\":\"离线检查标点、数字、规范字形、异形词、本社词表与本书术语；机械修正由编辑采纳后应用\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"frozen-local-plan\"],\"outputTemplateId\":\"ai7.review.local-result/3\",\"parallelism\":1,\"stageType\":\"deterministic-check\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"确定性检查\",\"version\":3}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "a6ef9cdc6c2895e42a7d7bb0a8dd225226c0ba32b721d9ae4f2e11b8545d1822",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"210efb4006862da98aaa0f6271beaceaba40c513bed6bcd71522828f82b27d96\",\"previousDocumentDigest\":\"a6ef9cdc6c2895e42a7d7bb0a8dd225226c0ba32b721d9ae4f2e11b8545d1822\",\"procedureId\":\"ai7-procedure/local-text-check\",\"version\":3,\"versionId\":\"ai7-procedure/local-text-check@3\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-style-and-format@3",
+   "procedure_id": "ai7-procedure/review-style-and-format",
+   "version": 3,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-style-and-format\",\"outputKinds\":[\"annotation\"],\"role\":\"检查标题层级、序号、数字与时间写法、引文与专名的呈现是否全书一致，以批注指出。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-input/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"exact-occurrence-groups\",\"pinned-baseline-leads\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-result/1\",\"parallelism\":1,\"stageType\":\"cross-chapter-consistency\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"体例与格式与跨章一致性\",\"version\":3}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "f017819a7d4a9967f7a73de6a77a2bc052aebb438e1f78fedb27b10ebaa3a1f9",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"d78c4bf6473bd2e60d56f829be8c28742848afea3dc053ded1fd596260fac0ad\",\"previousDocumentDigest\":\"f017819a7d4a9967f7a73de6a77a2bc052aebb438e1f78fedb27b10ebaa3a1f9\",\"procedureId\":\"ai7-procedure/review-style-and-format\",\"version\":3,\"versionId\":\"ai7-procedure/review-style-and-format@3\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-plot-consistency@2",
+   "procedure_id": "ai7-procedure/review-plot-consistency",
+   "version": 2,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-plot-consistency\",\"outputKinds\":[\"annotation\"],\"role\":\"逐单元审阅并结合基线线索检查人物、年代、年龄、地点、机构与时间线的跨章一致性，以精确批注提示编辑核对。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-input/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"exact-occurrence-groups\",\"pinned-baseline-leads\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-result/1\",\"parallelism\":1,\"stageType\":\"cross-chapter-consistency\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"情节逻辑与前后一致与跨章一致性\",\"version\":2}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": "20aee9cffceabb4f4b017b6dc38c2716125157fa5b87b47b3eba18e4d9a5be50",
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"8c4715df0364ba248bd05fb63f48fca8e329153fea7b94327b0bc48670a69c5e\",\"previousDocumentDigest\":\"20aee9cffceabb4f4b017b6dc38c2716125157fa5b87b47b3eba18e4d9a5be50\",\"procedureId\":\"ai7-procedure/review-plot-consistency\",\"version\":2,\"versionId\":\"ai7-procedure/review-plot-consistency@2\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/factual-claim-check@1",
+   "procedure_id": "ai7-procedure/factual-claim-check",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/factual-claim-check\",\"outputKinds\":[\"annotation\"],\"role\":\"抽取精确断言，逐条联网取证，保留来源与未决结果\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.factual-claim-ledger/1\",\"parallelism\":1,\"stageType\":\"claim-extraction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"ai7.factual-claim-ledger/1\"],\"outputTemplateId\":\"ai7.factual-claim-verification-result/1\",\"parallelism\":1,\"stageType\":\"web-verification\",\"toolWhitelist\":[\"websearch\",\"webfetch\"],\"web\":true}],\"title\":\"事实核查\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"0ac6d24e2fb520f879a89f9f63f0f5822482a240ac56c14c01e7f5d4f63d05d3\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/factual-claim-check\",\"version\":1,\"versionId\":\"ai7-procedure/factual-claim-check@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/evaluation@1",
+   "procedure_id": "ai7-procedure/evaluation",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/evaluation\",\"outputKinds\":[\"record\"],\"role\":\"AI7 初评\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.evaluation.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.evaluation.synthesis-result/2\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\",\"cross-unit-results\"],\"outputTemplateId\":\"ai7.evaluation.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"AI7 初评\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"0d327c9c7c3ca143208c57281c3c2a8e366f6ce87d50d86559d59e42e6f4df19\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/evaluation\",\"version\":1,\"versionId\":\"ai7-procedure/evaluation@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/readers-report@1",
+   "procedure_id": "ai7-procedure/readers-report",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/readers-report\",\"outputKinds\":[\"document\"],\"role\":\"审稿意见\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.readers-report.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.readers-report.synthesis-result/1\",\"parallelism\":1,\"stageType\":\"drafting\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\",\"cross-unit-results\"],\"outputTemplateId\":\"ai7.readers-report.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"审稿意见\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"832520e88cd2125ac3f8542593c4b03bb0851b69bc6b86d42ce05459d84befad\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/readers-report\",\"version\":1,\"versionId\":\"ai7-procedure/readers-report@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/evaluation-rewrite@1",
+   "procedure_id": "ai7-procedure/evaluation-rewrite",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/evaluation-rewrite\",\"outputKinds\":[\"document\"],\"role\":\"按我的评分重写评语\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.evaluation-rewrite.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.evaluation-rewrite.synthesis-result/1\",\"parallelism\":1,\"stageType\":\"drafting\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\",\"cross-unit-results\"],\"outputTemplateId\":\"ai7.evaluation-rewrite.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"按我的评分重写评语\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"8d26c08434b1993d994f4a9e5591eaa1b3181acae846408bfebed26f3b694034\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/evaluation-rewrite\",\"version\":1,\"versionId\":\"ai7-procedure/evaluation-rewrite@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/writing@1",
+   "procedure_id": "ai7-procedure/writing",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/writing\",\"outputKinds\":[\"document\"],\"role\":\"写作任务\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.writing.unit-result/1\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.writing.synthesis-result/1\",\"parallelism\":1,\"stageType\":\"drafting\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\",\"cross-unit-results\"],\"outputTemplateId\":\"ai7.writing.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"写作任务\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"6ba4d318a4a18c9c376ca5ea6d6396475c09239e26e922c95618196bf9f945a6\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/writing\",\"version\":1,\"versionId\":\"ai7-procedure/writing@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/review-run-synthesis@1",
+   "procedure_id": "ai7-procedure/review-run-synthesis",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"\",\"id\":\"ai7-procedure/review-run-synthesis\",\"outputKinds\":[\"record\"],\"role\":\"统合各章已经形成的发现，解释共性问题与全书脉络，保留逐条发现供编辑处理。\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":1,\"exemptionRules\":[],\"inputs\":[\"review-findings\",\"baseline-chapter-synopses\"],\"outputTemplateId\":\"ai7.review.run-synthesis-result/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"全书审阅统合总结\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"a69a03c43d43fea0f5a65be28b773b6cd36344488d3c6a2f16b65a6b04efaa27\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/review-run-synthesis\",\"version\":1,\"versionId\":\"ai7-procedure/review-run-synthesis@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  },
+  {
+   "version_id": "ai7-procedure/full-review@1",
+   "procedure_id": "ai7-procedure/full-review",
+   "version": 1,
+   "document_json": "{\"editorInstruction\":\"这是一次全文审校中的一个方面；只报告本方面的问题，每条都须精确引用原文。\",\"id\":\"ai7-procedure/full-review\",\"members\":[{\"categoryId\":\"local-text-check\",\"digest\":\"210efb4006862da98aaa0f6271beaceaba40c513bed6bcd71522828f82b27d96\",\"procedureId\":\"ai7-procedure/local-text-check\",\"stageCount\":1,\"version\":3},{\"categoryId\":\"typos-and-usage\",\"digest\":\"425942e4eb81fe6684b44fe00d95ff68f6a265429169413867f96132fc7e2b46\",\"procedureId\":\"ai7-procedure/review-typos-and-usage\",\"stageCount\":2,\"version\":2},{\"categoryId\":\"style-and-format\",\"digest\":\"d78c4bf6473bd2e60d56f829be8c28742848afea3dc053ded1fd596260fac0ad\",\"procedureId\":\"ai7-procedure/review-style-and-format\",\"stageCount\":4,\"version\":3},{\"categoryId\":\"plot-consistency\",\"digest\":\"8c4715df0364ba248bd05fb63f48fca8e329153fea7b94327b0bc48670a69c5e\",\"procedureId\":\"ai7-procedure/review-plot-consistency\",\"stageCount\":4,\"version\":2},{\"categoryId\":\"factual-review\",\"digest\":\"0ac6d24e2fb520f879a89f9f63f0f5822482a240ac56c14c01e7f5d4f63d05d3\",\"procedureId\":\"ai7-procedure/factual-claim-check\",\"stageCount\":2,\"version\":1}],\"outputKinds\":[\"change-suggestion\",\"annotation\"],\"role\":\"按错别字与规范用语、文风与格式、跨章一致性、事实性断言四个方面依次审校全书，结果以精确定位的卡片交编辑逐条决定\",\"schema\":\"ai7.procedure-definition/2\",\"stages\":[{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"frozen-local-plan\"],\"outputTemplateId\":\"ai7.review.local-result/3\",\"parallelism\":1,\"stageType\":\"deterministic-check\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.15,\"exemptionRules\":[\"引文、古诗文和作者有意保留的旧式写法不按错别字处理，确属误植时才指出。\",\"人物对白中的口语、方言和省略句不算语病。\"],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.15,\"exemptionRules\":[\"作者有意的短句、省略主语和文白夹杂不算体例或格式问题。\"],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-input/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.1,\"exemptionRules\":[],\"inputs\":[\"exact-occurrence-groups\",\"pinned-baseline-leads\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-result/1\",\"parallelism\":1,\"stageType\":\"cross-chapter-consistency\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.15,\"exemptionRules\":[],\"inputs\":[\"manuscript-scope\",\"category-guidelines\"],\"outputTemplateId\":\"ai7.editorial-review.unit-result/2\",\"parallelism\":1,\"stageType\":\"chunked-review\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-input/1\",\"parallelism\":1,\"stageType\":\"cross-unit-reduction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.1,\"exemptionRules\":[\"叙述者或人物记忆中有意的前后不一不作错误处理，只提示编辑核对。\"],\"inputs\":[\"exact-occurrence-groups\",\"pinned-baseline-leads\"],\"outputTemplateId\":\"ai7.editorial-review.cross-chapter-result/1\",\"parallelism\":1,\"stageType\":\"cross-chapter-consistency\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"unit-results\"],\"outputTemplateId\":\"ai7.editorial-review.result-set-revision/1\",\"parallelism\":1,\"stageType\":\"synthesis\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.15,\"exemptionRules\":[\"虚构情节中的人物与事件不作为待核查的事实断言；只抽取涉及真实历史、地理、科学与引语的断言。\"],\"inputs\":[\"manuscript-scope\"],\"outputTemplateId\":\"ai7.factual-claim-ledger/1\",\"parallelism\":1,\"stageType\":\"claim-extraction\",\"toolWhitelist\":[],\"web\":false},{\"budgetShare\":0.2,\"exemptionRules\":[],\"inputs\":[\"ai7.factual-claim-ledger/1\"],\"outputTemplateId\":\"ai7.factual-claim-verification-result/1\",\"parallelism\":1,\"stageType\":\"web-verification\",\"toolWhitelist\":[\"websearch\",\"webfetch\"],\"web\":true},{\"budgetShare\":0,\"exemptionRules\":[],\"inputs\":[\"review-findings\"],\"outputTemplateId\":\"ai7.review.report/1\",\"parallelism\":1,\"stageType\":\"derived-report\",\"toolWhitelist\":[],\"web\":false}],\"title\":\"全文审校\",\"version\":1}",
+   "document_sha256": "<sha256 of document_json>",
+   "previous_document_sha256": null,
+   "created_at": "<instant>",
+   "canonical_json": "{\"createdAt\":\"<instant>\",\"documentDigest\":\"88a9bcb05b765ac5815460e5424a6e4289d2f945c05593388a84abf9c7817412\",\"previousDocumentDigest\":null,\"procedureId\":\"ai7-procedure/full-review\",\"version\":1,\"versionId\":\"ai7-procedure/full-review@1\"}",
+   "sha256": "<sha256 of canonical_json>"
+  }
+ ],
+ "production_document_categories": [
+  {
+   "type_id": "news-release",
+   "name": "新闻稿",
+   "description": "",
+   "position": 0
+  },
+  {
+   "type_id": "promotion-article",
+   "name": "宣传文章",
+   "description": "",
+   "position": 1
+  },
+  {
+   "type_id": "review-article",
+   "name": "评论文章",
+   "description": "",
+   "position": 2
+  },
+  {
+   "type_id": "launch-materials",
+   "name": "发布会材料",
+   "description": "",
+   "position": 3
+  },
+  {
+   "type_id": "marketing-points",
+   "name": "营销要点",
+   "description": "",
+   "position": 4
+  }
+ ]
+}

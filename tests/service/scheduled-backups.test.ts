@@ -1,4 +1,4 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -8,18 +8,11 @@ import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
-import {
-  SCHEDULED_BACKUP_TRIGGER_SQL,
-  ScheduledBackups,
-  backupFailureReason,
-  backupFileName,
-  backupLocationFor,
-  initializeScheduledBackupSchema,
-} from '../../src/service/scheduled-backups.js';
+import { ScheduledBackups, backupFailureReason, backupFileName, backupLocationFor, SCHEDULED_BACKUP_SCHEMA_SQL } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { SCHEDULED_BACKUP_TRIGGER_SQL } from '../../src/service/scheduled-backups.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
 const packedBackup = vi.hoisted(() => ({ pause: null as ((signal: AbortSignal | undefined) => Promise<void>) | null }));
@@ -280,7 +273,7 @@ describe('定期自动备份 over the real store', () => {
       expect(made.backups[0]).toMatchObject({ fileName: backupFileName(T), createdAt: T.toISOString(), expiresAt: at(14 * DAY).toISOString(), present: true });
       const packaged = unzipSync(await readFile(join(location, backupFileName(T))));
       expect(parseCanonicalJson(strFromU8(packaged['manifest.json']!))).toMatchObject({
-        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
+        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
       });
       expect((await readdir(location)).filter((name) => name.includes('.partial'))).toEqual([]);
 
@@ -324,8 +317,7 @@ describe('定期自动备份 over the real store', () => {
       reopened.close();
     }
   }, 180_000);
-
-  it('keeps its records as ledgers read back against their digests, and adds revision 56 to a revision-55 store', async () => {
+  it('keeps its records as ledgers read back against their digests', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
@@ -433,37 +425,8 @@ describe('定期自动备份 over the real store', () => {
     } finally {
       reopened.close();
     }
-
-    // A store as revision 55 left it gains the three empty ledgers, and the switch starts off.
-    const other = await createServiceTestRoots('ai7-service-scheduled-backup-migration-');
-    try {
-      const first = await EditorialStore.open(other.dataRoot, other.codeRoot);
-      first.markCleanShutdown();
-      first.close();
-      const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
-      try {
-        execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
-        downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-      } finally {
-        plant.close();
-      }
-      const migrated = await EditorialStore.open(other.dataRoot, other.codeRoot);
-      try {
-        expect([migrated.inspectScheduledBackups(T).enabled, migrated.inspectScheduledBackups(T).total]).toEqual([false, 0]);
-        migrated.markCleanShutdown();
-      } finally {
-        migrated.close();
-      }
-      const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      } finally {
-        check.close();
-      }
-    } finally {
-      await other.dispose();
-    }
   }, 180_000);
+
 
   it('removes only a file it made, each removal before any write, and clears what a cut-off check left (Issue #434 review)', async () => {
     const location = `${roots.dataRoot}-backups`;
@@ -657,7 +620,7 @@ describe('定期自动备份 over the real store', () => {
     const location = backupLocationFor(dataRoot);
     const db = new DatabaseSync(':memory:');
     try {
-      initializeScheduledBackupSchema(db);
+      createBaselineRelations(db, SCHEDULED_BACKUP_SCHEMA_SQL);
       const backups = new ScheduledBackups(db, dataRoot, {
         facts: () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1 }),
       });

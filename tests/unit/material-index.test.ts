@@ -1,26 +1,9 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import {
-  MATERIAL_INDEXER_FIRST,
-  MATERIAL_INDEXER_IDENTITY,
-  MATERIAL_INDEXER_PREDECESSOR,
-  MATERIAL_INDEX_PREPARE_SLICE,
-  MATERIAL_INDEX_SCHEMA_SQL,
-  MaterialIndexAborted,
-  MaterialIndexError,
-  MaterialIndexLedger,
-  classifyLanguage,
-  initializeMaterialIndexSchema,
-  materialCitation,
-  prepareMaterialIndex,
-  prepareMaterialIndexInSlices,
-  splitSentences,
-  type MaterialExtraction,
-  type MaterialLayerActivity,
-} from '../../src/service/material-index.js';
-import { STUB_EMBEDDING_DIMENSIONS, STUB_EMBEDDING_IDENTITY } from '../../src/service/knowledge/embedding-stub.js';
-import { LIBRARY_MATERIAL_SCHEMA_SQL, initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
+import { MATERIAL_INDEXER_FIRST, MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEXER_PREDECESSOR, MATERIAL_INDEX_PREPARE_SLICE, MATERIAL_INDEX_SCHEMA_SQL, MaterialIndexAborted, MaterialIndexError, MaterialIndexLedger, classifyLanguage, materialCitation, prepareMaterialIndex, prepareMaterialIndexInSlices, splitSentences, type MaterialExtraction, type MaterialLayerActivity } from '../../src/service/material-index.js';
+import { LIBRARY_MATERIAL_SCHEMA_SQL } from '../../src/service/library-materials.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 
 // Unit suite (L1) for the Material Index's own rules (Issue #428, plan slice S80a; V2-UX-KB-009): the sentence anchors, the
@@ -31,8 +14,6 @@ const sentences = (text: string): string[] => splitSentences(text).map(([start, 
 
 /** The store's facts beside the ledger when nothing is being made and 来源译文 is not admitted (Issue #892). */
 const ACTIVITY: MaterialLayerActivity = {
-  embedding: { identity: STUB_EMBEDDING_IDENTITY, dimensions: STUB_EMBEDDING_DIMENSIONS, readiness: { state: 'ready' } },
-  vectorsBuilding: false,
   translating: false,
   translationRequest: { available: false, reason: '当前策略未开放来源译文' },
   translationFailure: null,
@@ -148,8 +129,8 @@ describe('the ledger over a minimal store', () => {
   function store(): DatabaseSync {
     const db = new DatabaseSync(':memory:');
     db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-    initializeLibraryMaterialSchema(db);
-    initializeMaterialIndexSchema(db);
+    createBaselineRelations(db, LIBRARY_MATERIAL_SCHEMA_SQL);
+    createBaselineRelations(db, MATERIAL_INDEX_SCHEMA_SQL);
     db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
       .run(MATERIAL, 'b'.repeat(64), '2026-10-09T00:00:00.000Z', '{}', SHA);
     return db;
@@ -165,7 +146,6 @@ describe('the ledger over a minimal store', () => {
 
   it('creates its relations once and records one build per item, with the metadata it read', () => {
     const db = store();
-    initializeMaterialIndexSchema(db);
     expect(Object.keys(MATERIAL_INDEX_SCHEMA_SQL)).toEqual(['material_index_builds', 'material_index_segments']);
     expect(Object.keys(LIBRARY_MATERIAL_SCHEMA_SQL)).toContain('library_materials');
     const ledger = new MaterialIndexLedger(db);
@@ -176,10 +156,9 @@ describe('the ledger over a minimal store', () => {
     expect(projection).toMatchObject({
       state: 'complete', reason: null, builtAt: '2026-10-09T01:00:00.000Z',
       metadata: { documentTitle: '自带标题', language: 'zh', paragraphs: 2, headings: 1, sentences: 3, characters: 10, pages: null },
-      // Chinese text needs no 来源译文; its vectors wait until the editor asks (Issue #892).
+      // Chinese text needs no 来源译文; nothing is built for 相似段落检索, which ranks the paragraphs by words (R5-F2c).
       translation: null,
-      vectors: { state: 'not-built', embedding: STUB_EMBEDDING_IDENTITY, dimensions: STUB_EMBEDDING_DIMENSIONS, built: 0, total: 2, builtAt: null, expectedDigest: null },
-      layers: { translation: 'not-needed', vectors: 'not-built', recognition: 'not-needed' },
+      layers: { translation: 'not-needed', recognition: 'not-needed' },
     });
     // Its build record names no page count: a format without pages records exactly what it did before (Issue #892).
     const built = db.prepare('SELECT canonical_json FROM material_index_builds').get() as { canonical_json: string };
@@ -367,7 +346,7 @@ describe('the ledger over a minimal store', () => {
     ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'PDF' }, { state: 'unsupported', reason: 'needs-local-dependency', converter: null });
     expect(ledger.projection({ materialId: MATERIAL, sha256: SHA, format: 'PDF' }, 'indexing', ACTIVITY)).toMatchObject({
       state: 'unsupported', reason: 'needs-local-dependency', metadata: { language: null, paragraphs: 0 },
-      layers: { text: 'deferred', recognition: 'deferred', segments: 'deferred', translation: 'deferred', vectors: 'deferred' },
+      layers: { text: 'deferred', recognition: 'deferred', segments: 'deferred', translation: 'deferred' },
     });
     expect(() => ledger.page(MATERIAL, '资料', 1)).toThrowError(/没有提取出可分段的文字/u);
     // A plan cannot pin an item whose text was never read, whoever may list it (#725 review, P2-3).

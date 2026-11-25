@@ -1,3 +1,5 @@
+import { chooseImportTarget } from './import-page.mjs';
+import { inWindowPress } from './review-preferences.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, popoverShownInside } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
@@ -405,8 +407,7 @@ async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const targetLabel = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${targetLabel}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -430,8 +431,8 @@ const READ_EVALUATION = `(() => {
   const record = host.querySelector('.evaluation-record');
   const report = host.querySelector('.evaluation-report');
   const active = document.activeElement;
-  const REPORT_PREFIX = '详细评估报告 · ';
   const recordHeading = record?.querySelector('h3')?.firstChild?.textContent ?? null;
+  const REPORT_PREFIX = recordHeading?.startsWith('详细评估报告 · ') ? '详细评估报告 · ' : '评估报告 · ';
   return {
     state: host.dataset.evaluation ?? null,
     // Which leads the page (Issue #1406): AI7's report, a version's form, or neither.
@@ -475,7 +476,7 @@ const READ_EVALUATION = `(() => {
       state: record.dataset.evaluationState,
       entries: record.dataset.entries,
       // A version begun from AI7's report is headed as the report (Issue #1407); \`heading\` names the version either way.
-      report: recordHeading?.startsWith(REPORT_PREFIX) ?? false,
+      report: record.dataset.initial === 'true',
       heading: recordHeading?.startsWith(REPORT_PREFIX) ? recordHeading.slice(REPORT_PREFIX.length) : recordHeading,
       reportConclusion: record.querySelector('.evaluation-report-conclusion')?.textContent ?? null,
       nextStep: record.querySelector('.evaluation-report-next-step')?.textContent ?? null,
@@ -541,7 +542,7 @@ const READ_EVALUATION = `(() => {
         state: section.dataset.rewriteState ?? null,
         task: section.querySelector('.evaluation-rewrite-task')?.textContent ?? null,
         reason: section.querySelector('.evaluation-rewrite-reason')?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(record.querySelectorAll('.evaluation-action-bar .evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
           line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
@@ -1430,7 +1431,7 @@ async function main() {
     // The bar covers no control the page shows: every visible button, link, field, select and disclosure outside the bar lies
     // clear of its box, and a hit test at the control's centre lands on the control, not on the bar.
     const COVERED_CONTROLS = `Array.from(document.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"]')).filter((node) => {
-      const bar = document.querySelector('#persistence-status'); if (bar.contains(node)) return false;
+      const bar = document.querySelector('#persistence-status'); if (bar.contains(node) || !node.checkVisibility({ visibilityProperty: true })) return false;
       const r = node.getBoundingClientRect(), box = bar.getBoundingClientRect();
       if (!(r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) || getComputedStyle(node).visibility === 'hidden') return false;
       const hit = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
@@ -1689,6 +1690,15 @@ async function main() {
     await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
     await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
     await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    // Issue #1710's class on 评估: the refusal stands above the sticky action bar, never over it. Every button of the bar is whole in
+    // the window and the topmost thing at its own centre, and a real press on one works while the refusal still shows.
+    const evaluationBar = '[data-screen="book-evaluation"] .evaluation-record .evaluation-action-bar';
+    const barButtonsReachable = `(() => { const buttons = Array.from(document.querySelector(${JSON.stringify(evaluationBar)})?.querySelectorAll('button') ?? []).filter((button) => button.checkVisibility());
+      return buttons.length >= 3 && buttons.every((button) => { const r = button.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && button.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); }); })()`;
+    try { await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。' && ${statusBarClear([evaluationBar])} && ${barButtonsReachable}`, 'evaluation-refusal-clear-of-the-action-bar', 10_000); }
+    catch { requireJourney(false, 'evaluation-refusal-clear-of-the-action-bar', await renderer.evaluate(statusBarOverlaps([evaluationBar]))); }
+    await pointerClick(renderer, waitFor, `${evaluationBar} [data-evaluation-action="copy-report"]`, 'evaluation-copy-under-refusal', { scroll: false });
+    await waitFor(renderer, `${notice} === '评估报告已复制。'`, 'evaluation-copied-under-refusal', 10_000);
     await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
     await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
@@ -2053,11 +2063,11 @@ async function main() {
       ['next-step', page.initial.latest.nextStep === null ? [] : [page.initial.latest.nextStep]]].filter(([, lines]) => lines.length > 0)))`);
     const nextStep = JSON.parse(latestWords).find(([key]) => key === 'next-step')?.[1][0] ?? null;
     requireJourney(JSON.parse(latestWords).length >= 2, 'initial-evaluation-report-lists-present', latestWords.length);
-    const readReportView = (page, items = AI7_ITEM_LINES) => page.view === 'report' && page.record === null && page.report !== null &&
+    const readReportView = (page, items = AI7_ITEM_LINES, editLabel = '修改报告') => page.view === 'report' && page.record === null && page.report !== null &&
       JSON.stringify(page.report.items) === JSON.stringify(items) && JSON.stringify(page.report.comments) === JSON.stringify(AI7_COMMENTS) &&
       JSON.stringify(page.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
       JSON.stringify(page.report.lists) === latestWords && page.report.conclusion === 'AI7 建议的结论：修改后再议' &&
-      JSON.stringify(page.report.actions) === JSON.stringify([['edit-report', '修改报告', false]]) && page.report.reason === null &&
+      JSON.stringify(page.report.actions) === JSON.stringify([['edit-report', editLabel, false], ['copy-report', '复制评估报告', false]]) && page.report.reason === null &&
       page.market !== null && page.market.ai7 === 'true' && JSON.stringify(page.market.lists) === JSON.stringify(MARKET_LISTS) &&
       page.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && page.start === null;
     const reportPage = await readEvaluation(renderer, (page) => page.view === 'report', 'initial-evaluation-report');
@@ -2086,7 +2096,7 @@ async function main() {
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
     // Ordinary mode cites paragraphs without the reading ranges they fall in (#1431 item 71).
     const ordinaryItems = AI7_ITEM_LINES.map(([itemId, sufficiency, line]) => [itemId, sufficiency, line.replace(/，分布在 \d+ 个阅读范围/u, '')]);
-    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    requireJourney(readReportView(ordinaryReport, ordinaryItems, '修改评估报告') && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
@@ -2299,7 +2309,13 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改报告',
+    // 0.7.9 wording follow-up (#1616): the report Task's drawer was painted in development mode; in ordinary mode its PLAN-007 line
+    // (「计划说明，不是运行授权」) is not drawn — the engine's own computed style of the line, whatever the drawer last painted — and
+    // the words are nowhere in what the window shows. The drawer is open beside the page at a wide window and closed at the Gate's
+    // (overlay form), so the text is read from the page, which is always rendered: `innerText` of a closed drawer is its whole text
+    // content, hidden lines included (hosted Gate 45394156356, where reduced motion closes the drawer without a transition).
+    await assertRenderer(renderer, `(() => { const footer=document.querySelector('#task-drawer .task-drawer-footer'); return document.documentElement.dataset.technicalLayerVisible==='false' && footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !document.body.innerText.includes('不是运行授权'); })()`, 'evaluation-rewrite-drawer-footer-hidden');
+    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改评估报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
     const fifteenth = await readEvaluation(renderer, (page) => ofToday(page.record?.heading) && page.rewrite !== null, 'evaluation-rewrite-begun');
@@ -2315,7 +2331,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-rewrite-save');
     await waitFor(renderer, `document.querySelector('[data-evaluation-action="prepare-rewrite"]')?.disabled===false`, 'evaluation-rewrite-model-ready');
     const rewriteOffered = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.rewrite?.actions.length === 2, 'evaluation-rewrite-offered-read');
-    requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
+    requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成评估报告', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
       JSON.stringify(rewriteOffered.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']), 'evaluation-rewrite-offered-words', rewriteOffered.rewrite);
     // A rewrite reads only what is saved; edits still in the form are saved first by the same click (Issue #1410 item 12).
 
@@ -2357,7 +2373,7 @@ async function main() {
         [null, `现在：${waiting.record.strengths.join('；')}`, `重新生成：${REWRITTEN_STRENGTHS.join('；')}`],
         [null, `现在：${waiting.record.weaknesses.join('；')}`, `重新生成：${REWRITTEN_WEAKNESSES.join('；')}`],
       ]) && JSON.stringify(waiting.rewrite.proposal.lists) === JSON.stringify(['strengths', 'weaknesses']) && waiting.record.strengths.length > 0 &&
-      JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版报告', false], ['rewrite-discard', '放弃', false]]) &&
+      JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版评估报告', false], ['rewrite-discard', '放弃', false]]) &&
       waiting.record.entries === '2' && JSON.stringify(waiting.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)),
     'evaluation-rewrite-proposal-words', waiting.rewrite);
 
@@ -3307,6 +3323,113 @@ async function main() {
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-cancel"]', 'learning-audit-reflow-cancel');
     await readAudit(renderer, (page) => page.reinclude === null && page.lineage?.decisions.length === 5, 'learning-audit-reflow-closed');
 
+    // ---- 学习回溯 in ordinary mode (Issue #1549): the tab is there, a row nobody decided is decided in place, one in use is stopped ----
+    at('learning-audit-ordinary');
+    const auditMode = async (developer, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
+      await click(renderer, '帮助', `${name}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `${name}-applied`);
+    };
+    await auditMode(false, 'learning-audit-ordinary');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-ordinary-quality');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), (node) => node.textContent).join('|') === '审阅偏好|反馈记录|学习回溯'`, 'learning-audit-ordinary-tabs');
+    // Real pointer and key input, as the editor gives it: the tab, each dropdown and its option, the row's choice, the explorer and the way back.
+    const auditSelect = async (selector, value, name) => {
+      const index = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex((option) => option.value === ${JSON.stringify(value)})`);
+      requireJourney(index >= 0, `${name}-option-exists`, { selector, value });
+      await pointerClick(renderer, waitFor, `${selector} + .ui-select-trigger`, `${name}-open`);
+      // The options open inside the window and are what the pointer meets there.
+      await assertRenderer(renderer, `(() => {
+        const popover = document.querySelector(${JSON.stringify(`${selector} ~ .ui-select-popover`)});
+        const option = popover?.querySelector('.ui-select-option[data-index="${index}"]');
+        if (!(popover instanceof HTMLElement) || popover.hidden || !(option instanceof HTMLElement)) return false;
+        const box = popover.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+      })()`, `${name}-popover-inside`);
+      await pointerClick(renderer, waitFor, `${selector} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-option`);
+    };
+    await pointerClick(renderer, waitFor, '#quality-tab-audit', 'learning-audit-ordinary-tab');
+    await readAudit(renderer, (page) => page.view === 'list', 'learning-audit-ordinary-list');
+    // Filters are dropdowns of the shared style, the search and date controls styled as the other pages' are, and all of it inside the window.
+    await auditSelect('#learning-audit-filter-standing', '', 'learning-audit-ordinary-standing-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-standing-read');
+    await auditSelect('#learning-audit-filter-kind', '', 'learning-audit-ordinary-kind-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-kind-read');
+    await pointerClick(renderer, waitFor, '#learning-audit-query', 'learning-audit-ordinary-query-focus');
+    await renderer.evaluate(`document.querySelector('#learning-audit-query').select()`);
+    await renderer.send('Input.insertText', { text: '分页原因5' });
+    await pressEnter(renderer);
+    const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
+    const ordinaryKey = ordinaryRow.rows[0][0];
+    requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
+    // The query press leaves the short window above the decision buttons. Reveal both with the wheel before measuring;
+    // pointerClick's scripted scroll must not supply the evidence that these choices can be reached.
+    for (let step = 0; step < 8; step++) {
+      const wheel = await renderer.evaluate(`(() => {
+        const root=document.querySelector('[data-screen="quality-learning"] .learning-audit');
+        const buttons=Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+        const bottom=Math.max(...buttons.map(node=>node.getBoundingClientRect().bottom));
+        const box=root.getBoundingClientRect();
+        return {x:box.left+box.width/2,y:innerHeight-32,deltaY:Math.max(0,bottom-innerHeight+16)};
+      })()`);
+      if (wheel.deltaY <= 0) break;
+      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheel, deltaX: 0 });
+      await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    }
+    const ordinaryControls = await renderer.evaluate(`(() => {
+      const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
+      const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+      const filters = Array.from(root.querySelectorAll('.learning-audit-filter .ui-select-trigger'));
+      const query = root.querySelector('#learning-audit-query');
+      const fits = (node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; };
+      // Each choice is inside the window and is what a pointer meets at its centre.
+      const meets = (node) => { const box = node.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); };
+      return { labels: buttons.map((node) => node.textContent), reachable: buttons.every((node) => fits(node) && meets(node)), buttons: buttons.length,
+        buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')), datesTogether: Math.abs(root.querySelector('#learning-audit-filter-from').getBoundingClientRect().top-root.querySelector('#learning-audit-filter-to').getBoundingClientRect().top)<=1,
+        datesVisible: ['from','to'].every(key=>{const node=root.querySelector('#learning-audit-filter-'+key);return fits(node)&&meets(node);}),
+        decisionRects: buttons.map(node=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};}),
+        queryRadius: getComputedStyle(query).borderTopLeftRadius, selectRadius: filters[0] ? getComputedStyle(filters[0]).borderTopLeftRadius : null, width: innerWidth, height: innerHeight };
+    })()`);
+    requireJourney(JSON.stringify(ordinaryControls.labels) === JSON.stringify(['用于学习', '不用']) && ordinaryControls.reachable && ordinaryControls.buttonChoices === 0 && ordinaryControls.filters === 4 &&
+      ordinaryControls.filtersFit && ordinaryControls.queryFits && ordinaryControls.fromFits && ordinaryControls.datesTogether && ordinaryControls.datesVisible && ordinaryControls.queryRadius === '8px' && ordinaryControls.selectRadius === '8px', 'learning-audit-ordinary-filters-style', ordinaryControls);
+    await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="decide-book"]`, 'learning-audit-ordinary-decide');
+    const decidedRow = await readAudit(renderer, (page) => page.rows.length === 1 && page.rows[0][1] === 'book', 'learning-audit-ordinary-decided');
+    requireJourney(decidedRow.rows[0][2] === '用于学习 · 仅本书' && decidedRow.rows[0][4] === true, 'learning-audit-ordinary-decided-words', decidedRow);
+    const decidedService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(ordinaryKey)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
+    requireJourney(JSON.stringify(decidedService) === JSON.stringify(['book', 'book']), 'learning-audit-ordinary-decided-service', decidedService);
+    // The one in use is read as two parts and stopped from its explorer; nothing technical is drawn.
+    await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="open"]`, 'learning-audit-ordinary-open');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey, 'learning-audit-ordinary-lineage');
+    await assertRenderer(renderer, `(() => {
+      const lineage = document.querySelector('.learning-lineage');
+      const parts = Array.from(lineage.querySelectorAll('[data-lineage-part]'), (node) => node.dataset.lineagePart);
+      return JSON.stringify(parts) === JSON.stringify(['from', 'used']) && getComputedStyle(lineage.querySelector('.learning-lineage-parts')).display === 'grid' &&
+        lineage.querySelector('.learning-audit-details') === null && lineage.querySelector('.learning-lineage-step[data-lineage-step]') === null &&
+        !/审计详情|\\bv[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}T|[0-9a-f]{32}/u.test(lineage.textContent);
+    })()`, 'learning-audit-ordinary-lineage-words');
+    await pointerClick(renderer, waitFor, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-ordinary-stop');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-ordinary-stop-status');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'excluded', 'learning-audit-ordinary-stopped');
+    await assertRenderer(renderer, `document.querySelector('.learning-remediation-preview') === null`, 'learning-audit-ordinary-no-preview');
+    await pointerClick(renderer, waitFor, '.learning-lineage [data-learning-audit-action="back"]', 'learning-audit-ordinary-back');
+    const stoppedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'excluded', 'learning-audit-ordinary-stopped-row');
+    requireJourney(stoppedRow.rows[0][2] === '不用于学习', 'learning-audit-ordinary-stopped-words', stoppedRow);
+    const reincludePress = inWindowPress(renderer, waitFor);
+    await reincludePress(`${auditRow(ordinaryKey)} [data-learning-audit-action="open"]`, 'ordinary-reinclude-open');
+    await waitFor(renderer, `document.querySelector('.learning-lineage [data-learning-audit-action="reinclude"]')!==null`, 'ordinary-reinclude-ready');
+    await reincludePress('.learning-lineage [data-learning-audit-action="reinclude"]', 'ordinary-reinclude-start');
+    await reincludePress('.learning-reinclude input[value="book"]', 'ordinary-reinclude-book');
+    await waitFor(renderer, `document.querySelector('[data-learning-audit-action="reinclude-record"]')?.textContent==='确定'`, 'ordinary-reinclude-confirm-word');
+    await reincludePress('[data-learning-audit-action="reinclude-record"]', 'ordinary-reinclude-confirm');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'book', 'ordinary-reinclude-recorded');
+    await reincludePress('.learning-lineage [data-learning-audit-action="back"]', 'ordinary-reinclude-back');
+    const reincludedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'book', 'ordinary-reinclude-row');
+    requireJourney(reincludedRow.rows[0][2] === '用于学习 · 仅本书', 'ordinary-reinclude-row-words');
+    await auditMode(true, 'learning-audit-ordinary-restore');
+
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
     at('evaluation-damaged-route');
     // 评估旅程丙's latest version, 第 15 版 begun from AI7's 初评, is damaged on disk while the product is closed — one entry's digest
@@ -3382,6 +3505,8 @@ async function main() {
       await renderer.evaluate(`window.ai7.controlTaskRun({kind:'initial-evaluation',ref:${JSON.stringify(taskId)},action:'pause'})`);
       await new Promise(resolve=>setTimeout(resolve,2200));
       await waitFor(renderer, `(() => {const current=document.querySelector('.evaluation-initial'),more=document.querySelector('.evaluation-more');return current!==globalThis.__j11PollInitial && current?.dataset.initialState==='pausing' && more?.open && document.activeElement===more.querySelector('summary') && document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'poll-evaluation-first-changed-paint');
+      // 0.7.9 wording follow-up (#1616): while the report Task is under way, why another cannot be prepared reads in the editor's words.
+      await assertRenderer(renderer, `(() => { const why=document.querySelector('.evaluation-initial-reason'); return why instanceof HTMLElement && why.getClientRects().length>0 && why.innerText.trim()==='已有一项评估任务正在进行；等它结束后才能准备新的评估任务。'; })()`, 'poll-evaluation-busy-reason-words');
       await renderer.evaluate(`globalThis.__j11PollInitial=document.querySelector('.evaluation-initial')`);
       await writeFile(unitHoldPath, '1', 'utf8');
       await new Promise(resolve=>setTimeout(resolve,2200));
@@ -3400,7 +3525,7 @@ async function main() {
       await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', `${name}-return`);
       await waitFor(renderer, `(() => { const host=document.querySelector('[data-screen="book-evaluation"] .evaluation'); return host instanceof HTMLElement && host!==globalThis.__j11EvaluationBeforeReturn && host.dataset.evaluation==='ready'; })()`, `${name}-returned`, 60_000);
       const reportRead = await readEvaluation(renderer, (page) => page.view === 'report', `${name}-report`);
-      requireJourney(reportRead.editReport === '修改报告' && reportRead.record === null && reportRead.report.technical === 0 &&
+      requireJourney(reportRead.editReport === '修改评估报告' && reportRead.record === null && reportRead.report.technical === 0 &&
         JSON.stringify(reportRead.report.comments) === JSON.stringify(AI7_COMMENTS) &&
         JSON.stringify(reportRead.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
         reportRead.market.ai7 === 'true' && JSON.stringify(reportRead.market.lists) === JSON.stringify(MARKET_LISTS),
@@ -3642,18 +3767,21 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
         await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); return root.querySelector('[data-learning-enabled]') && root.querySelector('[data-preference-editor="new"]') && !root.querySelector('[data-memory-candidate-form]') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent) && root.textContent.includes('来源与历史'); })()`, 'ordinary-memory-private-labels');
       }
-      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
+      const acceptLabel = name === 'memory-governance-first' ? '接受' : '接受记忆';
+      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent===${JSON.stringify(acceptLabel)});if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
       if (name === 'memory-governance-first') {
         await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]'); const stop=Array.from(row?.querySelectorAll('button')??[]).find(button=>button.textContent==='停用'); if(!stop||stop.disabled)return false;stop.click();return true; })()`, 'ordinary-preference-stop-after-memory');
-        await waitFor(renderer, `document.querySelector('[data-review-preference="${ordinaryPreference}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
         await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-history-open');
         await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && document.querySelectorAll('[data-entry-id]').length>0`, 'ordinary-history-populated');
         await assertRenderer(renderer, `(async () => { const page=await window.ai7.inspectFeedbackHistory(); const rows=Array.from(document.querySelectorAll('[data-entry-id]')); return JSON.stringify(rows.map(row=>row.dataset.entryId))===JSON.stringify(page.entries.map(entry=>entry.entryId)) && rows.every(row=>row.querySelectorAll(':scope > p').length===2 && row.querySelector('.feedback-entry-book') && (row.querySelector('[data-feedback-action="open"]')?.textContent==='查看原处' || row.querySelector('.feedback-entry-detached'))) && !document.querySelector('#feedback-filter-signal, #feedback-filter-author, #feedback-filter-editor, #feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by'); })()`, 'ordinary-history-newest-two-lines');
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
         await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
-        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"] details summary')!==null`, 'ordinary-preference-history-ready');
+        await inWindowPress(renderer, waitFor)(`[data-review-preference="${ordinaryPreference}"] details summary`, 'ordinary-preference-history-expand');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.closest('[data-disabled-preferences]')?.querySelector('h4')?.textContent==='已停用的审阅偏好' && history?.open && Array.from(history.querySelectorAll('p')).some(line=>line.textContent.includes('已停用')&&/[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(line.textContent)) && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;
@@ -3689,7 +3817,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-stop-quality');
     await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')`, 'ordinary-memory-stop-ready');
     await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
-    await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
+    await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-memory-item="${deactivatedMemoryId}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
     await qualityMode(true, 'ordinary-memory-stop-restore');
     // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
     await backToLibrary(renderer, 'memory-governance-leave');
@@ -3723,7 +3851,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
     await click(renderer, '导入稿件', 'word-import-stage');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-import-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-new-book');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'word-import-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-import-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"] [data-word-learn-from-edits]')?.checked === true`, 'word-learning-default-visible');

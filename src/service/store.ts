@@ -1,3 +1,7 @@
+import { StandardTableLibrary, type StandardTableFormatter } from './standard-tables/library.js';
+import { ReviewGuidelineFormatting, type EditorialStoreGuidelineFormatter } from './review-guideline-formatting.js';
+import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
+import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
 import type { ReimportPreparationProgress, ReimportResolutionProgress, ReimportCommitProgress } from './manuscript-reimport-operations.js';
@@ -18,20 +22,20 @@ import { launchedTaskPlan } from './task-plan-creation.js';
 import { RUN_SYNTHESIS_ENTRY } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
-import { TaskLaunchPreview } from './task-plan-creation.js';
+import { previewTaskLaunch } from './task-launch-preview.js';
+import { reviewCategoryEdits, requireReviewRetryChoice } from './review/review-launch-options.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 
-import { initializeInlineEditorRevisionSchema } from './inline-editor-revisions.js';
-import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
+import { saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
 import type { SaveProductionDocumentTypeInput, DeleteProductionDocumentTypeInput, ReorderProductionDocumentTypesInput, UpdateProductionDocumentMetaInput, ProductionDocumentTypesProjection } from '../shared/protocol.js';
-import { initializeAiEditLockSchema } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
-import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
-import { customAnalysisModeGoal } from '../shared/protocol.js';
+import { composeTaskOverview, estimateTaskStarts, overviewUsage, withBookTaskWork, withRunningProgress } from './task-overview.js';
+import { TaskWorkReader } from './task-work.js';
+import { customAnalysisModeGoal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -39,10 +43,9 @@ import * as writingTaskOperations from './writing-task-operations.js';
 import * as factualVerificationOperations from './factual-verification-operations.js';
 import * as initialEvaluationOperations from './initial-evaluation-operations.js';
 import { pinTaskDeliverable, taskDeliverableStale } from './task-deliverable-target.js';
-import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
-import { initializeStructuralEditSchema } from './manuscript/structural-schema.js';
-import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
 import { ManuscriptSourceObjects } from './manuscript/source-objects.js';
+import { paragraphAtKey, paragraphCount, rowsFrom, workingBlock } from './manuscript/working-positions.js';
+import { withEditorStep, type EditorStepSpec } from './manuscript/editor-steps.js';
 import {
   commitNoteSources,
   stageNoteSources,
@@ -51,7 +54,6 @@ import {
   routeBlockSource,
   type LegacyBlockSources,
 } from './manuscript/note-blocks.js';
-import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
 import {
   type ImportStructureChoice,
   type AskGlobalAgentInput,
@@ -231,7 +233,7 @@ import {
   type ApplyChangeSuggestionBatchInput,
   type ApplyChangeSuggestionInput,
   type CreateEditorialMarkInput,
-  type EditorialMarkCardProjection,
+  type EditorialMarkCardProjection, type FindPendingMarkInput, type PendingMarkPlace,
   type EditorialMarkCommandProjection,
   type JournalAcknowledgement,
   type JournalEditInput,
@@ -326,7 +328,7 @@ import {
   type SourceImportTargetSelection,
   type StagedImportProjection,
   type ContinueImportProjection,
-  type DurableHistoryProjection,
+  type DurableHistoryProjection, type EditorHistoryProjection,
   type ManuscriptWindowTarget,
   type MilestoneProjection,
   type OutlineProjection,
@@ -384,7 +386,8 @@ import {
   type ReviewFindingPageRequest,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
-  type BookFindingsProjection,
+  type BookFindingsReadProjection,
+  type InspectBookFindingsInput,
   type ParagraphAnalysisProjection,
   MAX_WRITING_REQUIREMENTS_GRAPHEMES,
   MAX_WRITING_MATERIALS,
@@ -459,7 +462,7 @@ import {
   type VerifiedSelection,
 } from './manuscript/selection-span.js';
 import { SELECTION_SPAN_SEPARATOR, spanGraphemes } from '../shared/selection-span.js';
-import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
+import { HouseWordLists } from './review/house-word-list.js';
 import {
   HouseWordListError,
   type InspectHouseWordListInput,
@@ -476,42 +479,19 @@ import {
   type ProgressReader,
   type UnconfirmedOutcomeRecord,
 } from './analysis/baseline-analysis-store.js';
-import {
-  MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
-  WORD_TRACKED_IMPORT_SCHEMA_VERSION,
-  EDITORIAL_MEMORY_SCHEMA_VERSION,
-  initializeTaskAuthorizationSchema,
-  initializeFactualRangeTaskSchema,
-  EDITORIAL_LEARNING_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
-  TaskAuthorizationError,
-  TaskAuthorizationStore,
-  validateTaskAuthorizationSchema,
-  type TaskPreparationResult,
-} from './task-authorization.js';
-import {
-  initializeLocalStageSchema,
-  initializeReviewRunSchema,
-  ReviewRunError,
-  ReviewRunStore,
-} from './review/review-runs.js';
+import { LATEST_SCHEMA_VERSION, TaskAuthorizationError, TaskAuthorizationStore, type TaskPreparationResult } from './task-authorization.js';
+import { ReviewRunError, ReviewRunStore } from './review/review-runs.js';
 import { sha256Hex, canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import { graphemeCount, FACTUAL_VERIFICATION_POLICY_VERSION } from './analysis/factual-review-contract.js';
 import { executionBackgroundShare } from './analysis/execution.js';
-import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
-import {
-  EditorialLearningLedger,
-  LearningReads,
-  initializeEditorialLearningSchema,
-  type WordLearningProofs,
-} from './learning/ledger.js';
+import { EditorialLearningLedger, LearningReads, type WordLearningProofs } from './learning/ledger.js';
 import type { CurationRun } from './learning/curation.js';
 import type {
   LearningCurationBundle,
   WordTrackedEditLearningSource,
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
-  DeactivateEditorialMemoryInput,
+  DeactivateEditorialMemoryInput, AcceptEditorialMemoryInput, ReviewPreferenceLifecycleInput,
   InspectEditorialLearningInput,
   EditorialLearningProjection,
   LearningReasonAskInput,
@@ -524,10 +504,7 @@ import {
 } from './dialogue/contract.js';
 import { globalAgentScopedTools, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
 import type { ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
-import {
-  SupervisionDirectives,
-  initializeSupervisionSchema,
-} from './learning/supervision-directives.js';
+import { SupervisionDirectives } from './learning/supervision-directives.js';
 import {
   analysisBytePage,
   revisionUnitsPage,
@@ -535,7 +512,6 @@ import {
   baselineAnalysisSummaryPage,
 } from './analysis/baseline-analysis-wire.js';
 import { SkillAcquisitions } from './imported-skills.js';
-import { initializeImportedSkillSchema, initializeImportedSkillUpdateSchema } from './imported-skill-schema.js';
 import {
   HOUSE_REVIEW_PREFERENCE_CATEGORY,
   allowedProductionBindingOf,
@@ -544,39 +520,19 @@ import {
   type ConfiguredProviderBinding,
 } from './launch-policy.js';
 import * as customAnalysisOperations from './custom-analysis-dimensions.js';
-import {
-  CustomAnalysisDimensionError,
-  CustomAnalysisDimensions,
-  customAnalysisVersionInput,
-  initializeCustomAnalysisDimensionSchema,
-} from './custom-analysis-dimensions.js';
+import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput } from './custom-analysis-dimensions.js';
 import { CustomAnalysisDocumentError } from './analysis/custom-analysis-contract.js';
 import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import * as learningSupervision from './house-review-preference.js';
-import {
-  HouseReviewPreferenceLedger,
-  initializeHouseReviewPreferenceSchema,
-} from './house-review-preference.js';
-import {
-  initializeProposalReviewSchema,
-  EditorialMarkError,
-  EditorialMarkStore,
-  initializeEditorialMarkSchema,
-  followReimportedMarks,
-  resolveBranchMarksAfterRewrite,
-  workingBlockDigests,
-  type ReimportMarkOutcome,
-  type ReimportMarkRow,
-  type ProducedEditorialMarkInput,
-} from './editorial-marks.js';
-import { initializeSearchFallbackSchema } from './provider/search-backend-settings.js';
+import { HouseReviewPreferenceLedger } from './house-review-preference.js';
+import { EditorialMarkError, EditorialMarkStore, followReimportedMarks, resolveBranchMarksAfterRewrite, workingBlockDigests, type ReimportMarkOutcome, type ReimportMarkRow, type ProducedEditorialMarkInput } from './editorial-marks.js';
 import {
   RetrievalIndex,
   RetrievalError,
-  type RetrievalMaterialVectorQuery,
   type RetrievalSource,
 } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
+import { searchReferableMaterials, type RetrievalAssist } from './retrieval/flash-assist.js';
 import {
   TASK_MATERIALS_NONE,
   TASK_MATERIALS_STATEMENT,
@@ -593,11 +549,6 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './analysis/factual-recheck.js';
 import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './provider/model-fixture.js';
-import {
-  initializeAdmittedChannelsSchema,
-  initializeModelSelectionSchema,
-  initializeModelServiceRoutesSchema,
-} from './model-service-connections.js';
 import {
   closeSync,
   constants,
@@ -625,40 +576,20 @@ import {
   sha256,
   type SqlRow,
 } from './store-records.js';
-import { inspectBookFindings, paragraphAnalysis, type BookFindingsHost } from './book-findings.js';
+import { BookFindingsReader, paragraphAnalysis } from './book-findings.js';
 import { initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import { liveMaterialRule } from './analysis/live-kind-admission.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
 import * as evaluationRewriteOperations from './evaluation-rewrites.js';
-import {
-  EvaluationRewriteError,
-  EvaluationRewrites,
-  evaluationRewriteRefusal,
-  initializeEvaluationRewriteSchema,
-} from './evaluation-rewrites.js';
+import { EvaluationRewriteError, EvaluationRewrites, evaluationRewriteRefusal } from './evaluation-rewrites.js';
 import {
   type ReadersReportContractInput,
   type ReadersReportExemplarInput,
 } from './evaluation/readers-report-contract.js';
 import * as readersReportOperations from './readers-reports.js';
-import { ReadersReportError, ReadersReports, initializeReadersReportSchema } from './readers-reports.js';
-import {
-  WRITING_EXEMPLAR_MOVED,
-  WritingTasks,
-  graphemeLength,
-  writingMaterialDigest,
-  writingMaterialOverBound,
-  writingMaterialOverBoundNamed,
-  writingMaterialParagraph,
-  writingMaterialsOverTotal,
-  initializeWritingTaskSchema,
-  writingWords,
-  type StoredWritingTask,
-  type WritingExemplarSource,
-  type WritingMaterialReading,
-  type WritingMaterialSource,
-} from './writing-tasks.js';
+import { ReadersReportError, ReadersReports } from './readers-reports.js';
+import { WRITING_EXEMPLAR_MOVED, WritingTasks, graphemeLength, writingMaterialDigest, writingMaterialOverBound, writingMaterialOverBoundNamed, writingMaterialParagraph, writingMaterialsOverTotal, writingWords, type StoredWritingTask, type WritingExemplarSource, type WritingMaterialReading, type WritingMaterialSource } from './writing-tasks.js';
 import {
   WRITING_COPY_RULES,
   type WritingCopyRules,
@@ -710,18 +641,14 @@ import {
   manuscriptObjectExtension,
 } from './manuscript-format.js';
 import { convertTextManuscript, isTextConversionRefusal, type ConversionLoss } from './text-manuscript.js';
-import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
+import { ManuscriptApplyStore } from './manuscript-apply.js';
 import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
 import {
   newSeriesKnowledgeReadings,
   frozenSeriesScopes,
   seriesScopeMaterials,
 } from './review/series-consistency.js';
-import {
-  initializePublicationVersionSchema,
-  PublicationVersionError,
-  PublicationVersionStore,
-} from './publication-versions.js';
+import { PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
   GlobalAttentionError,
@@ -777,303 +704,55 @@ import {
   reviewWorkspacePage,
   REVIEW_WORKSPACE_PAGE_PATHS,
 } from './task-plan.js';
-import {
-  decisionResolvesConflict,
-  initializeProposalConflictSchema,
-  ProposalConflictError,
-  ProposalConflictStore,
-  readConflictAttention,
-  type ProposalConflictRegenerationLineage,
-} from './proposal-conflicts.js';
-import {
-  ImportRetentionError,
-  initializeImportRetentionSchema,
-  initializeWordImportRetentionSchema,
-  validateWordImportRetentionVersion,
-  validateWordImportRetentionClosure,
-  recordTextBoxChoice,
-  recordedTextBoxChoice,
-  stageImportSources,
-  stageWordRevisionIntake,
-  wordIntakeForStagedReading,
-  requireWordStagedIntake,
-  bindWordReadingBlocks,
-  wordTrackedSamples,
-  wordTrackedSampleRecord,
-  validateWordChoice,
-  wordPreparedChoice,
-  wordPreparedSelection,
-  recordWordPreparedIntake,
-  requireWordPreparedIntake,
-  stagedImportSourcesMatch,
-  stagedTextBoxParagraphs,
-  readWordParentSourcePin,
-  requireWordParentSourcePin,
-  retainWordRevisionSource,
-  retainWordRevisionImport,
-  bindWordReadingToRevision,
-  retainWordManuscriptSourceSegments,
-  requireWordManuscriptSourceSegments,
-  readWordImportChoiceRecord,
-  wordParentSourcePinRecord,
-  createWordSampleDetailContext,
-  wordSampleDetailContextCurrent,
-  wordSourceFragmentText,
-  resolveWordSampleDetailSource,
-  pageWordSampleDetail,
-  type WordSampleDetailContext,
-  type WordSampleDetailPage,
-  type WordReadingKind,
-  type WordPreparedIntake,
-  type WordCompiledReading,
-  type WordTrackedChoiceInput,
-  type WordImportChoiceRecord,
-  type StagedImportSources,
-} from './import-retention.js';
-import {
-  ImportedMarkError,
-  createImportedMarks,
-  createWordImportedMarks,
-  validateWordImportedMarkSources,
-  initializeImportedMarkSchema,
-  stageImportedMarks,
-  stagedImportedMarksMatch,
-} from './imported-marks.js';
-import {
-  ExportLedgerError,
-  ManuscriptExportStore,
-  initializeExportLedgerSchema,
-  readWordManuscriptExportSource,
-} from './manuscript-export.js';
-import {
-  DEFAULT_EXECUTION_RULES_STATEMENT,
-  DEFAULT_EXECUTION_RULE_PROCEDURES,
-  DefaultExecutionRuleError,
-  DefaultExecutionRuleLedger,
-  QUICK_START_DEVELOPER_LIVE,
-  QUICK_START_MODE_UNAVAILABLE,
-  QUICK_START_NEEDS_CONNECTION,
-  QUICK_START_NOT_READY,
-  QUICK_START_OFFLINE,
-  QUICK_START_PLAN_CHANGED,
-  QUICK_START_RANGE_REASON,
-  QUICK_START_RULE_CHANGED,
-  QUICK_START_RESEND,
-  RULE_STATE_LABELS,
-  SET_RULE_BUDGET,
-  SET_RULE_CHANGED,
-  SET_RULE_DEVELOPER_LIVE,
-  SET_RULE_ORDINARY_PRODUCTION,
-  SET_RULE_EDITED,
-  SET_RULE_FIRST_BASELINE,
-  SET_RULE_RANGE,
-  defaultExecutionRuleBindingOf,
-  defaultExecutionRuleCovers,
-  defaultExecutionRuleDoes,
-  defaultExecutionRuleKind,
-  defaultExecutionRuleDrift,
-  defaultExecutionRuleReference,
-  initializeDefaultExecutionRuleSchema,
-  isDefaultExecutionRulePattern,
-  quickStartNoRuleReason,
-  ruleDriftReason,
-  setRuleAlreadyReason,
-  type DefaultExecutionRuleRecord,
-} from './default-execution-rules.js';
-import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
+import { decisionResolvesConflict, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
+import { ImportRetentionError, validateWordImportRetentionVersion, validateWordImportRetentionClosure, recordTextBoxChoice, recordedTextBoxChoice, stageImportSources, stageWordRevisionIntake, wordIntakeForStagedReading, requireWordStagedIntake, bindWordReadingBlocks, wordTrackedSamples, wordTrackedSampleRecord, validateWordChoice, wordPreparedChoice, wordPreparedSelection, recordWordPreparedIntake, requireWordPreparedIntake, stagedImportSourcesMatch, stagedTextBoxParagraphs, readWordParentSourcePin, requireWordParentSourcePin, retainWordRevisionSource, retainWordRevisionImport, bindWordReadingToRevision, retainWordManuscriptSourceSegments, requireWordManuscriptSourceSegments, readWordImportChoiceRecord, wordParentSourcePinRecord, createWordSampleDetailContext, wordSampleDetailContextCurrent, wordSourceFragmentText, resolveWordSampleDetailSource, pageWordSampleDetail, type WordSampleDetailContext, type WordSampleDetailPage, type WordReadingKind, type WordPreparedIntake, type WordCompiledReading, type WordTrackedChoiceInput, type WordImportChoiceRecord, type StagedImportSources } from './import-retention.js';
+import { ImportedMarkError, createImportedMarks, createWordImportedMarks, validateWordImportedMarkSources, stageImportedMarks, stagedImportedMarksMatch } from './imported-marks.js';
+import { ExportLedgerError, ManuscriptExportStore, readWordManuscriptExportSource } from './manuscript-export.js';
+import { DEFAULT_EXECUTION_RULES_STATEMENT, DEFAULT_EXECUTION_RULE_PROCEDURES, DefaultExecutionRuleError, DefaultExecutionRuleLedger, QUICK_START_DEVELOPER_LIVE, QUICK_START_MODE_UNAVAILABLE, QUICK_START_NEEDS_CONNECTION, QUICK_START_NOT_READY, QUICK_START_OFFLINE, QUICK_START_PLAN_CHANGED, QUICK_START_RANGE_REASON, QUICK_START_RULE_CHANGED, QUICK_START_RESEND, RULE_STATE_LABELS, SET_RULE_BUDGET, SET_RULE_CHANGED, SET_RULE_DEVELOPER_LIVE, SET_RULE_ORDINARY_PRODUCTION, SET_RULE_EDITED, SET_RULE_FIRST_BASELINE, SET_RULE_RANGE, defaultExecutionRuleBindingOf, defaultExecutionRuleCovers, defaultExecutionRuleDoes, defaultExecutionRuleKind, defaultExecutionRuleDrift, defaultExecutionRuleReference, isDefaultExecutionRulePattern, quickStartNoRuleReason, ruleDriftReason, setRuleAlreadyReason, type DefaultExecutionRuleRecord } from './default-execution-rules.js';
 import * as backgroundEnrollments from './background-analysis-enrollments.js';
-import {
-  BACKGROUND_ANALYSIS_LISTED,
-  BACKGROUND_ANALYSIS_NOT_GRANTED,
-  BACKGROUND_CEILING_RULE,
-  BACKGROUND_NO_CEILING,
-  BACKGROUND_NO_RULE,
-  BACKGROUND_PAUSED,
-  BACKGROUND_ENROLL_NO_ROUTE,
-  BACKGROUND_ENROLL_NO_SHARE,
-  BACKGROUND_NO_ROUTE,
-  BACKGROUND_PLACE_BUSY,
-  BACKGROUND_PREPARATION_IN_FLIGHT,
-  BACKGROUND_EDITOR_JOB,
-  BACKGROUND_RECOVERY_PENDING,
-  BACKGROUND_RECORD_DAMAGED,
-  BACKGROUND_REPLACEMENT_WAITING,
-  BACKGROUND_REVOKED,
-  backgroundQuietReason,
-  backgroundShareFullReason,
-  BACKGROUND_ANALYSIS_KIND,
-  BACKGROUND_ANALYSIS_STATEMENT,
-  BACKGROUND_ANALYSIS_WHAT,
-  BACKGROUND_ENROLL_NO_RULE,
-  BACKGROUND_FACTS_UNREADABLE,
-  BACKGROUND_REVOKE_CONSEQUENCES,
-  BACKGROUND_STARTING_POINT_LABELS,
-  BACKGROUND_STARTING_POINT_NOTES,
-  BACKGROUND_STATE_LABELS,
-  BackgroundAnalysisEnrollmentError,
-  BackgroundAnalysisEnrollmentLedger,
-  backgroundAnalysisDecisionOf,
-  backgroundAnalysisWhen,
-  backgroundDriftReason,
-  backgroundEnrollmentDrift,
-  backgroundEnrollmentName,
-  backgroundScopeLabel,
-  BACKGROUND_CEILING_REQUIRED,
-  initializeBackgroundAnalysisEnrollmentSchema,
-  type BackgroundAnalysisDecision,
-  type BackgroundAnalysisEnrollmentRecord,
-} from './background-analysis-enrollments.js';
-import { initializeClarificationSchema } from './analysis/clarifications.js';
-import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
-import {
-  initializeProductionDocumentDeliverySchema,
-  initializeProductionDocumentSchema,
-  initializeMultiDocumentSchema,
-} from './production-document-ledger.js';
-import {
-  BookDeliveryPackageError,
-  BookDeliveryPackages,
-  initializeBookDeliveryPackageSchema,
-  type PackageReadersReportReading,
-} from './book-delivery-packages.js';
-import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
-import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
-import {
-  ReviewGuidelineError,
-  ReviewGuidelineLedger,
-  initializeReviewGuidelineSchema,
-  readGuidelineFile,
-} from './review-guidelines.js';
-import {
-  RESEARCH_EVIDENCE_INCOMPLETE,
-  RESEARCH_EVIDENCE_READ_ONLY,
-  ResearchEvidenceError,
-  ResearchEvidenceLedger,
-  initializeResearchEvidenceSchema,
-  initializeResearchEvidenceUnitRevisionSchema,
-} from './research-evidence.js';
-import {
-  FactualVerificationLedger,
-  initializeFactualVerificationSchema,
-  initializeFactualClaimSchema,
-  type ManuscriptReader,
-} from './factual-verification.js';
+import { BACKGROUND_ANALYSIS_LISTED, BACKGROUND_ANALYSIS_NOT_GRANTED, BACKGROUND_CEILING_RULE, BACKGROUND_NO_CEILING, BACKGROUND_NO_RULE, BACKGROUND_PAUSED, BACKGROUND_ENROLL_NO_ROUTE, BACKGROUND_ENROLL_NO_SHARE, BACKGROUND_NO_ROUTE, BACKGROUND_PLACE_BUSY, BACKGROUND_PREPARATION_IN_FLIGHT, BACKGROUND_EDITOR_JOB, BACKGROUND_RECOVERY_PENDING, BACKGROUND_RECORD_DAMAGED, BACKGROUND_REPLACEMENT_WAITING, BACKGROUND_REVOKED, backgroundQuietReason, backgroundShareFullReason, BACKGROUND_ANALYSIS_KIND, BACKGROUND_ANALYSIS_STATEMENT, BACKGROUND_ANALYSIS_WHAT, BACKGROUND_ENROLL_NO_RULE, BACKGROUND_FACTS_UNREADABLE, BACKGROUND_REVOKE_CONSEQUENCES, BACKGROUND_STARTING_POINT_LABELS, BACKGROUND_STARTING_POINT_NOTES, BACKGROUND_STATE_LABELS, BackgroundAnalysisEnrollmentError, BackgroundAnalysisEnrollmentLedger, backgroundAnalysisDecisionOf, backgroundAnalysisWhen, backgroundDriftReason, backgroundEnrollmentDrift, backgroundEnrollmentName, backgroundScopeLabel, BACKGROUND_CEILING_REQUIRED, type BackgroundAnalysisDecision, type BackgroundAnalysisEnrollmentRecord } from './background-analysis-enrollments.js';
+import { BookDeliveryPackageError, BookDeliveryPackages, type PackageReadersReportReading } from './book-delivery-packages.js';
+import { MaintenanceCaseError, MaintenanceCases } from './maintenance-cases.js';
+import { BookPeople, BookPeopleError } from './book-people.js';
+import { ReviewGuidelineError, ReviewGuidelineLedger } from './review-guidelines.js';
+import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvidenceError, ResearchEvidenceLedger } from './research-evidence.js';
+import { FactualVerificationLedger, type ManuscriptReader } from './factual-verification.js';
 import { planEditAssuranceLevel } from './analysis/plan-edits.js';
-import {
-  LibraryMaterialError,
-  LibraryMaterialLedger,
-  initializeLibraryMaterialSchema,
-  libraryMaterialTitle,
-} from './library-materials.js';
-import {
-  MaterialIndexError,
-  MaterialIndexLedger,
-  initializeMaterialIndexLayerSchema,
-  initializeMaterialTranslationAttemptSchema,
-  initializeMaterialIndexSchema,
-  sweepMaterialIndexWork,
-  type MaterialEmbeddingFacts,
-  type MaterialLayerActivity,
-  type MaterialReferenceBoundary,
-  type MaterialReferencePin,
-  type MaterialTaskReading,
-  type MaterialVectorQuery,
-} from './material-index.js';
-import type { EmbeddingProvider } from './knowledge/embedding.js';
-import { StubEmbeddingProvider } from './knowledge/embedding-stub.js';
+import { LibraryMaterialError, LibraryMaterialLedger, libraryMaterialTitle } from './library-materials.js';
+import { MaterialIndexError, MaterialIndexLedger, sweepMaterialIndexWork, type MaterialLayerActivity, type MaterialReferenceBoundary, type MaterialReferencePin, type MaterialTaskReading } from './material-index.js';
 import type { MaterialTranslator } from './fast-role/material-translation-contract.js';
-import {
-  BUILTIN_EVALUATION_PROFILE,
-  EvaluationError,
-  EvaluationRecords,
-  evaluationProfileDigest,
-  initializeEvaluationInitialDraftSchema,
-  initializeEvaluationRecordSchema,
-  type InitialEvaluationFacts,
-} from './evaluation-records.js';
-import { AnalysisFeedbackError, AnalysisFeedbackLedger, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
-import { OutcomeResolutionLedger, initializeOutcomeResolutionSchema } from './analysis/outcome-resolutions.js';
-import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
-import {
-  LOCAL_LEARNING_POLICY_BASIS,
-  LearningEligibilityError,
-  LearningEligibilityLedger,
-  analysisFeedbackCandidate,
-  initializeLearningEligibilitySchema,
-  learningMaterialDigest,
-  wordTrackedEditCandidate,
-  proposalDecisionCandidate,
-  reviewDispositionCandidate,
-  type LearningMaterialCandidate,
-} from './learning-eligibility.js';
+import { BUILTIN_EVALUATION_PROFILE, EvaluationError, EvaluationRecords, evaluationProfileDigest, type InitialEvaluationFacts } from './evaluation-records.js';
+import { AnalysisFeedbackError, AnalysisFeedbackLedger } from './analysis-feedback.js';
+import { OutcomeResolutionLedger } from './analysis/outcome-resolutions.js';
+import { DecisionFeedbackError, DecisionFeedbackLedger } from './decision-feedback.js';
+import { LOCAL_LEARNING_POLICY_BASIS, LearningEligibilityError, LearningEligibilityLedger, analysisFeedbackCandidate, learningMaterialDigest, wordTrackedEditCandidate, proposalDecisionCandidate, reviewDispositionCandidate, type LearningMaterialCandidate } from './learning-eligibility.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   HISTORICAL_REVIEW_CATEGORY_CONFIGURATION,
   reviewCategoryEntry,
 } from './review/category-configuration.js';
-import {
-  EvaluationCalibrationError,
-  EvaluationCalibrationLedger,
-  initializeEvaluationCalibrationSchema,
-} from './evaluation-calibration.js';
+import { EvaluationCalibrationError, EvaluationCalibrationLedger } from './evaluation-calibration.js';
 import { UsageLedger } from './usage.js';
 import * as seriesOperations from './series.js';
-import { SeriesError, SeriesLedger, initializeSeriesSchema, weighedPage } from './series.js';
+import { SeriesError, SeriesLedger, weighedPage } from './series.js';
 import {
   CALIBRATION_MIN_ADJUSTMENTS,
 } from '../shared/evaluation-calibration.js';
-import {
-  DATA_VERSION,
-  DATA_VERSION_FROZEN,
-  dataVersionAt,
-  DataVersionError,
-  DataVersionLedger,
-  initializeDataVersionSchema,
-  inspectDataVersionMarker,
-  MAX_STORE_VERSIONS_LISTED,
-  readDataVersionMarker,
-  readSoftwareVersion,
-  refuseNewerDataVersion,
-  SCHEMA_REVISION_CLASSES,
-  writeDataVersionMarker,
-} from './data-version.js';
-import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
+import { DATA_VERSION, DATA_VERSION_FROZEN, dataVersionAt, DataVersionError, DataVersionLedger, inspectDataVersionMarker, MAX_STORE_VERSIONS_LISTED, readDataVersionMarker, readSoftwareVersion, refuseNewerDataVersion, refuseOlderDataVersion, SCHEMA_REVISION_CLASSES, storeRevisionOnDisk, writeDataVersionMarker, type DataVersionMarker } from './data-version.js';
+import { DatabaseExportError, DatabaseExports } from './database-exports.js';
 import { DATA_VERSION_MARKER_UNWRITABLE } from '../shared/data-version-labels.js';
-import {
-  ScheduledBackupError,
-  ScheduledBackups,
-  backupLocationFor,
-  initializeScheduledBackupSchema,
-} from './scheduled-backups.js';
-import { backUpBeforeUpgrade, completeUpgrade } from './upgrade-backup.js';
+import { ScheduledBackupError, ScheduledBackups, backupLocationFor } from './scheduled-backups.js';
+import { BASELINE_SCHEMA_REVISION, createStoreAtBaseline, requireBaselineSchema } from './baseline-schema.js';
+import { validateBoundedStore } from './bounded-manuscript.js';
+import { validateConnectionRecords } from './store-schema.js';
+import { validateProcedureDefinitions } from './procedures/definition-store.js';
+import { validateMaterialTranslationAttemptSchema } from './material-index.js';
+import { validateLocalStageArtifacts } from './review/review-runs.js';
 import { DatabasePackageError } from './database-package-reader.js';
-import {
-  DatabaseReplacementError,
-  DatabaseReplacements,
-  completeReplacement,
-  initializeDatabaseReplacementSchema,
-  openWithPendingReplacement,
-} from './database-replacement.js';
-import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
-import {
-  SeriesExclusionError,
-  SeriesExclusionLedger,
-  initializeSeriesRetrievalExclusionSchema,
-  type SeriesKnowledgeMaterial,
-} from './series-exclusions.js';
-import {
-  DIALOGUE_BASIS_QUOTE_CHARACTERS,
-  DIALOGUE_MARK_SOURCE_LABEL,
-  DialogueError,
-  DialogueLedger,
-  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
-  initializeDialogueSchema,
-  type DialogueOutcome,
-  type DialogueTurnStart,
-  type StoredDialogueBinding,
-  type StoredDialogueTask,
-  type QualifiedGlobalAttemptMetadata,
-} from './dialogue/dialogue-ledger.js';
+import { DatabaseReplacementError, DatabaseReplacements, completeReplacement, openWithPendingReplacement } from './database-replacement.js';
+import { DatabaseMergeError } from './database-merge.js';
+import { SeriesExclusionError, SeriesExclusionLedger, type SeriesKnowledgeMaterial } from './series-exclusions.js';
+import { DIALOGUE_BASIS_QUOTE_CHARACTERS, DIALOGUE_MARK_SOURCE_LABEL, DialogueError, DialogueLedger, MAX_DIALOGUE_PROPOSAL_CHARACTERS, type DialogueOutcome, type DialogueTurnStart, type StoredDialogueBinding, type StoredDialogueTask, type QualifiedGlobalAttemptMetadata } from './dialogue/dialogue-ledger.js';
 import {
   dialogueProjection,
   harnessHistoryReader,
@@ -1083,53 +762,20 @@ import {
   type LiveAnswer,
 } from './dialogue/dialogue-history.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import {
-  DRAFT_FIRST_BASELINE_UNAVAILABLE,
-  DRAFT_RANGE_STATE_LABELS,
-  TaskIntentDraftError,
-  TaskIntentDraftLedger,
-  draftAnswer,
-  draftGoal,
-  draftOutcomeClass,
-  goalFromText,
-  initializeTaskIntentDraftSchema,
-  initializeDeliverableDraftSchema,
-  draftBlockBounds,
-  draftParagraphs,
-  draftRangesPlan,
-  isProcedurePin,
-  requireDraft,
-  resolutionOffers,
-  resolveDraft,
-  type DraftResolutionFacts,
-  type StoredDraft,
-  type StoredDraftRange,
-} from './task-intent-drafts.js';
+import { DRAFT_FIRST_BASELINE_UNAVAILABLE, DRAFT_RANGE_STATE_LABELS, TaskIntentDraftError, TaskIntentDraftLedger, draftAnswer, draftGoal, draftOutcomeClass, goalFromText, draftBlockBounds, draftParagraphs, draftRangesPlan, isProcedurePin, requireDraft, resolutionOffers, resolveDraft, type DraftResolutionFacts, type StoredDraft, type StoredDraftRange } from './task-intent-drafts.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
-import { SeriesKnowledgeError, SeriesKnowledgeLedger, initializeSeriesKnowledgeSchema } from './series-knowledge.js';
-import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
-import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
+import { SeriesKnowledgeError, SeriesKnowledgeLedger } from './series-knowledge.js';
+import { EvaluationProfiles } from './evaluation-profiles.js';
+import { ImportedExemplars, ImportedExemplarError } from './imported-exemplars.js';
 import { readExemplarBook, withPackagedVersions, type ExemplarSources } from './exemplars.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import { evaluationMarket, type EvaluationMarketHost } from './evaluation-market.js';
 import * as evaluationCalibrationOperations from './evaluation-calibration-operations.js';
 import * as productionDocumentOperations from './production-document-operations.js';
-import { CapturedProcedures, initializeCapturedProcedureSchema } from './captured-procedures.js';
-import {
-  ProductionDocumentOriginError,
-  initializeProductionDocumentOriginSchema,
-} from './production-document-origins.js';
-import {
-  BookDeliveryPackageExportError,
-  BookDeliveryPackageExports,
-  initializeBookDeliveryPackageExportSchema,
-} from './book-delivery-package-exports.js';
-import {
-  ProductionDocumentWorkflow,
-  ProductionDocumentWorkflowError,
-  initializeProductionDocumentWorkflowSchema,
-  type WorkflowProfilePin,
-} from './production-document-workflow.js';
+import { CapturedProcedures } from './captured-procedures.js';
+import { ProductionDocumentOriginError } from './production-document-origins.js';
+import { BookDeliveryPackageExportError, BookDeliveryPackageExports } from './book-delivery-package-exports.js';
+import { ProductionDocumentWorkflow, ProductionDocumentWorkflowError, type WorkflowProfilePin } from './production-document-workflow.js';
 import {
   ProductionDocumentError,
   ProductionDocuments,
@@ -1143,14 +789,7 @@ import {
 } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 
-import {
-  BoundedManuscriptStore,
-  BoundedStoreError,
-  BoundedStoreFatalError,
-  initializeBoundedSchema,
-  initializeManuscriptEntryPositionSchema,
-  type ReimportCheckpointBinding,
-} from './bounded-manuscript.js';
+import { BoundedManuscriptStore, BoundedStoreError, BoundedStoreFatalError, type ReimportCheckpointBinding } from './bounded-manuscript.js';
 import { RecoveryObjectStore } from './recovery-objects.js';
 import {
   createCanonicalExternalDataRoot,
@@ -1158,13 +797,7 @@ import {
   inspectCanonicalDataFile,
 } from '../shared/data-root.js';
 import { loadBuiltInManuscriptProfile, type BuiltInWorkflowProfile } from './native-workflow-profile.js';
-import {
-  EditorialWorkspaceProfileError,
-  EditorialWorkspaceProfileFatalError,
-  EditorialWorkspaceProfileStore,
-  initializeEditorialWorkspaceProfileSchema,
-  validateEditorialWorkspaceProfileSchema,
-} from './editorial-workspace-profile.js';
+import { EditorialWorkspaceProfileError, EditorialWorkspaceProfileFatalError, EditorialWorkspaceProfileStore, validateEditorialWorkspaceProfileSchema } from './editorial-workspace-profile.js';
 import {
   REVIEW_CATEGORY_CACHE_CAPACITY,
   TASK_PLAN_NOT_CURRENT_REASON,
@@ -1175,24 +808,13 @@ import {
   type StoreControl,
   type WritingExemplarScan,
 } from './store-operation-support.js';
-import {
-  configureDatabase,
-  WalCheckpointPolicy,
-  initializeManuscriptIntakeSchema,
-  initializeManuscriptReimportSchema,
-  initializeModelServiceSchema,
-  initializeSchema,
-  initializeSearchBackendSchema,
-  initializeSourceImportSchema,
-  initializeTextConversionSchema,
-} from './store-schema.js';
+import { configureDatabase, WalCheckpointPolicy } from './store-schema.js';
 
 export { CUSTOM_ANALYSIS_NOT_ADMITTED_REASON,CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON } from './custom-analysis-dimensions.js';
 export { StoreError,StoreFatalError,importedMarksRecord };
 
 export { boundedGraphemes } from './readers-reports.js';
 export { EVALUATION_PROFILE_UNKNOWN_ID,EVALUATION_PROFILE_UNKNOWN_TITLE,REVIEW_CATEGORY_CACHE_CAPACITY,type DraftPromotion,type LedgerTaskKind,type StoreControl } from './store-operation-support.js';
-
 
 const TOKEN_PATTERN = UUID_PATTERN;
 
@@ -1450,6 +1072,7 @@ export type DraftPreparation =
     readonly intentDraft: DraftPromotion;
   };
 
+
 export class EditorialStore {
   readonly #importRetentionOperationsHost: importRetentionOperations.ImportRetentionOperationsHost = this.#importRetentionOperationsHostOf();
   #importRetentionOperationsHostOf(): importRetentionOperations.ImportRetentionOperationsHost {
@@ -1482,6 +1105,7 @@ export class EditorialStore {
   #manuscriptReimportOperationsHostOf(): manuscriptReimportOperations.ManuscriptReimportOperationsHost {
     const store = this;
     return {
+      get control() { return store.#control; },
       assertAvailable: this.#assertAvailable.bind(this),
       reimportLineageSourceVersionPage: this.#reimportLineageSourceVersionPage.bind(this),
       requireNoAbandonmentCleanupIntent: this.#requireNoAbandonmentCleanupIntent.bind(this),
@@ -1738,8 +1362,8 @@ export class EditorialStore {
       transaction: this.#transaction.bind(this),
       get getConfiguredModelRoleBinding() { return store.getConfiguredModelRoleBinding.bind(store); },
       get getManuscriptWindow() { return store.getManuscriptWindow.bind(store); },
-      get getModelServiceConnections() { return store.getModelServiceConnections.bind(store); },
       get globalAgentAttempt() { return store.globalAgentAttempt.bind(store); },
+      get resolveModelRole() { return (role: ModelRoleId) => modelSearchSettings.resolveModelRole(store.#modelSearchSettingsHost, role); },
       get globalAgentModelConnection() { return store.globalAgentModelConnection.bind(store); },
       get globalAgentProcedureDocument() { return store.globalAgentProcedureDocument.bind(store); },
       get globalAgentRedact() { return store.globalAgentRedact.bind(store); },
@@ -1757,10 +1381,6 @@ export class EditorialStore {
     return {
       get authority() { return store.#authority; },
       get dataRoot() { return store.#dataRoot; },
-      get embedding() { return store.#embedding; },
-      enrollmentCall: this.#enrollmentCall.bind(this),
-      get enrollments() { return store.#enrollments; },
-      get idleVectorItems() { return store.#idleVectorItems; },
       get indexController() { return store.#indexController; },
       set indexController(value) { store.#indexController = value; },
       get indexEnabled() { return store.#indexEnabled; },
@@ -1784,13 +1404,6 @@ export class EditorialStore {
       set translationRun(value) { store.#translationRun = value; },
       get translator() { return store.#translator; },
       set translator(value) { store.#translator = value; },
-      get vectorBuilding() { return store.#vectorBuilding; },
-      set vectorBuilding(value) { store.#vectorBuilding = value; },
-      get vectorLaneIdle() { return store.#vectorLaneIdle; },
-      set vectorLaneIdle(value) { store.#vectorLaneIdle = value; },
-      get vectorQueue() { return store.#vectorQueue; },
-      get vectorRun() { return store.#vectorRun; },
-      set vectorRun(value) { store.#vectorRun = value; },
       get inspectLibraryMaterial() { return store.inspectLibraryMaterial.bind(store); },
       get replacementFrozen() { return store.replacementFrozen.bind(store); },
       get startMaterialIndexing() { return store.startMaterialIndexing.bind(store); },
@@ -1811,7 +1424,6 @@ export class EditorialStore {
       get getModelServiceRouteConnection() { return store.getModelServiceRouteConnection.bind(store); },
       get getSearchBackendConnections() { return store.getSearchBackendConnections.bind(store); },
       get modelServiceBinding() { return store.modelServiceBinding.bind(store); },
-      get selectRoleModel() { return store.selectRoleModel.bind(store); },
     };
   }
 
@@ -1896,14 +1508,6 @@ export class EditorialStore {
   #indexStopped = false;
   /** Set once the service serves (`startMaterialIndexing`): a store opened for any other purpose builds no index by itself. */
   #indexEnabled = false;
-  /**
-   * 相似段落检索 (Issue #892): what makes the similarity vectors on this machine — the deterministic built-in provider until a
-   * model adapter is admitted — and the items whose vectors the editor asked for, in order, and the one being built now.
-   */
-  readonly #embedding: EmbeddingProvider = new StubEmbeddingProvider();
-  readonly #vectorQueue: string[] = [];
-  #vectorBuilding: string | null = null;
-  #vectorRun: Promise<void> | null = null;
   /** 来源译文 (Issue #892): who makes it, if this launch can; the item being translated now; why an item's last request stopped. */
   #translator: MaterialTranslator | null = null;
   #translating: string | null = null;
@@ -1919,6 +1523,7 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
+  readonly #taskWork: TaskWorkReader;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
   /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
   readonly #seriesExclusions: SeriesExclusionLedger;
@@ -2013,6 +1618,12 @@ export class EditorialStore {
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
+    this.#guidelineFormatting = new ReviewGuidelineFormatting(this.#reviewGuidelines, this.#assertAvailable.bind(this), this.#guidelineCall.bind(this));
+    this.standardTables = new StandardTableLibrary({ db: authority, assertAvailable: this.#assertAvailable.bind(this),
+      transaction: operation => this.#transaction(authority, operation), withObjects: operation => this.#withContentObjectLifecycle(operation),
+      keep: async (bytes, digest) => { this.#requireNoAbandonmentCleanupForObject(digest);
+        const existing = authority.prepare('SELECT relative_key FROM content_objects WHERE object_digest = ?').get(digest);
+        return existing ? String(existing.relative_key) : this.#persistContentObject(bytes, digest, 'UNKNOWN'); }, objectPath: this.#contentObjectPath.bind(this) });
     this.#materialIndex = new MaterialIndexLedger(authority);
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#factualVerification = new FactualVerificationLedger(authority);
@@ -2026,6 +1637,8 @@ export class EditorialStore {
     this.#series = new SeriesLedger(authority);
     this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
+    this.#taskWork = new TaskWorkReader(authority, { reviewTaskIntents: (reviewRunId) => this.#reviewRuns.workTaskIntents(reviewRunId),
+      reviewModelLabel: (reviewRunId) => this.#reviewRuns.modelLabelOf(reviewRunId) }, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -2040,7 +1653,7 @@ export class EditorialStore {
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
       facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
-      // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
+      // A package's data opens as a store of its own, with no launch control: at this baseline or refused, checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
           induceUnprovableReconciliation: false,
@@ -2223,6 +1836,7 @@ export class EditorialStore {
       throw error;
     });
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
+    requireStore(!existsSync(join(dataRoot, 'shell', 'storage-upgrade.json')), 'UPGRADE_PENDING', '请在应用内继续上次数据升级。');
     // Refuse before pending replacement recovery can remove staging, move data or merge into SQLite (#967 review).
     await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     // 替换本机全部数据 (Issue #434, S86c; ADR 0079 §1.3): a replacement prepared in the last lifetime is applied before anything
@@ -2254,9 +1868,21 @@ export class EditorialStore {
     try {
       const marker = await readDataVersionMarker(dataRoot);
       if (marker !== null) refuseNewerDataVersion(marker, {
-        dataVersion: dataVersionAt(LATEST_SCHEMA_VERSION, control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES),
+        dataVersion: dataVersionAt(LATEST_SCHEMA_VERSION, SCHEMA_REVISION_CLASSES),
         schemaRevision: LATEST_SCHEMA_VERSION,
       });
+      // Data an earlier AI7 wrote is refused as it lies, read from its marker and its files without opening SQLite (#1634).
+      EditorialStore.#refuseOlder(marker, storeRevisionOnDisk(join(dataRoot, 'store', 'ai7.sqlite')));
+    } catch (error) {
+      if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /** Data of an earlier Data Version, by its marker or by the revision its files hold, is refused as it lies (#1634). */
+  static #refuseOlder(marker: DataVersionMarker | null, revisionOnDisk: number | null): void {
+    try {
+      refuseOlderDataVersion(marker, revisionOnDisk, { dataVersion: dataVersionAt(LATEST_SCHEMA_VERSION, SCHEMA_REVISION_CLASSES) });
     } catch (error) {
       if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
       throw error;
@@ -2273,7 +1899,7 @@ export class EditorialStore {
   ): Promise<EditorialStore> {
     // 数据版本标记 (Issue #967; ADR 0023): data a newer AI7 wrote is refused before anything here touches it — nothing is created,
     // migrated or backed up. A store without a marker yet opens, and this open writes it.
-    const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
+    const classes = SCHEMA_REVISION_CLASSES;
     await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
     const recoveryObjects = await RecoveryObjectStore.open(dataRoot);
@@ -2286,198 +1912,38 @@ export class EditorialStore {
     let journal: DatabaseSync | null = null;
     let ingest: DatabaseSync | null = null;
     try {
+      // 存储基线 (#1634; ADR 0105 §4): a store of an earlier Data Version, or a database AI7 did not make, was refused above from
+      // its files, untouched. This second check only guards the files' reading: it writes nothing, but closing the handle may
+      // checkpoint a log. An empty store is built at the baseline in one transaction, with its seed and its first version record.
+      const revision = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
+      EditorialStore.#refuseOlder(null, revision);
+      requireStore(revision === 0 || revision === BASELINE_SCHEMA_REVISION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
       configureDatabase(authority, 'FILE');
-      validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
-      const beforeWordVersion = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
-      // An unknown future schema belongs to the existing unsupported-version refusal, not this Word reader.
-      if (beforeWordVersion <= LATEST_SCHEMA_VERSION) {
-        try {
-          validateWordImportRetentionVersion(authority, beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
-          if (beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) await validateRetainedWordImports(authority, dataRoot, objectsRoot);
-        } catch (error) {
-          if (error instanceof ImportRetentionError) throw new StoreError(error.code, error.message);
-          throw error;
-        }
-      }
-      // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
-      // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
-      const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: LATEST_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
-      }).catch((error: unknown) => {
-        if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+      if (revision === 0) createStoreAtBaseline(authority, softwareVersion, dataVersionAt(LATEST_SCHEMA_VERSION, classes));
+      requireBaselineSchema(authority);
+      validateRequestAdmissionRecords(authority, true);
+      try {
+        validateWordImportRetentionVersion(authority, true);
+        await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+      } catch (error) {
+        if (error instanceof ImportRetentionError) throw new StoreError(error.code, error.message);
         throw error;
-      });
-      initializeSchema(authority);
-      initializeDeliverableDraftSchema(authority);
-      initializeBoundedSchema(authority, workflowProfile);
-      initializeSourceImportSchema(authority, workflowProfile);
+      }
       if (control.induceReimportProofTamper) {
         requireStore(authority.prepare(REIMPORT_PROOF_TAMPER_SQL).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
       }
-      initializeManuscriptReimportSchema(authority, workflowProfile);
-      // A store already at the terminal version is validated whole exactly twice per open: once above,
-      // before any cleanup write, and once below, after the E2E control injection, the layered
-      // initializers, and native-artifact partial recovery. The initializers between those two points
-      // would otherwise repeat the same whole-store validation over an unchanged store.
-      initializeModelServiceSchema(authority, workflowProfile, false);
-      initializeEditorialWorkspaceProfileSchema(authority);
-      initializeBoundedSchema(authority, workflowProfile, false);
+      // The record checks each owner runs over a store it did not just write: the manuscript core once, then every ledger with
+      // rules of its own beyond its shape.
+      validateBoundedStore(authority, workflowProfile);
+      validateConnectionRecords(authority);
       const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
-      // The intake relations widen before the terminal version moves, so the version and the shape it
-      // names change together for every store that reaches revision 18, and again for revision 19,
-      // and again for the entry-position relation revision 21 adds, the editorial-mark relations
-      // revision 22 adds and the manuscript-effect relations revision 23 adds. Revision 24 (Issue
-      // #417) adds the Review Run relations here, and `initializeTaskAuthorizationSchema` rebuilds the
-      // three kind-coupled analysis relations for the review-category kind family. Revision 25 (Issue
-      // #414) adds the Publication Version relations here and revision 26 (Issue #57) the proposal-conflict
-      // relations, and the version stamp is the only other move. Revision 27 (Issue #410) widens
-      // `import_fidelity_categories` and adds the import-retention relations here, in one transaction.
-      // Revision 28 (Issue #411) widens `proposal_change_items` to the `insert` kind and adds the staged
-      // imported marks here, in one transaction. Revision 29 (Issue #413) adds the export ledger here, and
-      // revision 31 (Issue #421) the default-execution-rule ledger; `initializeTaskAuthorizationSchema` widens
-      // the Run Authorization origin for it and stamps the version.
-      initializeManuscriptIntakeSchema(authority);
-      initializeTextConversionSchema(authority);
-      initializeManuscriptEntryPositionSchema(authority);
-      initializeEditorialMarkSchema(authority);
-      initializeManuscriptEffectSchema(authority);
-      initializeReviewRunSchema(authority);
-      initializeLocalStageSchema(authority);
-      // Existing House DDL is checked by the structural owner; no historical JSON/hash walk on open.
-      if (authority.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'house_word_list_versions' AND type = 'table'").get() === undefined) initializeHouseWordListSchema(authority);
-      initializePublicationVersionSchema(authority);
-      initializeProposalConflictSchema(authority);
-      initializeImportRetentionSchema(authority);
-      initializeWordImportRetentionSchema(authority);
-      initializeImportedMarkSchema(authority);
-      initializeExportLedgerSchema(authority);
-      initializeDefaultExecutionRuleSchema(authority);
-      initializeRunCheckpointSchema(authority);
-      initializeClarificationSchema(authority);
-      // Revision 36 (Issue #412) adds the chapter-level Reimport Comparison's relations here, and revision 37
-      // (Issue #415) rebuilds `manuscripts` for Production Documents beside their ledgers.
-      initializeReimportGroupSchema(authority);
-      initializeProductionDocumentSchema(authority);
-      // Revision 38 (Issue #415, S66b) adds their Delivery Records, and revision 39 (Issue #416, S67a) the Book's
-      // frozen 图书交付包 versions.
-      initializeProductionDocumentDeliverySchema(authority);
-      initializeBookDeliveryPackageSchema(authority);
-      // Revision 40 (Issue #415, S66c) adds each document's workflow instance and phase moves, and revision 41 (Issue #416,
-      // S67b) each package export and the files it links.
-      initializeProductionDocumentWorkflowSchema(authority, workflowProfilePin(workflowProfile));
-      initializeBookDeliveryPackageExportSchema(authority);
-      // Revision 42 (Issue #547) adds how each document's origin material was read, and revision 43 (Issue #426, S68a) the
-      // 维护事项 of each 发稿版本.
-      initializeProductionDocumentOriginSchema(authority);
-      initializeMaintenanceCaseSchema(authority);
-      // Revision 44 (Issue #431, S83) adds each Book's people, revision 45 (Issue #427, S79a) the versions a house imports
-      // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions;
-      // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
-      // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
-      // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
-      // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
-      // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
-      // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
-      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
-      // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
-      // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
-      // revision 60 (Issue #52, S17a) adds the dialogue Tasks, and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
-      // Revision 63 (Issue #65, S30) adds the Captured Procedures and the Developer Capability Proposals.
-      initializeBookPeopleSchema(authority);
-      initializeReviewGuidelineSchema(authority);
-      initializeLibraryMaterialSchema(authority);
-      initializeEvaluationRecordSchema(authority);
-      initializeAnalysisFeedbackSchema(authority);
-      initializeDecisionFeedbackSchema(authority);
-      initializeLearningEligibilitySchema(authority);
-      initializeEvaluationCalibrationSchema(authority);
-      initializeSeriesSchema(authority);
-      initializeSeriesKnowledgeSchema(authority);
-      initializeDataVersionSchema(authority);
-      initializeDatabaseExportSchema(authority);
-      initializeScheduledBackupSchema(authority);
-      initializeDatabaseReplacementSchema(authority);
-      initializeDatabaseMergeSchema(authority);
-      initializeEvaluationInitialDraftSchema(authority);
-      initializeDialogueSchema(authority);
-      initializeSeriesRetrievalExclusionSchema(authority);
-      // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
-      initializeReadersReportSchema(authority);
-      initializeCapturedProcedureSchema(authority);
-      // Revision 64 (Issue #429, S81b2): which version each 按我的评分重写评语 Task rewrites, and the editor's decisions.
-      initializeEvaluationRewriteSchema(authority);
-      // Revision 65 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a document.
-      initializeWritingTaskSchema(authority);
-      initializeMultiDocumentSchema(authority);
-      // Revision 66 (Issue #95, S39): each Book's 后台分析登记; `initializeTaskAuthorizationSchema` widens the Run Authorizations'
-      // origin for it and stamps the version.
-      initializeBackgroundAnalysisEnrollmentSchema(authority);
-      // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and the segments of a complete one.
-      initializeMaterialIndexSchema(authority);
-      // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known.
-      initializeOutcomeResolutionSchema(authority);
-      // Revision 69 (Issue #427): earlier published Books' imported 范例, their exact versions and Learning Eligibility.
-      initializeImportedExemplarSchema(authority);
-      initializeEvaluationProfileSchema(authority);
-      // Revision 72 (Issue #811): the model-service connections widen for the two ordinary-production routes.
-      initializeModelServiceRoutesSchema(authority);
-      initializeSearchBackendSchema(authority); initializeSearchFallbackSchema(authority);
-      // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
-      initializeResearchEvidenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeResearchEvidenceUnitRevisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
-      initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeProposalReviewSchema(authority);
-      // Revision 78 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
-      initializeFactualClaimSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeFactualVerificationSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeHouseReviewPreferenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts; `initializeTaskAuthorizationSchema` rebuilds the Task
-      // Intents for the drafts' sentences and stamps the version.
-      initializeTaskIntentDraftSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 81 (Issue #66; ADR 0090): the inert imported-Skill ledgers beside the native artifact's.
-      initializeImportedSkillSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 82 (Issue #922, slice 7f): the house's 自定义分析维度; `initializeTaskAuthorizationSchema` rebuilds the Result Set
-      // relations for the custom analysis family and stamps the version.
-      initializeCustomAnalysisDimensionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 83 (Issue #89; ADR 0090 §3): the foreign Skill update candidates, rules and current selections beside them.
-      initializeImportedSkillUpdateSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeModelSelectionSchema(authority); initializeAdmittedChannelsSchema(authority);
-      initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeProcedureDefinitionSchema(authority);
-      initializeEditableProcedureSchema(authority); initializeStructuralEditSchema(authority); initializeNoteBlockSchema(authority); initializeImportStructureSchema(authority);
-      // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
-      initializeEditorialLearningSchema(authority);
-      // Revision 87 (Issue #1083): the editor's Learning Supervision Directives; a damaged chain refuses the store once the
-      // whole-store validation has read the relation itself.
-      initializeSupervisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 91 (Issue #1128): the editor-governed memory /2 and 本社审阅偏好 /2 readers add no relation. Before the stamp, a
-      // store that could hold learning records is proved by the revision-90 readers, and none of revision 91's own records may stand.
-      const learningRevision = asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-      if (learningRevision >= EDITORIAL_LEARNING_SCHEMA_VERSION && learningRevision < EDITORIAL_MEMORY_SCHEMA_VERSION) {
-        new EditorialLearningLedger(authority).validate(false);
-        new HouseReviewPreferenceLedger(authority).validate(false);
-        for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) requireStore(
-          new SupervisionDirectives(authority).history(scope).every((directive) => directive.actionId === undefined), 'SCHEMA_INVALID', '学习监督记录与数据库修订不一致。');
-      } else if (learningRevision === EDITORIAL_MEMORY_SCHEMA_VERSION) {
-        // Revision 92 only stamps (Issue #1131): a revision-91 store is proved by its own readers before it claims the successor.
-        new EditorialLearningLedger(authority).validate();
-        new SupervisionDirectives(authority).validate();
-        new HouseReviewPreferenceLedger(authority).validate();
-      }
-      initializeFactualRangeTaskSchema(authority);
-      // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
-      initializeAiEditLockSchema(authority);
-      initializeDerivativeWorkspaceSchema(authority);
-      initializeInlineEditorRevisionSchema(authority);
-      initializeTaskAuthorizationSchema(authority);
-      initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
-      validateTaskAuthorizationSchema(authority);
+      validateProcedureDefinitions(authority);
+      validateMaterialTranslationAttemptSchema(authority);
+      validateLocalStageArtifacts(authority);
       new EditorialLearningLedger(authority).validate();
       new SupervisionDirectives(authority).validate();
       new HouseReviewPreferenceLedger(authority).validate();
-      validateRequestAdmissionRecords(authority, true);
       journal = new DatabaseSync(databasePath);
       configureDatabase(journal);
       ingest = new DatabaseSync(databasePath);
@@ -2538,23 +2004,17 @@ export class EditorialStore {
       store.#factualReview.bindLaunch(localLaunch);
       store.#initialEvaluation.bindLaunch(localLaunch);
       store.#dataVersion = dataVersionAt(LATEST_SCHEMA_VERSION, classes);
-      if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
-      // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
-      // that let an open stopped before this record it (Issue #433 review).
+      // A new record only when the software, the Data Version or the revision changed since the last (Issue #433, S85a).
       store.#dataVersionCall(() => store.#transaction(authority, () => {
-        // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
-        // record already holds is not recorded again (Issue #433 review).
-        for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION });
       }));
-      if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
-      await completeUpgrade(dataRoot).catch(() => undefined);
       // The marker last, once every owner has opened and the versions are recorded (Issue #967): create or replace.
       await writeDataVersionMarker(dataRoot, {
         dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion, writtenAt: new Date().toISOString(),
       }).catch(() => {
         throw new StoreError('DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE);
       });
+      store.#taskWork.acquire();
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
@@ -2688,34 +2148,32 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.rangePlan(input.bookId, input.unitOrdinal));
   }
 
-  /** Read-only aggregation: the source owners derive dispositions on every read. */
-  readonly #bookFindingsHost: BookFindingsHost = this.#bookFindingsHostOf();
-
-  #bookFindingsHostOf(): BookFindingsHost {
+  readonly #bookFindings = this.#bookFindingsReader();
+  #bookFindingsReader(): BookFindingsReader {
     const store = this;
-    return {
+    return new BookFindingsReader({
       get authority() { return store.#authority; },
       evaluationBookTitle: this.#evaluationBookTitle.bind(this),
       latestAnalysisRevision: this.#latestAnalysisRevision.bind(this),
-      inspectReviewWorkspace: (bookId, reviewRunId, progress, page) => this.inspectReviewWorkspace(bookId, reviewRunId, progress, page),
+      reviewFindings: (bookId) => this.#reviewCall(() => this.#reviewRuns.bookFindings(bookId)),
       inspectEvaluation: (bookId, recordId) => this.inspectEvaluation(bookId, recordId),
-    };
+    });
   }
 
-  inspectBookFindings(bookId: string, offset = 0): BookFindingsProjection {
-    return inspectBookFindings(this.#bookFindingsHost, bookId, offset);
+  inspectBookFindings(bookId: string, options: number | InspectBookFindingsInput = 0): BookFindingsReadProjection {
+    return this.#bookFindings.inspect(bookId, options);
   }
 
   inspectParagraphAnalysis(bookId: string, manuscriptId: string, blockId: string, radius: number): ParagraphAnalysisProjection {
     requireStore(Number.isSafeInteger(radius) && radius >= 0 && radius <= 4, 'ANALYSIS_RANGE_INVALID', '段落分析范围无效。');
-    const block = this.#authority.prepare(`SELECT wb.position, wb.branch_id FROM manuscripts m
+    const block = this.#authority.prepare(`SELECT wb.order_key, wb.branch_id FROM manuscripts m
       JOIN branch_working_state bws ON bws.manuscript_id = m.manuscript_id
       JOIN working_blocks wb ON wb.branch_id = bws.branch_id
       WHERE m.book_id = ? AND m.manuscript_id = ? AND m.role = 'primary' AND wb.block_id = ?`).get(bookId, manuscriptId, blockId) as SqlRow | undefined;
     requireStore(block !== undefined, 'ANALYSIS_BLOCK_UNAVAILABLE', '这段文字已不在当前稿件中。');
-    const nearby = this.#authority.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ?')
-      .all(asString(block.branch_id), asNumber(block.position) - radius, asNumber(block.position) + radius) as SqlRow[];
-    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), this.#latestAnalysisRevision(bookId));
+    const at = paragraphAtKey(this.#authority, asString(block.branch_id), asNumber(block.order_key)), from = Math.max(1, at - radius);
+    const nearby = rowsFrom(this.#authority, asString(block.branch_id), from, at + radius - from + 1).map((row) => row.blockId);
+    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby), this.#latestAnalysisRevision(bookId));
   }
 
   /** The latest settled result set alone: the panel reads it on a cadence, so none of 分析's page decorations are built. */
@@ -2812,6 +2270,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
+      requireRelaunchSource: (bookId, source, preview) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run', preview),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3083,31 +2542,18 @@ export class EditorialStore {
     const { clientCommandId, ...request } = input;
     try {
       return launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'scoped-ai-edit', input: request },
-        () => this.#launchChoice('fast-interaction', input.executionConfig ?? {}, input.rememberedChoice), choice => create(choice.binding));
+        () => this.#launchChoice('foreground-flash', input.executionConfig ?? {}, input.rememberedChoice), choice => create(choice.binding));
     } catch (error) {
       if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }
 
-  #launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
-    let notice: string | undefined;
-    if (remembered && Object.keys(override).length > 0) {
-      const connection = this.getModelServiceConnections().find(connection => override.modelConnectionId === undefined
-        ? role === 'main-editorial' ? connection.selected : connection.fastSelected : connection.connectionId === override.modelConnectionId);
-      if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
-          !this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId))) {
-        override = {};
-        notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
-      }
-    }
-    const binding = this.getConfiguredModelRoleBinding(role, override);
-    requireStore(this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production' || binding !== null,
-      'MODEL_SERVICE_SETUP_REQUIRED', '请先在设置中连接可用模型。');
-    const connection = binding === null ? undefined : this.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference);
-    return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: { ...(connection === undefined ? {} : { modelConnectionId: connection.connectionId }),
-      ...(binding === null ? {} : { modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off' }) } };
+  #launchChoice(role: 'main-editorial' | 'foreground-flash' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
+    return modelSearchSettings.resolveModelLaunchChoice(this.#modelSearchSettingsHost, this.#baselineAnalysis.launch.operationalScope, role, override, remembered);
   }
+
+  requireCurrentModelRoleEffort(role: ModelRoleId): void { modelSearchSettings.requireCurrentModelRoleEffort(this.#modelSearchSettingsHost, role); }
 
   #launchInitialHost(execution: import('./analysis/baseline-analysis-store.js').LaunchBinding): initialEvaluationOperations.InitialEvaluationOperationsHost {
     const host: initialEvaluationOperations.InitialEvaluationOperationsHost = { ...this.#initialEvaluationOperationsHost,
@@ -3123,10 +2569,11 @@ export class EditorialStore {
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
     startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     if (preview !== undefined) {
+      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind, true);
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview, previewAfterCancellation: input.relaunchOf?.cancelsFirst === true,
         ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy));
       throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
     }
@@ -3135,6 +2582,7 @@ export class EditorialStore {
     try {
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind, input: request },
         () => this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice), (choice, snapshotId) => {
+          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind);
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
@@ -3171,12 +2619,12 @@ export class EditorialStore {
 
   launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen, preview);
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, input.redoOf ?? null, null, context), startWhen, preview);
   }
 
   launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen, preview);
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, input.seriesId ?? null, context), startWhen, preview);
   }
 
   launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
@@ -3185,7 +2633,7 @@ export class EditorialStore {
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
-        input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
+        input.bookId, input.template, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3194,35 +2642,17 @@ export class EditorialStore {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
-        input.bookId, input.recordId, launchPolicy, null, context);
+        input.bookId, input.recordId, launchPolicy, input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
-  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection): import('../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
-    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task, describe) => {
-      return ledger.previewLaunch(task, input.launch.input.planEdits, (projection, blocks) => {
-        const bookTitle = this.#evaluationBookTitle(input.bookId);
-        const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle, blocks })
-          : describe(projection, blocks, bookTitle);
-        const controlled = withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks);
-        throw new TaskLaunchPreview({ steps: controlled.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
-          scope: controlled.scope.process, units: projection.coverageManifest!.units.length, reference: controlled.scope.reference,
-          send: `${controlled.scope.send}；${controlled.service.send}`, usage: controlled.service.usage,
-          adaptations: controlled.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) });
-      });
-    };
-    const launch = input.launch;
-    try {
-      switch (launch.operation) {
-        case 'launchBaselineAnalysis': this.launchBaselineAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchCustomAnalysis': this.launchCustomAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchWritingTask': this.launchWritingTask({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchInitialEvaluation': this.launchInitialEvaluation({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchReadersReport': this.launchReadersReport({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchEvaluationRewrite': this.launchEvaluationRewrite({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-      }
-    } catch (result) { if (result instanceof TaskLaunchPreview) return result.projection; throw result; }
-    throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
+  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection) {
+    return previewTaskLaunch(this, input, policy, bookId => this.#evaluationBookTitle(bookId),
+      request => this.#taskWork.previewRead(reviewOperations.previewReviewRun(this.#reviewOperationsHost, request, policy, this.#evaluationBookTitle(input.bookId)), 'review-run'), this.#taskWork);
+  }
+
+  scopedAiEditLaunchChoice(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput) {
+    return this.#launchChoice('foreground-flash', input.executionConfig ?? {}, input.rememberedChoice);
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
@@ -3310,7 +2740,7 @@ export class EditorialStore {
    * checks see the same ledger. The range the chips name is the current plan version's (#288).
    */
   inspectTaskPlan(input: InspectTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
-    return this.#taskPlanWithRoute(input, progress).plan;
+    return this.#taskWork.planRead(this.#taskPlanWithRoute(input, progress).plan);
   }
 
   getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection | BookTasksProjection) {
@@ -3380,6 +2810,7 @@ export class EditorialStore {
           const originalState = plan.state;
           plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live',
             this.#liveCancellationRanges(projection, controlling.ledger));
+          plan = { ...plan, boundary: found.plan.boundary };
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
@@ -3415,7 +2846,7 @@ export class EditorialStore {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
       if (promoted.latest.target === 'ranges') plan = draftRangesPlan(plan, promoted.latest.ranges);
     }
-    return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+    return { ...found, plan: withTaskRelaunch(this.#taskRelaunchHost(), { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) }) };
   }
 
   #taskPlanOfKind(
@@ -3584,7 +3015,7 @@ export class EditorialStore {
   ): Promise<TaskPlanProjection> {
     const { plan: frozen, routeKind, provider } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
     const binding = this.#productionCredentialBinding(provider);
-    let plan = frozen;
+    let plan = this.#taskWork.planRead(frozen);
     if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness(binding));
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
     // and only once its credential is known to be there — 模型未连接 is decided first.
@@ -3793,39 +3224,21 @@ export class EditorialStore {
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  #taskRelaunchHost(): TaskRelaunchHost {
+    return { authority: this.#authority, analysisLedger: this.#analysisLedgerOfTask.bind(this), ledger: this.taskRunLedger.bind(this),
+      reviewRepeat: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, ref)),
+      reviewRedo: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.redoRequest(bookId, ref)),
+      materialIds: ref => this.#evaluationMaterialPlan(ref)?.boundary.references.map(entry => entry.materialId) ?? [],
+      readersTask: ref => this.#readersReportCall(() => this.#readersReports.task(ref)),
+      rewriteTask: ref => this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(ref)),
+      writingTask: ref => this.#writingCall(() => this.#writingTasks.task(ref)),
+      latestReaders: bookId => readersReportOperations.latestReadersReport(this.#readersReportHost, bookId),
+      latestRewrite: bookId => evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId),
+      latestWriting: bookId => this.#latestWriting(bookId), taskPlan: input => this.inspectTaskPlan(input), reviewFacts: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, ref)) };
+  }
+
   repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
-    if (source.kind === 'review-run') return { kind: source.kind, ...this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, source.ref)) };
-    const row = this.#authority.prepare(`SELECT r.run_record_id, t.kind FROM analysis_run_records r
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-      WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC LIMIT 1`).get(bookId, source.ref) as SqlRow | undefined;
-    requireStore(row !== undefined, 'TASK_REPEAT_UNAVAILABLE', '原任务的运行记录不存在。');
-    const expected = source.kind === 'baseline-analysis' ? BASELINE_ANALYSIS_KIND : source.kind === 'writing' ? WRITING_KIND
-      : source.kind === 'initial-evaluation' ? INITIAL_EVALUATION_KIND : source.kind === 'readers-report' ? READERS_REPORT_KIND : EVALUATION_REWRITE_KIND;
-    requireStore(asString(row.kind) === expected || source.kind === 'baseline-analysis' && isCustomAnalysisKindId(row.kind), 'TASK_REPEAT_UNAVAILABLE', '原任务类型不一致。');
-    if (source.kind === 'baseline-analysis') {
-      const ledger = this.#analysisLedgerOfTask(bookId, source.ref);
-      const facts = ledger.loadExecutionPlan(asString(row.run_record_id));
-      const mode = facts.update?.mode;
-      const update = mode === 'sync-current' || mode === 'reanalyze-range' || mode === 'reanalyze-book' ? { mode, selectedRange: facts.update!.selectedRange }
-        : ledger.inspect(bookId).resultSetRevision === null ? null : { mode: 'reanalyze-book' as const, selectedRange: null };
-      return { kind: source.kind, update, customRef: isCustomAnalysisKindId(row.kind) ? source.ref : null };
-    }
-    const materialIds = this.#evaluationMaterialPlan(source.ref)?.boundary.references.map((entry) => entry.materialId) ?? [];
-    if (source.kind === 'initial-evaluation') return { kind: source.kind, materialIds };
-    if (source.kind === 'readers-report') {
-      const task = this.#readersReportCall(() => this.#readersReports.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原审稿意见任务不存在。');
-      return { kind: source.kind, template: task.template, materialIds };
-    }
-    if (source.kind === 'evaluation-rewrite') {
-      const task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原评估重写任务不存在。');
-      return { kind: source.kind, recordId: task.recordId };
-    }
-    const task = this.#writingCall(() => this.#writingTasks.task(source.ref));
-    requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原写作任务不存在。');
-    return { kind: source.kind, request: { typeId: task.typeId, audience: task.input.audience, channel: task.input.channel,
-      requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+    return this.#analysisCall(() => repeatTaskRequest(this.#taskRelaunchHost(), bookId, source));
   }
 
   quickTaskRule(bookId: string, ruleId: string) {
@@ -3843,24 +3256,7 @@ export class EditorialStore {
   }
 
   redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
-    if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
-    const ledger = this.taskRunLedger(input);
-    const projection = this.#analysisCall(() => ledger.inspect(input.bookId));
-    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run !== null &&
-      (projection.run.state === 'cancelled' || (projection.run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached')) &&
-      projection.run.transitions.some((entry) => entry.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有开始后取消的运行可以改计划重做。');
-    const redoOf = projection.run.runRecordId;
-    const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
-    switch (input.kind) {
-      case 'initial-evaluation': return { kind: input.kind, redoOf, materialIds };
-      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: readersReportOperations.latestReadersReport(this.#readersReportHost, input.bookId)!.task.template };
-      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, input.bookId)!.task.recordId };
-      case 'writing': {
-        const task = this.#latestWriting(input.bookId)!.task;
-        return { kind: input.kind, redoOf, request: { typeId: task.typeId, audience: task.input.audience,
-          channel: task.input.channel, requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
-      }
-    }
+    return this.#analysisCall(() => redoTaskRequest(this.#taskRelaunchHost(), input));
   }
 
   requestTaskRunControl(input: ControlTaskRunInput): { runRecordId: string | null; ledger: BaselineAnalysisStore } {
@@ -3876,6 +3272,7 @@ export class EditorialStore {
 
   editTaskPlan(input: EditTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
     if (input.kind === 'review-run') {
+      requireReviewRetryChoice(input);
       const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
       const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
       requireStore(digest === input.planEnvelopeDigest && tasks.length > 0, 'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
@@ -3889,15 +3286,13 @@ export class EditorialStore {
       this.#transaction(this.#authority, () => {
         let changed = 0;
         for (const task of tasks) {
-          const factual = task.categoryId === 'factual-review';
           try {
-            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
-              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...reviewCategoryEdits({ ...shared,
+              ...(evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel }) }, task.categoryId, budgetMembers, task.ledger.definition.assurance !== null),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {
-            if (evidenceAssuranceLevel !== undefined && error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
+            if (error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
             throw error;
           }
         }
@@ -4022,12 +3417,8 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
 
-  cancellingLedgerRuns(): string[] {
-    return (this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r JOIN analysis_task_intents t
-      ON t.task_intent_id = r.task_intent_id WHERE t.kind <> ? AND (SELECT s.state FROM analysis_run_states s
-      WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'cancelling'`).all(BASELINE_ANALYSIS_KIND) as SqlRow[])
-      .map((row) => asString(row.run_record_id));
-  }
+  finishStoppedReviewCancellations(owner: reviewOperations.CancellationOwner): Promise<void> { return reviewOperations.finishStoppedReviewCancellations(this.#reviewOperationsHost, owner); }
+  finishCancelledReviewRunWhenDone(owner: reviewOperations.CancellationOwner, runRecordId: string): Promise<void> { return reviewOperations.finishCancelledReviewRunWhenDone(this.#reviewOperationsHost, owner, runRecordId); }
 
   finishCancelledReviewRun(runRecordId: string): void {
     return reviewOperations.finishCancelledReviewRun(this.#reviewOperationsHost, runRecordId);
@@ -4408,7 +3799,7 @@ export class EditorialStore {
           bookId === null ? null : { bookId, cancelled: false })).tasks;
         for (const control of controls) {
           const run = control.run;
-          if (run === null || !runIsActive(run.state) || run.state === 'awaiting-connectivity') continue;
+          if (run === null || (!runIsActive(run.state) && !(run.state === 'blocked-before-dispatch' && run.stopReason === 'shutdown')) || run.state === 'awaiting-connectivity') continue;
           readings.push({ kind, bookId: control.bookId, bookTitle: control.bookTitle, taskIntentId: control.taskIntentId,
             runRecordId: run.runRecordId, state: run.state, stateAt: run.stateAt, control });
         }
@@ -4769,7 +4160,7 @@ export class EditorialStore {
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
       reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。'
-        : kind === 'material-index' ? '空闲时在本机为这本书可参考的资料建立相似索引，从上次停下的段落接着建；你回来编辑时让开。'
+        : kind === 'material-index' ? '资料加入时已在本机建好索引，检索不需要另外构建；这项登记目前没有要在空闲时做的事。'
         : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
     const binding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
@@ -5109,13 +4500,13 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#bookFindings.clear();
+    this.#taskWork.release();
     this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;
     this.#indexQueue.length = 0;
     this.#indexController?.abort();
-    // Vectors and 来源译文 asked for stop after the batch under way; what was recorded stays, the rest is asked for again (#892).
-    this.#vectorQueue.length = 0;
     // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
     void this.#scheduledBackups.stop();
     // A database export still under way stops as 取消导出 stops it (Issue #434 review).
@@ -5553,26 +4944,19 @@ export class EditorialStore {
     // other connection. Everything else this projection reads comes from the same connection.
     const position = this.#boundedCall(() => this.#boundedAuthority.readManuscriptEntryPosition(manuscriptId, branchId));
     if (position === null) return anchor;
-    const block = this.#authority.prepare(
-      'SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?',
-    ).get(branchId, position.blockId) as SqlRow | undefined;
+    const block = workingBlock(this.#authority, branchId, position.blockId);
     // The resolution already answered against the working state, so a block it named that is not in
     // the working state means the two disagree: the overview then leads with the Revision alone
     // rather than with a position no window could open.
     if (block === undefined) return anchor;
-    const blockPosition = asNumber(block.position);
-    // The last working position, the same total the window projection reports, so the anchor's reading
+    const blockPosition = block.position;
+    // The working state's block count, the same total the window projection reports, so the anchor's reading
     // and the window the entry opens count the manuscript the same way.
-    const totalBlocks = asNumber(one(
-      this.#authority.prepare(
-        'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
-      ).all(branchId) as SqlRow[],
-      'BOOK_RECORD_GRAPH_INVALID',
-      '稿件工作稿内容块不完整。',
-    ).position);
+    const totalBlocks = paragraphCount(this.#authority, branchId);
+    requireStore(totalBlocks > 0, 'BOOK_RECORD_GRAPH_INVALID', '稿件工作稿内容块不完整。');
     const structure = this.#authority.prepare(
-      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
-    ).get(branchId, blockPosition) as SqlRow | undefined;
+      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND order_key <= ? ORDER BY order_key DESC LIMIT 1',
+    ).get(branchId, block.key) as SqlRow | undefined;
     const structureLabel = structure === undefined ? null : asString(structure.text);
     return {
       ...anchor,
@@ -5710,14 +5094,13 @@ export class EditorialStore {
       const projectedManuscriptState: 'empty' | 'populated' =
         manuscriptState === 'empty' ? 'empty' : 'populated';
       const lineagePage = projectedManuscriptState === 'empty'
-        ? { items: [] as string[], nextCursor: null }
+        ? { items: [], nextCursor: null }
         : this.#reimportLineageSourceVersionPage(bookId, null);
       return {
         bookId,
         stableIdentity,
         title,
-        internalNumber,
-        people: this.#peopleCall(() => this.#bookPeople.summary(bookId)),
+        ...this.#peopleCall(() => this.#bookPeople.libraryFacts(bookId)),
         manuscriptState: projectedManuscriptState,
         manuscriptStateLabel: projectedManuscriptState === 'empty' ? '尚无稿件' as const : '已有主稿件' as const,
         reimportLineageSourceVersionIds: lineagePage.items,
@@ -5983,19 +5366,13 @@ export class EditorialStore {
     return capturedProcedureOperations.inspectKnowledgeProcedures(this.#capturedProcedureHost);
   }
 
-  /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
-    this.#assertAvailable();
-    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
-    let read: Awaited<ReturnType<typeof readGuidelineFile>>;
-    try {
-      read = await readGuidelineFile(path);
-    } catch (error) {
-      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
-    return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
+  readonly #guidelineFormatting: ReviewGuidelineFormatting;
+  useGuidelineFormatter(formatter: EditorialStoreGuidelineFormatter): void { this.#guidelineFormatting.useGuidelineFormatter(formatter); }
+  previewReviewGuidelineVersion(documentId: string, path: string | undefined, formatConfirmed = false): Promise<ReviewGuidelinePreviewProjection> {
+    return this.#guidelineFormatting.previewReviewGuidelineVersion(documentId, path, formatConfirmed);
   }
+  readonly standardTables: StandardTableLibrary;
+  useStandardTableFormatter(formatter: StandardTableFormatter): void { this.standardTables.useFormatter(formatter); }
 
   /** 确认导入: the previewed version recorded, and the page as it now reads. */
   importReviewGuidelineVersion(previewId: string): ReviewGuidelinesProjection {
@@ -6148,15 +5525,6 @@ export class EditorialStore {
     return factualVerificationOperations.internalBookManuscript(this.#factualVerificationOperationsHost, bookId);
   }
 
-  /**
-   * The Versioned Verification Results of one Review Run's completed or eligible retained 事实核查 output (FREV-001), recorded once it has put its
-   * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
-   * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
-   */
-  #materializeFactualVerification(reviewRunId: string): void {
-    return factualVerificationOperations.internalMaterializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
-  }
-
   /** Record the results of a Review Run's 事实核查 category if it has formed them and they are not yet recorded. */
   materializeFactualVerification(reviewRunId: string): void {
     return factualVerificationOperations.materializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
@@ -6174,6 +5542,11 @@ export class EditorialStore {
   /** The Evidence Workspace of one result (EVID-001 to EVID-013): a read; it creates no mutation of any kind (EVID-012). */
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): EvidenceWorkspaceProjection {
     return factualVerificationOperations.inspectEvidenceWorkspace(this.#factualVerificationOperationsHost, input);
+  }
+
+  /** 在浏览器中打开 (Issue #1641): the address recorded for one source of this Book; a read. */
+  inspectSourceAddress(input: ServiceOperationMap['inspectSourceAddress']['input']): ServiceOperationMap['inspectSourceAddress']['output'] {
+    return factualVerificationOperations.inspectSourceAddress(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -6278,7 +5651,7 @@ export class EditorialStore {
     return materialIndexOperations.settleMaterialIndexing(this.#materialIndexOperationsHost);
   }
 
-  /** Resolves once no similarity vectors or 来源译文 are being made (Issue #892): for a caller that must see them recorded. */
+  /** Resolves once no 来源译文 is being made (Issue #892): for a caller that must see it recorded. */
   async settleMaterialLayers(): Promise<void> {
     return materialIndexOperations.settleMaterialLayers(this.#materialIndexOperationsHost);
   }
@@ -6325,15 +5698,6 @@ export class EditorialStore {
 
   // ---- 相似段落检索 and 来源译文 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009) ---------------------------------------------
 
-  /** The store's similarity provider: the built-in one in every test, CI run and test guest, and until a model adapter is admitted. */
-  embeddingProvider(): EmbeddingProvider {
-    return materialIndexOperations.embeddingProvider(this.#materialIndexOperationsHost);
-  }
-
-  #embeddingFacts(): MaterialEmbeddingFacts {
-    return materialIndexOperations.internalEmbeddingFacts(this.#materialIndexOperationsHost);
-  }
-
   /** Who makes 来源译文 under this launch — the service sets it once it serves; `null` refuses every request. */
   useMaterialTranslator(translator: MaterialTranslator | null): void {
     return materialIndexOperations.useMaterialTranslator(this.#materialIndexOperationsHost, translator);
@@ -6349,62 +5713,12 @@ export class EditorialStore {
   }
 
   /**
-   * 构建相似索引 (Issue #892; KB-009): the item's current build gets its similarity vectors, made on this machine by the
-   * store's provider, a batch at a time beside the service's other work — never on open, only when the editor asks. Refused
-   * before its text was read, while the provider's model files are missing, or while a database replacement waits; asking
-   * again for vectors already complete or under way changes nothing. Nothing is sent.
-   */
-  buildMaterialVectors(materialId: string): LibraryMaterialProjection {
-    return materialIndexOperations.buildMaterialVectors(this.#materialIndexOperationsHost, materialId);
-  }
-
-  #startVectorPump(): void {
-    return materialIndexOperations.internalStartVectorPump(this.#materialIndexOperationsHost);
-  }
-
-  /** The items the idle lane queued, which give way while the editor works; and whether the lane is idle now (Issue #1166). */
-  readonly #idleVectorItems = new Set<string>();
-  #vectorLaneIdle = true;
-
-  /**
-   * 资料索引 on the idle lane (Issue #1166; ADR 0095 §3): each pass of the background dispatcher says whether the editor is
-   * quiet. While quiet, every Book with an active 资料索引 Background Processing Enrollment has the items it may refer to —
-   * retained research sources saved as 来源材料 among them — queued for their similarity vectors, beside any the editor asked
-   * for; once the editor is back, those items stop after the batch under way, and the next quiet pass goes on from the first
-   * paragraph still without its vector. A provider that is not ready, or no enrollment in force, builds nothing, and retrieval
-   * ranks those items lexically. Nothing is sent.
-   */
-  indexIdleMaterialVectors(idle: boolean): void {
-    return materialIndexOperations.indexIdleMaterialVectors(this.#materialIndexOperationsHost, idle);
-  }
-
-  /**
-   * One item's vectors after another, `MATERIAL_VECTOR_BATCH` paragraphs at a time: each batch embedded outside any
-   * transaction, then written in one, the service taking its other work between two. A stop, a replacement waiting or a
-   * store that can no longer write ends the item's run; what was recorded stays and the next request goes on from there.
-   */
-  async #pumpMaterialVectors(): Promise<void> {
-    return materialIndexOperations.internalPumpMaterialVectors(this.#materialIndexOperationsHost);
-  }
-
-  /**
-   * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, by the vectors the editor built;
-   * read-only, on this machine. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
+   * 相似段落检索 in an item's 查看索引 (Issue #892; since R5-F2c on R5-F2a's local lexical ranking, ADR 0107 §4 point 5): its
+   * paragraphs that best match the editor's words, as soon as its index is built; optional Flash expansion/rerank falls back
+   * to the local ranking. The search writes nothing; the words are read where each anchor points (ADR 0026).
    */
   async searchLibraryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
-    return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input);
-  }
-
-  /**
-   * A Task's similarity search over the 资料库 items its plan lists (Issue #892; KB-009, ADR 0026, ADR 0047): read-only, within
-   * its plan boundary exactly as `readMaterialIndexForTask` — every item searched is one its plan lists (`materialIds`, when
-   * given, must each be one), at the build its plan pinned, which this Book's Tasks may still list. Each pinned build is
-   * searched by its own vectors; one without them is listed as not searched, never built here. Candidates are pointers:
-   * their words are read through `readMaterialIndexForTask` from the candidate's paragraph. Nothing is written, sent or
-   * scheduled, and a built index grants no Run scope, egress or learning eligibility.
-   */
-  async queryMaterialVectors(boundary: MaterialReferenceBoundary, text: string, k: number, materialIds?: readonly string[]): Promise<MaterialVectorQuery> {
-    return materialIndexOperations.queryMaterialVectors(this.#materialIndexOperationsHost, boundary, text, k, materialIds);
+    return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input, this.#retrievalAssist);
   }
 
   /**
@@ -6442,16 +5756,16 @@ export class EditorialStore {
     return this.#runRetrieval(runRecordId, ledger).sources;
   }
 
-  /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
+  /** A Run's disposable index over exactly its pinned sources and records, ranked lexically (#1623; ADR 0107 §4 point 5). */
   retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
-    const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
+    const { sources } = this.#runRetrieval(runRecordId, ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
     const submitted = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const allowed = new Set(facts.manifest.units.filter((unit) => submitted === null || submitted.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
     const scoped = facts.compositionOptions?.version !== 2 ? sources : sources.map((source) => source.sourceKind !== 'manuscript' ? source : {
       ...source, read: () => { const reading = source.read(); return { ...reading, segments: reading.segments.filter((segment) => segment.blockId !== undefined && allowed.has(segment.blockId)) }; },
     });
-    return new RetrievalIndex(scoped, this.#embedding, this.#materialVectorQuery(boundary), ledger.pinnedToolSourcesForRun(runRecordId));
+    return new RetrievalIndex(scoped, ledger.pinnedToolSourcesForRun(runRecordId));
   }
 
   #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {
@@ -6462,12 +5776,6 @@ export class EditorialStore {
       ...materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from))] };
   }
 
-  /** The pinned builds' own vectors through the Task seam; an item without them is ranked lexically only. */
-  #materialVectorQuery(boundary: MaterialReferenceBoundary): RetrievalMaterialVectorQuery {
-    return async (query, k) => (await this.queryMaterialVectors(boundary, query, k)).candidates
-      .map(({ materialId, indexDigest, ordinal, score }) => ({ materialId, indexDigest, ordinal, score }));
-  }
-
   dialogueRetrievalSources(dialogueId: string): RetrievalSource[] {
     const task = this.#dialogues.task(dialogueId);
     if (task === null) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -6475,20 +5783,15 @@ export class EditorialStore {
   }
 
   dialogueRetrievalIndex(dialogueId: string): RetrievalIndex {
-    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId), this.#embedding);
+    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId));
   }
 
-  /** Editor-side discovery: no Run, no model, no persisted projection or implicit reference selection. */
+  #retrievalAssist: RetrievalAssist | null = null;
+  useRetrievalAssist(assist: RetrievalAssist | null): void { this.#retrievalAssist = assist; }
+
+  /** Editor-side discovery with optional Flash assistance; no persisted projection or implicit reference selection. */
   async searchReferableMaterials(input: ServiceOperationMap['searchReferableMaterials']['input']): Promise<ServiceOperationMap['searchReferableMaterials']['output']> {
-    requireStore(UUID_PATTERN.test(input.bookId) && input.query.trim().length > 0 && input.query.length <= 1_000 && Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= 8,
-      'RETRIEVAL_ARGUMENTS_INVALID', '检索文字须在 1 至 1,000 字符之间，最多显示 8 项。');
-    const references = this.#libraryMaterials.referable(input.bookId).flatMap((item) => {
-      try { return [this.pinMaterialReference(input.bookId, item.materialId)]; } catch { return []; }
-    });
-    const boundary = { bookId: input.bookId, references };
-    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)),
-      this.#embedding, this.#materialVectorQuery(boundary));
-    try { return { candidates: await index.retrieve(input.query, input.k, ['material']) }; } finally { index.dispose(); }
+    return searchReferableMaterials(input, this.#libraryMaterials, this, this.#retrievalAssist);
   }
 
   /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */
@@ -7201,12 +6504,14 @@ export class EditorialStore {
     return learningSupervision.prepareLearningCuration(this.#editorialLearningHost, bookId, signalIds);
   }
 
-  nextLearningCuration(): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost); }
+  pendingLearningControl() { return learningSupervision.pendingLearningControl(this.#editorialLearningHost); }
+
+  nextLearningCuration(checkedEntryId?: string): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost, checkedEntryId); }
 
   learningCurationCurrent(run: CurationRun): boolean { return learningSupervision.learningCurationCurrent(this.#editorialLearningHost, run); }
 
-  publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
-    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, evidence);
+  publishLearningCuration(run: CurationRun, text: string, retainedIds: readonly string[], evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, retainedIds, evidence);
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
@@ -7276,20 +6581,13 @@ export class EditorialStore {
     return learningSupervision.recordLearningReasonAsk(this.#editorialLearningHost, input, frequency);
   }
 
-  changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
-    return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input);
-  }
-
-  createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input);
-  }
-
-  acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.acceptEditorialMemory(this.#editorialLearningHost, input);
-  }
-
-  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.deactivateEditorialMemory(this.#editorialLearningHost, input);
+  changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection { return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input); }
+  createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input); }
+  acceptEditorialMemory(input: AcceptEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.acceptEditorialMemory(this.#editorialLearningHost, input); }
+  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.deactivateEditorialMemory(this.#editorialLearningHost, input); }
+  /** 审阅偏好's 重新启用 (`reactivate`) and 删除 (`retire`), Issue #1655. */
+  reviewPreferenceLifecycle(input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): EditorialLearningProjection {
+    return learningSupervision.reviewPreferenceLifecycle(this.#editorialLearningHost, input, action);
   }
 
   /**
@@ -7680,11 +6978,7 @@ export class EditorialStore {
     after: string | null,
   ): ReimportLineageSourceVersionPageProjection { return manuscriptReimportOperations.getReimportLineageSourceVersionPage(this.#manuscriptReimportOperationsHost, bookId, after); }
 
-  #reimportLineageSourceVersionPage(bookId: string, after: string | null): {
-    items: string[];
-    previousCursor: string | null;
-    nextCursor: string | null;
-  } { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
+  #reimportLineageSourceVersionPage(bookId: string, after: string | null): Pick<ReimportLineageSourceVersionPageProjection, 'items' | 'previousCursor' | 'nextCursor'> { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
 
   private prepareBookCreationReviewForExactIdentity(
     bookId: string,
@@ -8037,6 +7331,8 @@ export class EditorialStore {
     return manuscriptOperations.restoreRecovery(this.#manuscriptOperationsHost, restorationId, attentionId, expectedAttentionVersion, selection);
   }
 
+  returnImportToEditing(draftId: string, expectedDraftVersion: number) { return importEditingOperations.returnImportToEditing(this.#importIntakeOperationsHost, this.#manuscriptReimportOperationsHost, draftId, expectedDraftVersion); }
+
   async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> { return importIntakeOperations.continueImportDraft(this.#importIntakeOperationsHost, draftId, expectedDraftVersion); }
 
   async reselectImportDraft(
@@ -8308,11 +7604,11 @@ export class EditorialStore {
   ): Promise<SourceImportCommitProjection> { return importIntakeOperations.commitSourceImport(this.#importIntakeOperationsHost, input, options); }
 
   resolveAcknowledgedManuscriptReimportReplay(
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean },
   ): { draftId: string; commitId: string; bookId: string } { return manuscriptReimportOperations.resolveAcknowledgedManuscriptReimportReplay(this.#manuscriptReimportOperationsHost, input); }
 
   async createManuscriptReimportCommitWork(
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean },
     options: {
       interruptAfterAttempt?: boolean;
       interruptAfterCommit?: boolean;
@@ -8366,7 +7662,7 @@ export class EditorialStore {
       get authority() { return store.#authority; },
       get bounded() { return store.#bounded; },
       get boundedAuthority() { return store.#boundedAuthority; },
-      get recoveryObjects() { return store.#recoveryObjects; },
+      get recoveryObjects() { return store.#recoveryObjects; }, get manuscriptApply() { return store.#manuscriptApply; },
       get lifetimeId() { return store.#lifetimeId; },
       assertAvailable: this.#assertAvailable.bind(this),
       boundedCall: this.#boundedCall.bind(this),
@@ -8416,6 +7712,7 @@ export class EditorialStore {
   createEditorialMark(input: CreateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.createEditorialMark(this.#editorialMarkOperationsHost, input); }
 
   getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection { return editorialMarkOperations.getEditorialMarkCard(this.#editorialMarkOperationsHost, manuscriptId, branchId, markId); }
+  findPendingMark(input: FindPendingMarkInput): { mark: PendingMarkPlace | null } { return editorialMarkOperations.findPendingMark(this.#editorialMarkOperationsHost, input); }
 
   updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.updateEditorialMark(this.#editorialMarkOperationsHost, input); }
 
@@ -8458,7 +7755,7 @@ export class EditorialStore {
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
-    return this.#boundedCall(() => this.#bounded.listPriorWork());
+    return this.#boundedCall(() => this.#bounded.listPriorWork()).map(item => ({ ...item, library: this.#peopleCall(() => this.#bookPeople.libraryFacts(item.bookId)) }));
   }
 
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
@@ -8555,21 +7852,21 @@ export class EditorialStore {
     return modelSearchSettings.selectModelServiceRoute(this.#modelSearchSettingsHost, route);
   }
 
-  /** Exact persisted role selection. A missing chosen key never falls back to another channel. */
-  getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+  /** A role's binding under the cascade of Issue #1620; legacy ids read as aliases. A missing key never falls back to another channel. */
+  getConfiguredModelRoleBinding(role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
     return modelSearchSettings.getConfiguredModelRoleBinding(this.#modelSearchSettingsHost, role, override);
   }
-
-  selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-    return modelSearchSettings.selectFastRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
+  /** The four roles with their effective model and its source (Issue #1620). */
+  getModelRoles(): ModelRoleResolutionProjection[] { return modelSearchSettings.getModelRoles(this.#modelSearchSettingsHost); }
+  clearFlashModel(): void { modelSearchSettings.clearFlashModel(this.#modelSearchSettingsHost); }
+  selectForegroundFlashModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+    modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, 'foreground-flash', reasoningEffort);
   }
-
-  selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-    return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
-  }
-
+  selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'fast', reasoningEffort); }
+  selectUnderlyingModel(input: Parameters<typeof modelSearchSettings.selectUnderlyingModel>[1]): void { modelSearchSettings.selectUnderlyingModel(this.#modelSearchSettingsHost, input); }
+  selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'main', reasoningEffort); }
   selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
-    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId, reasoningEffort, fastReasoningEffort);
+    this.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
   }
 
   private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
@@ -8593,7 +7890,7 @@ export class EditorialStore {
     return modelSearchSettings.recordModelConnectionTest(this.#modelSearchSettingsHost, connection, result);
   }
 
-  getManuscriptWindowAt(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindowAt(this.#manuscriptOperationsHost, manuscriptId, branchId, target); }
+  getManuscriptWindowAt(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget, marks?: { afterOrdinal: number; digest: string }): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindowAt(this.#manuscriptOperationsHost, manuscriptId, branchId, target, marks); }
 
   getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection { return manuscriptOperations.getOutline(this.#manuscriptOperationsHost, manuscriptId, branchId, cursor); }
 
@@ -8628,6 +7925,18 @@ export class EditorialStore {
   /** The 交付物 of one Book: its Manuscript's milestones, its Publication Versions, and what followed them. */
   inspectDeliverables(bookId: string): DeliverablesProjection {
     return this.#publicationCall(() => this.#withActuals(this.#publicationVersions.deliverables(bookId)));
+  }
+
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']) {
+    return this.#boundedCall(() => this.#bounded.listBookVersions(input));
+  }
+
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']) {
+    return this.#boundedCall(() => this.#bounded.viewBookVersion(input));
+  }
+
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']) {
+    return this.#boundedCall(() => this.#boundedAuthority.restoreBookVersion(input));
   }
 
   /** 交付物's 录入定价与首印 line with what was entered for its 发稿版本 (Issue #430, S82). */
@@ -8927,6 +8236,11 @@ export class EditorialStore {
   // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
 
   /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
+  async hasLocalUpgradeSource(): Promise<boolean> {
+    const { hasLocalUpgradeSource } = await import('./in-app-upgrade.js');
+    return hasLocalUpgradeSource(this.#dataRoot);
+  }
+
   inspectDataVersion(): DataVersionProjection {
     return this.#dataVersionCall(() => {
       const { latest, recent, update, count, upgrades } = this.#dataVersions.standing();
@@ -9670,7 +8984,7 @@ export class EditorialStore {
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
           bookTasks: (this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]).flatMap((book) =>
-            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit).groups.flatMap((group) => group.items)
+            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit, false).groups.flatMap((group) => group.items)
               .map((entry) => entry.item).filter((item) => item.target.kind === 'dialogue' || item.group === 'recent' && item.target.kind === 'task-plan')),
           globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
@@ -9709,28 +9023,11 @@ export class EditorialStore {
       .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
     const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, waitingFor, dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
-    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
-      if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
-      if (item.runRecordId !== null) return this.#usage.taskSummary({ runRecordId: item.runRecordId });
-      if (item.target.kind === 'review' || item.target.kind === 'review-plan') {
-        return this.#usage.taskSummary({ taskIntentIds: this.#reviewRuns.controlTasks(item.target.bookId, item.target.reviewRunId).map((task) => task.taskIntentId) });
-      }
-      if (item.target.kind === 'dialogue') {
-        const dialogue = this.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, () => null);
-        return { calls: dialogue.attempts.length, elapsed: dialogue.attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
-      }
-      return null;
-    });
+    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, overviewUsage({ taskSummary: (target) => this.#usage.taskSummary(target),
+      reviewTaskIntentIds: (bookId, reviewRunId) => this.#reviewRuns.controlTasks(bookId, reviewRunId).map((task) => task.taskIntentId),
+      dialogueAttempts: (bookId, dialogueId) => this.inspectDialogue(bookId, dialogueId, 0, () => null).attempts }));
     const quickStarts = this.inspectDefaultExecutionRules().rules.filter((rule) => rule.state === 'active').map((rule) => ({ bookId: rule.bookId, procedureId: `rule:${rule.pattern}`, label: rule.name }));
-    return estimateTaskStarts({ ...overview, quickStarts, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
-      if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
-      const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
-      const current = progress(item.runRecordId);
-      const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
-      return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
-        currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
-        modelWaiting: current?.attemptState === 'awaiting-response' } };
-    }) })) });
+    return estimateTaskStarts(withRunningProgress({ ...overview, quickStarts }, progress, (runRecordId) => this.executionLedgerForRun(runRecordId).loadExecutionPlan(runRecordId)));
   }
 
   /**
@@ -9739,7 +9036,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number, work = true): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -9753,7 +9050,7 @@ export class EditorialStore {
           const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
           return ledger === null ? [] : ledger.attentionReadings(progress, '', limit, { bookId, cancelled: true }).outcomes.map((outcome) => ({ kind, outcome }));
         });
-        return composeBookTasks({
+        return withBookTaskWork(work ? this.#taskWork : null, dialogueLive, composeBookTasks({
           bookId, otherOutcomes, ...(recentLimit === undefined ? {} : { recentLimit }),
           analysisTasks: [...baseline.tasks, ...custom.tasks],
           analysisOutcomes: [...baseline.outcomes, ...custom.outcomes],
@@ -9765,7 +9062,7 @@ export class EditorialStore {
           dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
           // Its unfinished Task Intent Drafts (Issue #423, slice 7a), in 等你处理.
           drafts: this.#draftCall(() => this.#draftAttention(bookId)),
-        });
+        }));
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -10018,7 +9315,7 @@ export class EditorialStore {
    */
   #draftRanges(ranges: ReadonlyArray<StoredDraftRange>): TaskIntentDraftRangeProjection[] {
     return ranges.map((range) => {
-      const block = this.#authority.prepare('SELECT text, position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(range.branchId, range.blockId) as SqlRow | undefined;
+      const block = workingBlock(this.#authority, range.branchId, range.blockId);
       const holds = block !== undefined && (range.span === undefined ? graphemesOf(asString(block.text)).slice(range.fromGrapheme, range.toGrapheme).join('') === range.text : heldSpanPins(this.#authority, range.branchId, { ...range, span: range.span }) !== null);
       const branch = this.#authority.prepare('SELECT base_revision_id, last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').get(range.branchId) as SqlRow | undefined;
       const state: TaskIntentDraftRangeProjection['state'] = !holds || branch === undefined ? 'reselect'
@@ -10408,9 +9705,12 @@ export class EditorialStore {
     }
   }
 
-  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.undoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
+  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string, expectedStepId?: string): DurableHistoryProjection { return manuscriptOperations.undoManuscript(this.#manuscriptOperationsHost, { manuscriptId, branchId, expectedWorkingDigest, ...(expectedStepId === undefined ? {} : { expectedStepId }) }); }
 
-  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.redoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
+  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.redoManuscript(this.#manuscriptOperationsHost, { manuscriptId, branchId, expectedWorkingDigest }); }
+  inspectEditorHistory(manuscriptId: string, branchId: string): EditorHistoryProjection { return manuscriptOperations.inspectEditorHistory(this.#manuscriptOperationsHost, manuscriptId, branchId); }
+  /** A composite action as one editor step on the authority connection (Issue #1654): an AI edit's Applies. */
+  withEditorStep<T>(branchId: string, spec: EditorStepSpec, work: () => T): T { return this.#boundedCall(() => withEditorStep(this.#authority, branchId, spec, work)); }
 
   #loadCommitAttempt(attemptId: string): CommitAttempt {
     const row = one(
@@ -11162,29 +10462,7 @@ export class EditorialStore {
     for (const draft of drafts) this.#invalidateReview(this.#loadDraftSnapshot(asString(draft.draft_id)));
   }
 
-  #invalidateReview(snapshot: DraftSnapshot): DraftSnapshot {
-    requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '只有已复核草稿可以失效旧复核。');
-    const nextVersion = snapshot.version + 1;
-    this.#transaction(this.#authority, () => {
-      this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
-      const update = this.#authority
-        .prepare(
-          `UPDATE import_drafts
-           SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
-               reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
-               reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
-               reviewed_reuse_source_version_id = NULL,
-               reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
-               reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
-               review_digest = NULL, reviewed_at = NULL
-           WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
-        )
-        .run(nextVersion, snapshot.draftId, snapshot.version);
-      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核失效时已变化。');
-      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
-    });
-    return this.#loadDraftSnapshot(snapshot.draftId);
-  }
+  #invalidateReview(snapshot: DraftSnapshot): DraftSnapshot { return importIntakeOperations.invalidateReview(this.#importIntakeOperationsHost, snapshot); }
 
   /** The retained original keeps the extension of the format it was identified as (ADR 0072 §2). */
   async #persistRetainedOriginal(
@@ -11466,6 +10744,8 @@ export class EditorialStore {
   }
 
   #assertAbandonmentCleanupAuthority(intent: AbandonmentCleanupIntent): void {
+    for (const object of this.#cleanupObjects(intent)) requireStore(!this.#authority.prepare('SELECT 1 FROM standard_table_versions WHERE source_object_digest = ?').get(object.digest),
+      'ABANDON_REFERENCE_CHANGED', '这份文件已作为字表原件保存，不能作为未使用的导入文件删除。');
     const proof = one(
       this.#authority
         .prepare(
@@ -11711,6 +10991,7 @@ export class EditorialStore {
            AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = co.object_digest)
            AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = co.object_digest)
            AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = co.object_digest)
+           AND NOT EXISTS (SELECT 1 FROM standard_table_versions v WHERE v.source_object_digest = co.object_digest)
          ORDER BY co.object_digest`,
       )
       .all() as SqlRow[];
@@ -11729,7 +11010,8 @@ export class EditorialStore {
                AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = content_objects.object_digest)
                AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)
                AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = content_objects.object_digest)
-               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = content_objects.object_digest)`,
+               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = content_objects.object_digest)
+               AND NOT EXISTS (SELECT 1 FROM standard_table_versions v WHERE v.source_object_digest = content_objects.object_digest)`,
           )
           .run(digest);
       });

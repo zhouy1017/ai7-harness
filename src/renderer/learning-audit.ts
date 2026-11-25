@@ -1,11 +1,12 @@
-import { filterChoices as renderFilterChoices } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { filterChoices as renderFilterChoices, styleInput } from './components/controls.js';
+import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type {
   LearningAuditBookProjection,
   LearningAuditChoicesProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
   LearningAuditProjection,
+  LearningAuditStanding,
   LearningLineageProjection,
   LearningMaterialCursor,
   LearningRemediationItemInput,
@@ -17,7 +18,35 @@ import { mountWordTrackedEditDetail } from './quality-learning.js';
 import { wordLearningStandingLine } from './quality-learning-labels.js';
 import {
   LEARNING_AUDIT_ALL,
+  LEARNING_AUDIT_DECIDE,
+  LEARNING_AUDIT_ORDINARY_EMPTY,
+  LEARNING_AUDIT_ORDINARY_FILTERS,
+  LEARNING_AUDIT_ORDINARY_NOTE,
+  LEARNING_AUDIT_ORDINARY_RECORD,
+  LEARNING_AUDIT_ORDINARY_STATUS,
+  LEARNING_AUDIT_ORDINARY_OPEN,
+  LEARNING_AUDIT_ORDINARY_STANDING_LABELS,
+  LEARNING_AUDIT_UNUSED,
+  LEARNING_LINEAGE_ORDINARY_NO_DECISION,
+  LEARNING_LINEAGE_ORDINARY_PARTS,
+  LEARNING_LINEAGE_ORDINARY_REINCLUDE,
+  LEARNING_LINEAGE_ORDINARY_REINCLUDE_LEGEND,
+  LEARNING_LINEAGE_ORDINARY_REINCLUDE_NOTE,
+  learningAuditAwaitsDecision,
+  learningAuditDecideLabel,
+  learningAuditDecideTitle,
+  learningAuditOrdinaryConsequence,
+  learningAuditOrdinaryOpenLabel,
+  learningAuditStandingLabel,
+  learningLineageOrdinaryCandidates,
+  learningLineageOrdinaryDecisionLine,
+  learningLineageOrdinaryEarlier,
+  learningLineageOrdinaryMemories,
+  learningLineageOrdinaryHeading,
+  learningLineageOrdinarySignalLine,
+  learningLineageOrdinaryTaskLine,
   LEARNING_AUDIT_BATCH_MISMATCH,
+  LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH,
   LEARNING_AUDIT_CLEAR_SELECTION,
   LEARNING_AUDIT_EMPTY,
   LEARNING_AUDIT_FILTERS,
@@ -123,11 +152,22 @@ function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: st
 }
 
 type Filter = keyof typeof LEARNING_AUDIT_FILTERS;
+function selectable(material: LearningAuditMaterialProjection): boolean {
+  return material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house';
+}
+
 interface Selected { readonly bookId: string; readonly material: LearningAuditMaterialProjection }
 type Panel =
   | null
   | { readonly kind: 'preview'; readonly preview: LearningRemediationPreviewProjection; readonly items: ReadonlyArray<LearningRemediationItemInput> }
   | { kind: 'reinclude'; choice: 'book' | 'house' | null };
+
+/** Ordinary mode reads the page in an editor's words and decides undecided material in place (Issue #1549). */
+const ordinary = (): boolean => !technicalLayerVisible;
+const standingLabels = (): Readonly<Record<LearningAuditStanding, string>> =>
+  ordinary() ? LEARNING_AUDIT_ORDINARY_STANDING_LABELS : LEARNING_AUDIT_STANDING_LABELS;
+const statusWords = (): Readonly<Record<keyof typeof LEARNING_AUDIT_STATUS, string>> => ordinary() ? { ...LEARNING_AUDIT_STATUS, ...LEARNING_AUDIT_ORDINARY_STATUS } : LEARNING_AUDIT_STATUS;
+const filterLabels = (): typeof LEARNING_AUDIT_FILTERS | typeof LEARNING_AUDIT_ORDINARY_FILTERS => ordinary() ? LEARNING_AUDIT_ORDINARY_FILTERS : LEARNING_AUDIT_FILTERS;
 
 const itemOf = (material: { readonly materialKey: string; readonly digest: string; readonly decisions: number }): LearningRemediationItemInput =>
   ({ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions });
@@ -190,7 +230,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
    * Reads one page for the filters; on success the page, filters and cursor are the shown ones, the selection clears, and it
    * answers `true`. A failed read keeps the page that was shown, says so in the status, and answers `false`.
    */
-  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null, refusal: string | null = null): Promise<boolean> => {
+  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null, refusal: string | null = null, keepSelection = false): Promise<boolean> => {
     if (busy) return false;
     const input = inputOf(filters, after);
     if (input === null) {
@@ -213,7 +253,13 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       for (const book of page.choices.books) knownBooks.set(book.bookId, book.title);
       for (const book of page.books) knownBooks.set(book.bookId, book.title);
       names = learningAuditMaterialNames(page.books.flatMap((book) => book.materials), localInstantLabel);
+      // Deciding one row leaves the ticks on the others: the same materials, read again at the same version.
+      const ticked = keepSelection ? [...selection.values()] : [];
       selection.clear();
+      for (const entry of ticked) {
+        const again = page.books.find((book) => book.bookId === entry.bookId)?.materials.find((candidate) => candidate.materialKey === entry.material.materialKey);
+        if (again !== undefined && again.digest === entry.material.digest && again.standing === entry.material.standing && selectable(again)) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
+      }
       batch = null;
       listRefusal = refusal;
       listStale = false;
@@ -255,23 +301,34 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
 
   const select = (filter: 'book' | 'series' | 'kind' | 'standing', choices: ReadonlyArray<readonly [string, string]>): HTMLDivElement => {
     const wrapper = el('div', 'feedback-filter learning-audit-filter');
-    const control = renderFilterChoices({ label: LEARNING_AUDIT_FILTERS[filter], choices: [['', LEARNING_AUDIT_ALL], ...choices], value: chosen[filter], disabled: busy,
-      change: (value) => {
-        if (busy) return;
-        void request({ ...chosen, query: liveQuery(), [filter]: value }, null, `#learning-audit-filter-${filter}`);
-      },
-    });
+    const label = filterLabels()[filter];
+    const values: ReadonlyArray<readonly [string, string]> = [['', LEARNING_AUDIT_ALL], ...choices];
+    const change = (value: string): void => {
+      if (busy) return;
+      void request({ ...chosen, query: liveQuery(), [filter]: value }, null, `#learning-audit-filter-${filter}`);
+    };
+    // Ordinary mode: a dropdown of the shared control style; developer mode keeps the button choices.
+    let control: HTMLElement;
+    if (ordinary()) {
+      const dropdown = el('select');
+      dropdown.setAttribute('aria-label', label);
+      for (const [value, text] of values) { const option = el('option', undefined, text); option.value = value; dropdown.append(option); }
+      dropdown.value = chosen[filter];
+      dropdown.disabled = busy;
+      dropdown.addEventListener('change', () => change(dropdown.value));
+      control = dropdown;
+    } else control = renderFilterChoices({ label, choices: values, value: chosen[filter], disabled: busy, change });
     control.id = `learning-audit-filter-${filter}`;
     control.dataset['learningAuditFilter'] = filter;
     if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && (filterChoices.seriesTruncated || filterChoices.seriesUnavailable))) control.setAttribute('aria-describedby', `learning-audit-cut-${filter}`);
-    wrapper.append(el('span', undefined, LEARNING_AUDIT_FILTERS[filter]), control);
+    wrapper.append(el('span', undefined, label), control);
     return wrapper;
   };
 
   const dateFilter = (filter: 'from' | 'to'): HTMLDivElement => {
     const wrapper = el('div', 'feedback-filter learning-audit-filter');
     const control = el('input');
-    control.type = 'date';
+    control.type = 'date'; styleInput(control);
     control.id = `learning-audit-filter-${filter}`;
     control.value = chosen[filter];
     control.disabled = busy;
@@ -279,7 +336,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       if (busy) return;
       void request({ ...chosen, query: liveQuery(), [filter]: control.value }, null, `#learning-audit-filter-${filter}`);
     });
-    wrapper.append(el('span', undefined, LEARNING_AUDIT_FILTERS[filter]), control);
+    wrapper.append(el('span', undefined, filterLabels()[filter]), control);
     return wrapper;
   };
 
@@ -288,12 +345,12 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     form.setAttribute('role', 'search');
     const label = el('label', 'feedback-filter learning-audit-filter');
     const control = el('input');
-    control.type = 'search';
+    control.type = 'search'; styleInput(control);
     control.id = 'learning-audit-query';
     control.maxLength = 100;
     control.value = chosen.query;
     control.disabled = busy;
-    label.append(el('span', undefined, LEARNING_AUDIT_FILTERS.query), control);
+    label.append(el('span', undefined, filterLabels().query), control);
     const go = el('button', 'button secondary', LEARNING_AUDIT_SEARCH);
     go.type = 'submit';
     go.dataset['learningAuditAction'] = 'search';
@@ -330,8 +387,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     clear.disabled = busy;
     row.append(stop, clear);
     section.append(row);
-    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
-    if (batch !== null) section.append(previewNode(batch, null, (materialKey) => {
+    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', ordinary() ? LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH : LEARNING_AUDIT_BATCH_MISMATCH));
+    if (batch !== null && !ordinary()) section.append(previewNode(batch, null, (materialKey) => {
       const entry = selection.get(materialKey);
       return entry === undefined ? null : nameOf(entry.material);
     }, () => {
@@ -343,15 +400,16 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
 
   const paintList = (focus: string | null): void => {
     if (projection === null) return;
-    const parts: HTMLElement[] = [el('p', 'field-note learning-audit-note', LEARNING_AUDIT_NOTE)];
+    const parts: HTMLElement[] = [el('p', 'field-note learning-audit-note', ordinary() ? LEARNING_AUDIT_ORDINARY_NOTE : LEARNING_AUDIT_NOTE)];
     const filters = el('div', 'feedback-filters learning-audit-filters');
+    const dates = el('div', 'learning-audit-dates'); dates.append(dateFilter('from'), dateFilter('to'));
     filters.append(
       searchFilter(),
       select('book', [...knownBooks].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)).map(([bookId, title]) => [bookId, `《${title}》`] as const)),
       select('series', filterChoices.series.map((entry) => [entry.seriesId, entry.title] as const)),
       select('kind', LEARNING_MATERIAL_KINDS.map((kind) => [kind, LEARNING_AUDIT_KIND_LABELS[kind]] as const)),
-      select('standing', LEARNING_AUDIT_STANDINGS.map((standing) => [standing, LEARNING_AUDIT_STANDING_LABELS[standing]] as const)),
-      dateFilter('from'), dateFilter('to'),
+      select('standing', LEARNING_AUDIT_STANDINGS.map((standing) => [standing, standingLabels()[standing]] as const)),
+      dates,
     );
     parts.push(filters);
     // A house with more Books or Series than the filters list says so beside them (Issue #677).
@@ -374,7 +432,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     root.dataset['learningAuditView'] = 'list';
     if (projection.books.length === 0) {
       const none = el('p', 'field-note learning-audit-none',
-        Object.values(chosen).every((value) => value === '') && pageAfter === null ? LEARNING_AUDIT_EMPTY : LEARNING_AUDIT_NONE_MATCH);
+        Object.values(chosen).every((value) => value === '') && pageAfter === null ? (ordinary() ? LEARNING_AUDIT_ORDINARY_EMPTY : LEARNING_AUDIT_EMPTY) : LEARNING_AUDIT_NONE_MATCH);
       none.tabIndex = -1;
       none.setAttribute('role', 'status');
       parts.push(none);
@@ -415,7 +473,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningStanding'] = material.standing;
     const head = el('div', 'learning-material-head');
-    if (material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house') {
+    if (selectable(material)) {
       const check = el('input', 'learning-audit-select');
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);
@@ -431,20 +489,62 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     }
     head.append(
       el('span', 'learning-origin', learningOriginLine(material, localInstantLabel)),
-      el('span', `state-term status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
+      el('span', `state-term status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, learningAuditStandingLabel(material, ordinary())),
     );
     item.append(head);
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
-    const standing = material.wordCurrentEligibility === undefined ? '' : `${wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending').replace(/。$/u, '')}；`;
+    const standing = ordinary() || material.wordCurrentEligibility === undefined ? '' : `${wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending').replace(/。$/u, '')}；`;
     const use = el('p', 'field-note learning-audit-use', `${standing}${learningAuditUse(material.downstreamTasks)}`);
     use.dataset['downstreamTasks'] = String(material.downstreamTasks);
     item.append(use);
-    const open = action(LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
-    open.setAttribute('aria-label', learningAuditOpenLabel(nameOf(material)));
+    const open = action(ordinary() ? LEARNING_AUDIT_ORDINARY_OPEN : LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
+    open.setAttribute('aria-label', ordinary() ? learningAuditOrdinaryOpenLabel(nameOf(material)) : learningAuditOpenLabel(nameOf(material)));
     open.disabled = busy || batch !== null;
     item.append(open);
+    // 还没决定 (Issue #1549): the two choices are made here, on the row the editor reads, by the existing decision request.
+    if (ordinary() && learningAuditAwaitsDecision(material)) {
+      const row = el('div', 'button-row learning-audit-decide');
+      for (const { choice, label } of [LEARNING_AUDIT_DECIDE.use, LEARNING_AUDIT_DECIDE.skip]) {
+        const decide = action(label, choice === 'book' ? 'primary' : 'secondary', `decide-${choice}`, () => void decideHere(book, material, choice));
+        decide.setAttribute('aria-label', learningAuditDecideLabel(label, nameOf(material)));
+        decide.title = learningAuditDecideTitle(choice, book.title);
+        decide.disabled = busy || batch !== null;
+        row.append(decide);
+      }
+      item.append(row);
+    }
     return item;
+  };
+
+  /**
+   * One undecided material decided in place: the decision request carries the digest and decision count the row was read at.
+   * A refusal — the material moved or changed — says the service's sentence above the list, which is read again so every row
+   * shows where it stands now.
+   */
+  const decideHere = async (book: LearningAuditBookProjection, material: LearningAuditMaterialProjection, choice: 'book' | 'excluded'): Promise<void> => {
+    if (busy || batch !== null) return;
+    busy = true;
+    listRefusal = null;
+    paint(null);
+    setStatus(LEARNING_AUDIT_STATUS.deciding, 'busy');
+    let refusal: string | null = null;
+    try {
+      await api.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions, choice, note: null });
+    } catch (error) {
+      refusal = errorMessage(error, LEARNING_AUDIT_STATUS.reincludeFailed);
+    }
+    busy = false;
+    if (!root.isConnected) return;
+    const message = refusal ?? (choice === 'book' ? LEARNING_AUDIT_STATUS.decidedUse : LEARNING_AUDIT_STATUS.decidedSkip);
+    const reread = await request(chosen, pageAfter, refusal === null ? `${rowSelector(material.materialKey)} [data-learning-audit-action="open"]` : '.learning-audit-refusal', refusal, true);
+    if (!root.isConnected) return;
+    if (reread) setStatus(message, refusal === null ? 'success' : 'error');
+    else {
+      listRefusal = refusal;
+      paint(refusal === null ? '#learning-audit-query' : '.learning-audit-refusal');
+      setStatus(learningRemediationRereadFailed(message), 'error');
+    }
   };
 
   const previewBatch = async (): Promise<void> => {
@@ -454,14 +554,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = true;
     listRefusal = null;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.previewing, 'busy');
+    setStatus(statusWords().previewing, 'busy');
     try {
       const preview = await api.previewLearningRemediation({ bookId: entries[0]!.bookId, items });
       if (!root.isConnected) return;
       batch = { kind: 'preview', preview, items };
     } catch (error) {
       busy = false;
-      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="batch-stop"]'); }
+      if (root.isConnected) { setStatus(errorMessage(error, statusWords().previewFailed), 'error'); paint('[data-learning-audit-action="batch-stop"]'); }
       return;
     }
     // 停止今后使用 is one step (Issue #1410 item 31): what it would stop is recorded at once against exactly the preview read,
@@ -582,14 +682,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (busy) return;
     busy = true;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.lineage, 'busy');
+    setStatus(statusWords().lineage, 'busy');
     try {
       const read = await api.inspectLearningLineage({ bookId, materialKey });
       if (!root.isConnected) return;
       lineage = { bookId, materialKey, projection: read, panel: null, refusal: lineage?.materialKey === materialKey ? lineage.refusal : null };
-      setStatus(LEARNING_AUDIT_STATUS.lineageOpened);
+      setStatus(statusWords().lineageOpened);
     } catch (error) {
-      if (root.isConnected) setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.lineageUnavailable), 'error');
+      if (root.isConnected) setStatus(errorMessage(error, statusWords().lineageUnavailable), 'error');
     } finally {
       busy = false;
       if (root.isConnected) paint(lineage === null ? `${rowSelector(materialKey)} [data-learning-audit-action="open"]` : focus);
@@ -612,14 +712,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = true;
     open.refusal = null;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.previewing, 'busy');
+    setStatus(statusWords().previewing, 'busy');
     try {
       const preview = await api.previewLearningRemediation({ bookId: open.bookId, items });
       if (!root.isConnected) return;
       open.panel = { kind: 'preview', preview, items };
     } catch (error) {
       busy = false;
-      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="stop"]'); }
+      if (root.isConnected) { setStatus(errorMessage(error, statusWords().previewFailed), 'error'); paint('[data-learning-audit-action="stop"]'); }
       return;
     }
     // One step (Issue #1410 item 31), as the batch's.
@@ -638,6 +738,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     try {
       const outcome = await api.recordLearningRemediation({ bookId: open.bookId, items, previewDigest: preview.previewDigest });
       busy = false;
+      if (ordinary()) open.panel = null;
       listStale = true;
       if (!root.isConnected) return;
       await openLineage(open.bookId, open.materialKey, '.learning-lineage h4');
@@ -648,6 +749,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       // What moved since the preview is read again, so the next 停止今后使用 answers what is there now.
       open.refusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
       const refusal = open.refusal;
+      if (ordinary()) open.panel = null;
       await openLineage(open.bookId, open.materialKey, '.learning-audit-refusal');
       setStatus(refusal, 'error');
     }
@@ -660,7 +762,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = true;
     open.refusal = null;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.reincluding, 'busy');
+    setStatus(ordinary() ? LEARNING_AUDIT_STATUS.deciding : LEARNING_AUDIT_STATUS.reincluding, 'busy');
     try {
       await api.decideLearningMaterial({
         bookId: open.bookId, materialKey: open.materialKey, materialDigest: open.projection.material.digest,
@@ -670,7 +772,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       listStale = true;
       if (!root.isConnected) return;
       await openLineage(open.bookId, open.materialKey, '.learning-lineage h4');
-      setStatus(LEARNING_AUDIT_STATUS.reincluded, 'success');
+      setStatus(ordinary() ? LEARNING_AUDIT_STATUS.decidedUse : LEARNING_AUDIT_STATUS.reincluded, 'success');
     } catch (error) {
       busy = false;
       if (!root.isConnected) return;
@@ -690,13 +792,16 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
 
   const reincludeNode = (open: NonNullable<typeof lineage>, panel: Extract<Panel, { kind: 'reinclude' }>): HTMLElement => {
     const fieldset = el('fieldset', 'learning-choices learning-reinclude');
-    fieldset.append(el('legend', undefined, `${LEARNING_LINEAGE_REINCLUDE_LEGEND} · ${LEARNING_LINEAGE_REINCLUDE_NOTE}`));
+    fieldset.append(el('legend', undefined, ordinary()
+      ? `${LEARNING_LINEAGE_ORDINARY_REINCLUDE_LEGEND} · ${LEARNING_LINEAGE_ORDINARY_REINCLUDE_NOTE}`
+      : `${LEARNING_LINEAGE_REINCLUDE_LEGEND} · ${LEARNING_LINEAGE_REINCLUDE_NOTE}`));
     const consequence = el('p', 'field-note learning-consequence');
     consequence.setAttribute('aria-live', 'polite');
-    const record = action(LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
+    const record = action(ordinary() ? LEARNING_AUDIT_ORDINARY_RECORD : LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
     const show = (): void => {
       consequence.hidden = panel.choice === null;
-      consequence.textContent = panel.choice === null ? '' : learningChoiceConsequence(panel.choice, open.projection.bookTitle);
+      consequence.textContent = panel.choice === null ? '' : ordinary() && (panel.choice === 'book' || panel.choice === 'house')
+        ? learningAuditOrdinaryConsequence(panel.choice, open.projection.bookTitle) : learningChoiceConsequence(panel.choice, open.projection.bookTitle);
       record.disabled = busy || panel.choice === null;
     };
     for (const entry of LEARNING_CHOICES) {
@@ -714,7 +819,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
         panel.choice = value;
         show();
       });
-      wrapper.append(input, el('span', undefined, entry.label));
+      wrapper.append(input, el('span', undefined, ordinary() ? LEARNING_AUDIT_ORDINARY_STANDING_LABELS[value] : entry.label));
       fieldset.append(wrapper);
     }
     const cancel = action(LEARNING_REMEDIATION_CANCEL, 'secondary', 'reinclude-cancel', closePanel);
@@ -726,6 +831,67 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     return fieldset;
   };
 
+  /** 从哪来 and 用在哪 (Issue #1549): the material and the decisions on it, then what used it; a part with nothing in it is not listed. */
+  const ordinaryParts = (open: NonNullable<typeof lineage>): HTMLElement => {
+    const { projection: read } = open;
+    const { material } = read;
+    const parts = el('div', 'learning-lineage-parts');
+    const part = (key: keyof typeof LEARNING_LINEAGE_ORDINARY_PARTS, body: ReadonlyArray<HTMLElement>): HTMLElement => {
+      const node = el('section', 'learning-lineage-step learning-lineage-part');
+      node.dataset['lineagePart'] = key;
+      node.append(el('h5', undefined, LEARNING_LINEAGE_ORDINARY_PARTS[key]), ...body);
+      return node;
+    };
+    const excerpt = el('ul', 'learning-excerpt');
+    for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
+    const originParts = [learningOriginLine(material, localInstantLabel).replace(/。$/u, '')];
+    if (material.sourceTask !== null) originParts.push(`来源任务：${material.sourceTask.label}`);
+    const from: HTMLElement[] = [excerpt, el('p', 'field-note', `${originParts.join('；')}。`)];
+    if (material.target.kind === 'word-tracked-edit') {
+      const target = material.target;
+      const detail = el('div');
+      from.push(action('查看 Word 修改详情', 'secondary', 'word-detail', () => {
+        detail.replaceChildren();
+        void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+      }), detail);
+    }
+    const decisions = el('ol', 'learning-lineage-decisions');
+    for (const entry of [...read.decisions].reverse()) {
+      const item = el('li', 'learning-lineage-decision');
+      item.dataset['decisionOrdinal'] = String(entry.ordinal);
+      item.dataset['decisionState'] = entry.superseded ? 'superseded' : 'current';
+      item.dataset['decisionVia'] = entry.via;
+      const decision = el('p', 'learning-lineage-decision-line');
+      decision.append(learningLineageOrdinaryDecisionLine(entry, localInstantLabel), ' · ', el('span', 'learning-lineage-decision-status', learningLineageDecisionStatus(entry)));
+      if (entry.attribution !== null) decision.append(' · ', el('span', 'learning-lineage-attribution', feedbackAttributionLine(entry.attribution)));
+      item.append(decision);
+      decisions.append(item);
+    }
+    from.push(read.decisions.length === 0 ? el('p', 'field-note', LEARNING_LINEAGE_ORDINARY_NO_DECISION) : decisions);
+    if (read.earlierDecisions > 0) from.push(el('p', 'field-note', learningLineageOrdinaryEarlier(read.earlierDecisions)));
+    const used: HTMLElement[] = [];
+    if (read.signals.length > 0) {
+      const list = el('ul', 'learning-lineage-signals');
+      for (const signal of read.signals) list.append(el('li', undefined, learningLineageOrdinarySignalLine(signal, localInstantLabel)));
+      used.push(list);
+    }
+    if (read.downstream.memoryCandidates > 0) used.push(el('p', 'field-note', learningLineageOrdinaryCandidates(read.downstream.memoryCandidates)));
+    if (read.downstream.activeMemories > 0) used.push(el('p', 'field-note learning-lineage-memories', learningLineageOrdinaryMemories(read.downstream.activeMemories)));
+    if (read.tasks.length > 0) {
+      const list = el('ul', 'learning-lineage-tasks');
+      for (const task of read.tasks) {
+        const line = el('li', undefined, learningLineageOrdinaryTaskLine(task));
+        line.dataset['taskUse'] = task.use;
+        if (task.marked) line.dataset['taskMarked'] = 'true';
+        list.append(line);
+      }
+      used.push(list);
+      if (read.earlierTasks > 0) used.push(el('p', 'field-note', learningLineageEarlierTasks(read.earlierTasks)));
+    }
+    parts.append(part('from', from), part('used', used.length === 0 ? [el('p', 'learning-lineage-empty', LEARNING_AUDIT_UNUSED)] : used));
+    return parts;
+  };
+
   const paintLineage = (focus: string | null): void => {
     if (lineage === null) return;
     const open = lineage;
@@ -735,96 +901,101 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const section = el('section', 'learning-lineage');
     section.dataset['materialKey'] = material.materialKey;
     section.dataset['learningStanding'] = read.standing;
-    section.setAttribute('aria-label', learningLineageHeading(material.originLabel));
-    const heading = el('h4', undefined, learningLineageHeading(material.originLabel));
+    const headingText = ordinary() ? learningLineageOrdinaryHeading(material.originLabel) : learningLineageHeading(material.originLabel);
+    section.setAttribute('aria-label', headingText);
+    const heading = el('h4', undefined, headingText);
     heading.tabIndex = -1;
-    heading.append(' · ', el('span', 'learning-lineage-book', `《${read.bookTitle}》 · ${LEARNING_AUDIT_STANDING_LABELS[read.standing]}`));
-    if (read.automaticAdmission !== undefined && read.automaticAdmission !== null) heading.append(' · 默认纳入本机学习，没有人工纳入决定');
+    heading.append(' · ', el('span', 'learning-lineage-book', `《${read.bookTitle}》 · ${learningAuditStandingLabel(read, ordinary())}`));
+    if (!ordinary() && read.automaticAdmission !== undefined && read.automaticAdmission !== null) heading.append(' · 默认纳入本机学习，没有人工纳入决定');
     section.append(heading);
 
-    const step = (index: number, body: ReadonlyArray<HTMLElement>, count: number | null): HTMLLIElement => {
-      const { step: key, label } = LEARNING_LINEAGE_STEPS[index]!;
-      const item = el('li', 'learning-lineage-step');
-      item.dataset['lineageStep'] = key;
-      if (count !== null) item.dataset['lineageCount'] = String(count);
-      item.append(el('h5', undefined, label), ...body);
-      return item;
-    };
-    const backward = el('ol', 'learning-lineage-steps');
-    const excerpt = el('ul', 'learning-excerpt');
-    for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
-    const originParts = [learningOriginLine(material, localInstantLabel).replace(/。$/u, '')];
-    if (material.sourceTask !== null) originParts.push(`来源任务：${material.sourceTask.label}`);
-    if (material.target.kind === 'word-tracked-edit') {
-      if (material.wordCurrentEligibility !== undefined) originParts.push(wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null).replace(/。$/u, ''));
-      originParts.push('Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务');
-    }
-    const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', `${originParts.join('；')}。`)];
-    if (material.target.kind === 'word-tracked-edit') {
-      const target = material.target;
-      const detail = el('div');
-      materialBody.push(action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
-        detail.replaceChildren();
-        void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
-      }), detail);
-    }
-    backward.append(step(0, materialBody, null));
-    const decisions = el('ol', 'learning-lineage-decisions');
-    for (const entry of [...read.decisions].reverse()) {
-      const item = el('li', 'learning-lineage-decision');
-      item.dataset['decisionOrdinal'] = String(entry.ordinal);
-      item.dataset['decisionState'] = entry.superseded ? 'superseded' : 'current';
-      item.dataset['decisionVia'] = entry.via;
-      const decision = el('p', 'learning-lineage-decision-line');
-      decision.append(learningLineageDecisionLine(entry, localInstantLabel), ' · ',
-        el('span', 'learning-lineage-decision-status', learningLineageDecisionStatus(entry)));
-      if (entry.attribution !== null) decision.append(' · ', el('span', 'learning-lineage-attribution', feedbackAttributionLine(entry.attribution)));
-      item.append(decision);
-      decisions.append(item);
-    }
-    const decisionBody: HTMLElement[] = read.decisions.length === 0 ? [el('p', 'field-note', LEARNING_LINEAGE_NO_DECISION)] : [decisions];
-    if (read.earlierDecisions > 0) decisionBody.push(el('p', 'field-note', learningLineageEarlier(read.earlierDecisions)));
-    backward.append(step(1, decisionBody, read.decisions.length + read.earlierDecisions));
-    section.append(backward);
+    // Developer mode keeps the six framed stages; ordinary mode reads two parts, 从哪来 and 用在哪.
+    if (ordinary()) section.append(ordinaryParts(open));
+    else {
+      const step = (index: number, body: ReadonlyArray<HTMLElement>, count: number | null): HTMLLIElement => {
+        const { step: key, label } = LEARNING_LINEAGE_STEPS[index]!;
+        const item = el('li', 'learning-lineage-step');
+        item.dataset['lineageStep'] = key;
+        if (count !== null) item.dataset['lineageCount'] = String(count);
+        item.append(el('h5', undefined, label), ...body);
+        return item;
+      };
+      const backward = el('ol', 'learning-lineage-steps');
+      const excerpt = el('ul', 'learning-excerpt');
+      for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
+      const originParts = [learningOriginLine(material, localInstantLabel).replace(/。$/u, '')];
+      if (material.sourceTask !== null) originParts.push(`来源任务：${material.sourceTask.label}`);
+      if (material.target.kind === 'word-tracked-edit') {
+        if (material.wordCurrentEligibility !== undefined) originParts.push(wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null).replace(/。$/u, ''));
+        originParts.push('Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务');
+      }
+      const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', `${originParts.join('；')}。`)];
+      if (material.target.kind === 'word-tracked-edit') {
+        const target = material.target;
+        const detail = el('div');
+        materialBody.push(action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+          detail.replaceChildren();
+          void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+        }), detail);
+      }
+      backward.append(step(0, materialBody, null));
+      const decisions = el('ol', 'learning-lineage-decisions');
+      for (const entry of [...read.decisions].reverse()) {
+        const item = el('li', 'learning-lineage-decision');
+        item.dataset['decisionOrdinal'] = String(entry.ordinal);
+        item.dataset['decisionState'] = entry.superseded ? 'superseded' : 'current';
+        item.dataset['decisionVia'] = entry.via;
+        const decision = el('p', 'learning-lineage-decision-line');
+        decision.append(learningLineageDecisionLine(entry, localInstantLabel), ' · ',
+          el('span', 'learning-lineage-decision-status', learningLineageDecisionStatus(entry)));
+        if (entry.attribution !== null) decision.append(' · ', el('span', 'learning-lineage-attribution', feedbackAttributionLine(entry.attribution)));
+        item.append(decision);
+        decisions.append(item);
+      }
+      const decisionBody: HTMLElement[] = read.decisions.length === 0 ? [el('p', 'field-note', LEARNING_LINEAGE_NO_DECISION)] : [decisions];
+      if (read.earlierDecisions > 0) decisionBody.push(el('p', 'field-note', learningLineageEarlier(read.earlierDecisions)));
+      backward.append(step(1, decisionBody, read.decisions.length + read.earlierDecisions));
+      section.append(backward);
 
-    // 后来影响了什么 (LAUD-004): each stage after the decision — the 本社审阅偏好 versions it supports and the 审阅 that read
-    // them, the editor's actual proposed candidates and active memories, without inventing model curation.
-    const forward = el('section', 'learning-lineage-forward');
-    forward.setAttribute('aria-label', LEARNING_LINEAGE_FORWARD);
-    forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', learningLineageWhy(read.downstream.activeMemories, read.downstream.memoryCandidates)));
-    const later = el('ol', 'learning-lineage-steps');
-    later.start = 3;
-    const counts = [read.downstream.signals, read.downstream.memoryCandidates, read.downstream.activeMemories, read.downstream.tasks];
-    counts.forEach((count, offset) => {
-      const empty = offset === 3 ? LEARNING_LINEAGE_TASKS_NONE : LEARNING_LINEAGE_NOT_YET;
-      const body: HTMLElement[] = [];
-      if (offset === 0 && read.signals.length > 0) {
-        const list = el('ul', 'learning-lineage-signals');
-        for (const signal of read.signals) {
-          const line = el('li', undefined, learningLineageSignalLine(signal, localInstantLabel));
-          line.dataset['versionOrdinal'] = String(signal.ordinal);
-          list.append(line);
-        }
-        body.push(list);
-      } else if (offset === 1 && count > 0) {
-        body.push(el('p', 'field-note', `${count} 条编辑撰写的记忆候选引用了它，仍须明确接受后使用。`));
-      } else if (offset === 2 && count > 0) {
-        body.push(el('p', 'field-note learning-lineage-memories', learningLineageMemories(count)));
-      } else if (offset === 3 && read.tasks.length > 0) {
-        const list = el('ul', 'learning-lineage-tasks');
-        for (const task of read.tasks) {
-          const line = el('li', undefined, learningLineageTaskLine(task));
-          line.dataset['taskUse'] = task.use;
-          if (task.marked) line.dataset['taskMarked'] = 'true';
-          list.append(line);
-        }
-        body.push(list);
-        if (read.earlierTasks > 0) body.push(el('p', 'field-note', learningLineageEarlierTasks(read.earlierTasks)));
-      } else body.push(el('p', 'learning-lineage-empty', empty));
-      later.append(step(2 + offset, body, count));
-    });
-    forward.append(later);
-    section.append(forward);
+      // 后来影响了什么 (LAUD-004): each stage after the decision — the 本社审阅偏好 versions it supports and the 审阅 that read
+      // them, the editor's actual proposed candidates and active memories, without inventing model curation.
+      const forward = el('section', 'learning-lineage-forward');
+      forward.setAttribute('aria-label', LEARNING_LINEAGE_FORWARD);
+      forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', learningLineageWhy(read.downstream.activeMemories, read.downstream.memoryCandidates)));
+      const later = el('ol', 'learning-lineage-steps');
+      later.start = 3;
+      const counts = [read.downstream.signals, read.downstream.memoryCandidates, read.downstream.activeMemories, read.downstream.tasks];
+      counts.forEach((count, offset) => {
+        const empty = offset === 3 ? LEARNING_LINEAGE_TASKS_NONE : LEARNING_LINEAGE_NOT_YET;
+        const body: HTMLElement[] = [];
+        if (offset === 0 && read.signals.length > 0) {
+          const list = el('ul', 'learning-lineage-signals');
+          for (const signal of read.signals) {
+            const line = el('li', undefined, learningLineageSignalLine(signal, localInstantLabel));
+            line.dataset['versionOrdinal'] = String(signal.ordinal);
+            list.append(line);
+          }
+          body.push(list);
+        } else if (offset === 1 && count > 0) {
+          body.push(el('p', 'field-note', `${count} 条编辑撰写的记忆候选引用了它，仍须明确接受后使用。`));
+        } else if (offset === 2 && count > 0) {
+          body.push(el('p', 'field-note learning-lineage-memories', learningLineageMemories(count)));
+        } else if (offset === 3 && read.tasks.length > 0) {
+          const list = el('ul', 'learning-lineage-tasks');
+          for (const task of read.tasks) {
+            const line = el('li', undefined, learningLineageTaskLine(task));
+            line.dataset['taskUse'] = task.use;
+            if (task.marked) line.dataset['taskMarked'] = 'true';
+            list.append(line);
+          }
+          body.push(list);
+          if (read.earlierTasks > 0) body.push(el('p', 'field-note', learningLineageEarlierTasks(read.earlierTasks)));
+        } else body.push(el('p', 'learning-lineage-empty', empty));
+        later.append(step(2 + offset, body, count));
+      });
+      forward.append(later);
+      section.append(forward);
+    }
 
     const actions = el('div', 'button-row learning-lineage-actions');
     if (read.standing === 'book' || read.standing === 'house' || read.automaticAdmission?.choice === 'house') {
@@ -835,7 +1006,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     // An excluded standing is an actual recorded exclusion decision, for a Word pair as for any other material: the
     // existing explicit re-inclusion restores it; a Word pair's automatic admission never offers one before that.
     if (read.standing === 'excluded') {
-      const again = action(LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
+      const again = action(ordinary() ? LEARNING_LINEAGE_ORDINARY_REINCLUDE : LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
         if (busy || open.panel !== null) return;
         // The Book's own is chosen to begin with (Issue #1410 item 31).
         open.panel = { kind: 'reinclude', choice: 'book' };
@@ -849,7 +1020,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     leave.disabled = busy;
     actions.append(leave);
     section.append(actions);
-    if (open.panel?.kind === 'preview') {
+    // Ordinary mode records 停止今后使用 in one step and draws no preview, busy or after a refusal (Issue #1549).
+    if (open.panel?.kind === 'preview' && !ordinary()) {
       const name = nameOf(material);
       section.append(previewNode(open.panel, null, (materialKey) => (materialKey === material.materialKey ? name : null), closePanel, () => void confirmOne()));
     }
@@ -861,21 +1033,23 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       section.append(alert);
     }
 
-    // 审计详情 (LAUD-005): ids and governing references, inspect only.
-    const details = el('details', 'technical-details learning-audit-details');
-    const rows = el('dl', 'learning-facts');
-    const row = (term: string, value: string): void => { rows.append(el('dt', undefined, term), el('dd', 'technical-identity', value)); };
-    row('学习材料', `${material.materialKey} · ${material.digest}`);
-    if (material.sourceTask !== null) row('来源任务', material.sourceTask.taskIntentId);
-    for (const entry of read.decisions) {
-      row(`准入决定 ${entry.ordinal}`, [
-        entry.decisionId, `记录 ${entry.audit.recordDigest}`, `材料版本 ${entry.audit.materialDigest}`,
-        `取代 ${entry.audit.supersedes ?? '无'}`, `依据 ${entry.audit.basis}`, entry.recordedAt,
-        ...(entry.audit.remediationPreview === null ? [] : [`补救预览 ${entry.audit.remediationPreview}`]),
-      ].join(' · '));
+    // 审计详情 (LAUD-005): ids and governing references, inspect only — developer mode alone (Issue #1549).
+    if (!ordinary()) {
+      const details = el('details', 'technical-details learning-audit-details');
+      const rows = el('dl', 'learning-facts');
+      const row = (term: string, value: string): void => { rows.append(el('dt', undefined, term), el('dd', 'technical-identity', value)); };
+      row('学习材料', `${material.materialKey} · ${material.digest}`);
+      if (material.sourceTask !== null) row('来源任务', material.sourceTask.taskIntentId);
+      for (const entry of read.decisions) {
+        row(`准入决定 ${entry.ordinal}`, [
+          entry.decisionId, `记录 ${entry.audit.recordDigest}`, `材料版本 ${entry.audit.materialDigest}`,
+          `取代 ${entry.audit.supersedes ?? '无'}`, `依据 ${entry.audit.basis}`, entry.recordedAt,
+          ...(entry.audit.remediationPreview === null ? [] : [`补救预览 ${entry.audit.remediationPreview}`]),
+        ].join(' · '));
+      }
+      details.append(el('summary', undefined, '审计详情'), rows);
+      section.append(details);
     }
-    details.append(el('summary', undefined, '审计详情'), rows);
-    section.append(details);
     section.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
       event.preventDefault();

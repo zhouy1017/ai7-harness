@@ -2,6 +2,7 @@ import { reportResult } from './notifications.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import type { BookRecordPresentation, BookSummaryPageProjection, BookWorkOverviewProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ResolvedBookWorkbenchRoute, SourceImportCommitProjection, StagedImportProjection, TaskAuthorizationProjection, TaskPlanKind } from '../shared/protocol.js';
 import { mountBookPeople } from './book-people.js';
@@ -18,7 +19,10 @@ import { type ShellPlace } from './shell.js';
 import { SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
+import { startNewVersionImport } from './import-entry.js';
+import { IMPORT_ENTRY_WORDS } from './import-entry-labels.js';
 import type { RendererApi } from '../shared/protocol.js';
+import { mountBookVersions } from './book-versions.js';
 
 interface Options {
   panel: () => HTMLElement;
@@ -220,9 +224,9 @@ function renderBookOverview(
         }, () => undefined);
         analysisState.replaceChildren(
           element('p', undefined, projection.resultSetRevision === null
-            ? `${technicalWords('基线分析', '稿件分析')} · ${projection.stateLabel}`
+            ? `${technicalWords('基线分析', '稿件分析')} · ${serviceWords(projection.stateLabel)}`
             : technicalWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`,
-              `稿件分析 · ${projection.stateLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
+              `稿件分析 · ${serviceWords(projection.stateLabel)} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
         );
       },
       (error) => {
@@ -328,6 +332,8 @@ function renderBookOverview(
     for (const host of [reviewHost, evaluationHost, analysisHost, deliverablesHost]) host.classList.add('book-overview-tile');
     grid.append(reviewHost, evaluationHost, analysisHost, deliverablesHost);
     content.append(grid);
+    if (anchor !== null) content.append(mountBookVersions({ bookId: overview.book.bookId, manuscriptId: anchor.manuscriptId, branchId: anchor.branchId },
+      { api, element, button, setStatus, errorMessage: rendererErrorMessage, open: () => renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: overview.book.bookId, bookTitle: overview.book.title }, recoveryReturn) }));
     const sources = element('section', 'overview-line book-sources-summary');
     sources.append(element('h3', undefined, '来源与证据'),
       button('查看来源与证据', 'quiet', () => renderBookSources(overview.book.bookId, overview.book.title)));
@@ -406,10 +412,14 @@ function renderBookOverview(
         setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
     });
-    actions.append(primaryActionButton);
+    // 导入新版本… (Issue #1682): a new file for this Book, offered as an update of the manuscript.
+    const newVersion = button(IMPORT_ENTRY_WORDS.newVersion, 'secondary', () => void startNewVersionImport(overview.book.bookId, recoveryReturn));
+    newVersion.dataset['importNewVersion'] = 'overview';
+    actions.append(primaryActionButton, newVersion);
     if (completion) {
       primaryActionButton.disabled = true;
-      completionActionButtons.push(primaryActionButton);
+      newVersion.disabled = true;
+      completionActionButtons.push(primaryActionButton, newVersion);
     }
   }
 
@@ -467,8 +477,9 @@ function renderBookOverview(
     const receiptActions = element('div', 'button-row');
     for (const action of Array.from(actions.children)) receiptActions.append(action);
     records.prepend(receiptActions);
-    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
-    if (open) actions.append(open);
+    for (const action of Array.from(receiptActions.querySelectorAll('button'))) {
+      if (action.textContent === '继续编辑稿件' || action.dataset['importNewVersion'] !== undefined) actions.append(action);
+    }
   }
   if (overview.manuscriptState.state === 'empty') {
     if (actions.children.length > 0) content.querySelector('h2')?.after(actions);

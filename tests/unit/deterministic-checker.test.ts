@@ -1,14 +1,17 @@
+import { createBaselineSchema } from '../../src/service/baseline-schema.js';
+import { installPreinstalledStandardTables } from '../../src/service/standard-tables.js';
+import { selectedStandardTables, loadLibraryCheck } from '../../src/service/review/deterministic/library-check.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { checkLocalPlan, candidateHasExactAnchor, exactLocalCandidateIds, houseCandidateNote, validateLocalResultV2, validateLocalStageArtifactV2,
   type HouseCandidate, type LocalStageArtifactV2 } from '../../src/service/review/deterministic/checker.js';
-import { freezeLocalPlan, freezeLocalPlanV2, freezeLocalPlanV3, validateLocalPlan, validateLocalPlanV2 } from '../../src/service/review/deterministic/plan.js';
+import { freezeLocalPlan, freezeLocalPlanV2, freezeLocalPlanV3, freezeLocalPlanV5, validateLocalPlan, validateLocalPlanV2 } from '../../src/service/review/deterministic/plan.js';
 import { localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3 } from '../../src/service/procedures/preinstalled.js';
-import { STANDARD_CHARACTERS, VARIANT_WORDS, APPENDIX_WORDS } from '../../src/service/review/deterministic/tables.js';
-import { mechanicalReplacement, validateLocalResultV3 } from '../../src/service/review/deterministic/checker.js';
+import { mechanicalReplacement, validateLocalResultV3, versionedLocalCounts } from '../../src/service/review/deterministic/checker.js';
 import { parseBookTerms } from '../../src/shared/protocol/deterministic.js';
-import { HouseWordLists, initializeHouseWordListSchema } from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, HOUSE_WORD_LIST_SCHEMA_SQL } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
 
@@ -31,9 +34,9 @@ function tablePlan(texts: string[], options: Partial<LocalCheckOptions> = {}) {
 }
 describe('offline standard and Book tables', () => {
   it('ships the complete character membership and word groups, with conditional forms left for judgment', async () => {
-    expect(STANDARD_CHARACTERS.size).toBe(8105); expect(VARIANT_WORDS).toHaveLength(338); expect(APPENDIX_WORDS).toHaveLength(44);
-    expect(STANDARD_CHARACTERS.has('𬭎')).toBe(true);
-    const frozen = tablePlan(['按纳 双𨱑 帐本 乾隆 龍 𠮷']); const result = await checkLocalPlan(frozen); validateLocalResultV3(result, frozen);
+    const frozen = tablePlan(['按纳 双𨱑 帐本 乾隆 龍 𠮷 𬭎']); const result = await checkLocalPlan(frozen); validateLocalResultV3(result, frozen);
+    expect(versionedLocalCounts(frozen, result)).toMatchObject({ C01: { version: 1 }, C02: { version: 1 }, V01: { version: 1 } });
+    expect(result.candidates.some(candidate => candidate.quote === '𬭎')).toBe(false);
     const word = result.candidates.find((candidate) => candidate.quote === '按纳' && candidate.ruleId === 'V01')!;
     expect(mechanicalReplacement(word)).toBe('按捺');
     expect(mechanicalReplacement(result.candidates.find((candidate) => candidate.quote === '帐本' && candidate.ruleId === 'V01')!)).toBeNull();
@@ -51,6 +54,24 @@ describe('offline standard and Book tables', () => {
     expect(result.counts.T01.skipped).toBe(2); expect(result.counts.H01.disabled).toBe(1);
     expect(() => parseBookTerms('person\t甲名\t甲名')).toThrow();
     expect(canonicalJson(await checkLocalPlan(frozen))).toBe(canonicalJson(result));
+  });
+  it('retains a later national suggestion when earlier common-word notes fill the result limit (#1717)', async () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      createBaselineSchema(db);
+      db.exec('BEGIN');
+      installPreinstalledStandardTables(db, ['gf-1001-2001', 'cycb-2']);
+      db.exec('COMMIT');
+      const { schema, rules, digest, standardTableVersion, ...input } = tablePlan(['苹裹。'.repeat(10256), '按纳']);
+      const pins = selectedStandardTables(db, input.options.tables!);
+      const plan = freezeLocalPlanV5({ ...input, standardTables: pins, procedureDefinition: localCheckProcedureDefinitionV3() });
+      const result = await checkLocalPlan(plan, { libraryCheck: loadLibraryCheck(db, pins, []) });
+      expect(result.candidates).toHaveLength(10000);
+      expect(result.excluded).toHaveLength(256);
+      expect(result.counts.V01).toMatchObject({ findings: 10000, error: 257 });
+      expect(result.candidates.at(-1)).toMatchObject({ ruleId: 'V01', quote: '按纳', replacement: '按捺' });
+      expect(result.candidates.filter(c => mechanicalReplacement(c) === null)).toHaveLength(9999);
+    } finally { db.close(); }
   });
   it('keeps Book choices above general words and cancels even on a long table no-hit scan', async () => {
     const options = { characters: false, variantWords: true, bookTerms: [{ kind: 'term' as const, preferred: '按纳', variants: ['合成异写'] }], houseWordList: null };
@@ -137,7 +158,7 @@ describe('local punctuation and numeral predicates', () => {
 });
 
 function housePlan(texts: string[], entries: readonly { literal: string; enabled?: boolean; note?: string }[], options: Partial<LocalCheckOptions> = {}) {
-  const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+  const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
   try {
     const owner = new HouseWordLists(db);
     const saved = owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: entries.map((entry) => ({ entryId: null, note: '', enabled: true, ...entry })) });

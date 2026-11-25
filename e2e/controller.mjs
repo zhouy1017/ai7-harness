@@ -214,6 +214,25 @@ export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 
 // after it is admitted there.
 export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
+// The window sizes UI evidence is taken at (Owner decision, 2026-11-25): a 1080p screen with the window maximised and with
+// an ordinary restored window; the hosted Gate's size stays as the compatibility form. Each key is an outer size for the
+// guest runner's `-Window` (the E2E-only AI7_E2E_WINDOW); `viewport` is what a 1920×1080 desktop at 100 % then gives the
+// page. The product really maximises a Journey window asked for at the whole display (src/main/e2e-window.ts), so the
+// first is the size an editor gets by maximising. Another desktop gives other numbers, so a Journey reads innerWidth /
+// innerHeight and never these.
+export const E2E_WINDOW_BASELINES = Object.freeze({
+  '1920x1080': Object.freeze({ name: 'maximised', viewport: '1920x1009' }),
+  '1440x900': Object.freeze({ name: 'window', viewport: '1424x861' }),
+  '1024x720': Object.freeze({ name: 'hosted', viewport: '1008x681' }),
+});
+
+/** The one line a single-Journey run prints for an accepted E2E window size; a baseline size is named. */
+export function e2eWindowLine(journey, size) {
+  if (!/^[1-9]\d*x[1-9]\d*$/u.test(size ?? '')) return null;
+  const baseline = E2E_WINDOW_BASELINES[size];
+  return `E2E_WINDOW/${journey}/${size}${baseline ? `/${baseline.name}` : ''}`;
+}
+
 // The shell's sidebar (Issue #934, wave 11 slice 11a): every Journey reaches a global destination, 设置 and a Book's
 // sections through it, by its data attributes; each row's text is exactly its Chinese name. The library keeps its
 // screen state `landing`, so a Journey still waits for that.
@@ -399,6 +418,10 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'reimport-unconfirmed-no-change',
   'reimport-no-change-lineage',
   'reimport-no-change-lineage-restart',
+  'new-version-overview-entry',
+  'new-version-menu-entry-pointer',
+  'new-version-menu-entry-keyboard',
+  'new-version-drop-question',
   'reimport-degraded-initial',
   'reimport-degraded-review',
   'reimport-degraded-restart-required',
@@ -513,6 +536,7 @@ const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-t
 
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    'import-page-primary-visible', 'fidelity-one-sentence', 'single-answer-sentences',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
@@ -530,6 +554,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'reimport-history',
     // Issue #1521: a populated Book's records through 工作概览 by real input, once the 历史与恢复 row is gone.
     'book-records-reachable',
+    // Issue #1682: 导入新版本… from 工作概览 and from the manuscript's save menu, and the question a dropped file asks there.
+    'new-version-overview-entry',
+    'new-version-menu-entry',
+    'drop-question-overview',
+    'drop-question-editor',
     // The source-only intake of a PDF: identified from its bytes, refused as editable, retained.
     'synthetic-pdf-identity',
     'source-only-pdf-landing',
@@ -804,6 +833,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
+    'reply-draft-kept',
     'comments-inline-reply-column',
     'comments-inline-reply-overlay',
     'comments-connector-reply-overlay',
@@ -826,16 +856,27 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'snapshot-none-comparison',
   ]),
   'J-12': Object.freeze([
+    'review-preference-lifecycle',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
+    'upgrade-release-library',
+    'upgrade-failure',
+    'upgrade-decline',
+    'upgrade-consent',
+    'upgrade-card',
+    'upgrade-retained-rollback',
+    'upgrade-backup-rollback',
+    'upgrade-package',
     'first-run-card',
     'first-run-card-wide',
     'first-run-card-gate',
     'first-run-data-location-settings',
     'first-run-model-step',
     'first-run-import-step',
+    'first-run-help',
+    'first-review-help-book',
     'first-book-review-wide',
     'first-book-review-gate',
     'first-run-skip-persists',
@@ -871,6 +912,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'screen-return-origins',
     'diagnostics-bundle-export',
     'model-service-first-save',
+    'model-one-model-setup',
     'model-effort-defaults-wide',
     'model-effort-defaults-gate',
     'dispatch-model-wide',
@@ -907,7 +949,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'second-book-disabled',
     'accessibility-reflow-forced-colors',
     'knowledge-guidelines',
+    'standard-table-workbook-preview',
+    'standard-table-unavailable',
     'knowledge-guideline-import',
+    'knowledge-library-use',
     'j14-knowledge-keyboard',
     'j14-knowledge-reflow-forced-colors',
     'knowledge-guideline-restart',
@@ -918,8 +963,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-decide',
     // 资料索引 (Issue #428, S80a).
     'knowledge-library-index',
-    // 相似段落检索 built on request (Issue #892).
-    'knowledge-library-index-vectors',
+    // 相似段落检索 at once, nothing to build (Issue #892; R5-F2c).
+    'knowledge-library-index-search',
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
     'knowledge-library-index-translation',
@@ -967,6 +1012,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'usage-settings',
     'usage-price-saved',
     'keyboard-settings',
+    'help-f1',
     'keyboard-remap-refused',
     'keyboard-remap-saved',
     'keyboard-ime-guard',
@@ -1102,8 +1148,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-relaunch',
     'review-destination',
     'dispatch-model-choice',
+    'evaluation-relaunch-references',
     'task-status-finished',
     'review-sheet',
+    'review-sheet-form',
     'review-prepare',
     'review-bar-ready',
     'review-offline-bar',
@@ -1145,16 +1193,21 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'factual-evidence-workspace',
     // Issue #1174: the factual finding's review card and mark card list the result's sources.
     'factual-card-evidence',
+    // Issue #1683: the collapsed and expanded fact card in ordinary mode, and a web source opened and copied by pointer.
+    'factual-card-ordinary',
+    'factual-card-source-open',
     'factual-review-decision',
     'factual-correction-proposal',
     // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
     'custom-dimension-define',
     'custom-dimension-run',
     'custom-dimension-tab',
+    'retained-finding-sources',
   ]),
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    'selection-menu-swatches', 'comments-header-add', 'mark-draft-kept',
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
     'comments-connector-apply-overlay',
@@ -1224,13 +1277,23 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'proposal-decision-record',
     'structure-split',
     'structure-undo-across-apply',
+    'structure-undo-takes-back-apply',
+    'apply-undone-by-ctrl-z',
     'structure-merge',
+    'structure-split-keeps-reversal',
     'selection-span-draft',
     'selection-span-review-choices-wide',
     'selection-span-review-choices-gate',
+    'local-common-word-check',
     'local-check-exact-sample1',
+    'review-notice-header-band',
+    'review-reject-after-join',
     'review-keyboard-wide',
     'review-keyboard-gate',
+    'marks-paging-wide',
+    'marks-paging-gate',
+    'review-mechanical-batch-confirm',
+    'review-batch-undo-after-leaving',
     'review-batch-undo-wide',
     'review-batch-undo-gate',
     'dispatch-review-wide',
@@ -1285,7 +1348,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback-sentinel',
     'controller-imports',
     'import-and-open',
-    'deliverables-before-milestone',
+    'deliverables-save-in-place', 'deliverables-before-milestone',
     'milestone-needs-a-purpose',
     'milestone-first-saved',
     'milestone-changed-since',
@@ -1385,6 +1448,20 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'multi-documents-ordinary-import',
     'multi-documents-ordinary-identities',
     'multi-documents-ordinary-package',
+    // Issue #1551: 衍生稿件's management page — the editor's one four-mode create form, a title renamed in place, and
+    // 删除类别 asked in an app strip that names the category and its documents.
+    'derivatives-management',
+    'derivatives-management-blank',
+    'derivatives-management-rename',
+    'derivatives-management-import',
+    'derivatives-management-source',
+    'derivatives-management-writing',
+    'derivatives-management-menus',
+    'derivatives-management-category',
+    // Issue #1682: a file dropped on 衍生稿件管理 and on a 衍生稿件 in the editor asks what it is; a file that is not DOCX is answered.
+    'derivatives-drop',
+    'derivatives-drop-editor',
+    'derivatives-drop-text',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1455,6 +1532,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-revoked-no-dispatch',
     'idle-start-choice',
     'idle-yield-to-foreground',
+    'idle-yield-card-words',
     'idle-result-in-place',
     'model-question-launch',
     'model-question-notice',
@@ -1498,13 +1576,14 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'partial-revision-kept',
     'nothing-sent-after',
     'redo-from-cancelled',
-    'redo-plan-edit',
+    'redo-launch-bar',
     'redo-run-completed',
     'relaunch-for-second-book',
     'second-book-import',
     'second-run-held',
     'closed-under-run',
     'relaunched-resumable',
+    'resumable-task-card',
     'resumed-after-restart',
     'third-book-import',
     'third-run-paused',
@@ -1552,6 +1631,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-controls-pause-resume',
     'review-controls-cancel-impact',
     'review-controls-redo-plan',
+    'review-interrupted-relaunch',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1667,6 +1747,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'learning-audit-restart',
     'j14-learning-audit-keyboard',
     'j14-learning-audit-reflow-forced-colors',
+    'learning-audit-ordinary',
     'evaluation-damaged-route',
     'evaluation-calibration-books',
     'evaluation-calibrated-start',
@@ -1690,12 +1771,14 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback-sentinel',
     'controller-imports',
     'exact-sample1',
+    'retrieval-segmenter-packaged-runtime',
     'renderer-api-boundary',
     'book-import',
     'book-prerequisites',
     'model-credential-saved',
     'model-credential-removed',
     'panel-open',
+    'panel-launch-menu',
     'panel-prepare',
     'panel-start',
     'panel-stop-wording',
@@ -1711,9 +1794,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'chip-return-retained-busy',
     'chip-return-retained-ready',
     'chip-return-target-missing',
-    'chip-return-status-replaced',
+    'chip-return-arrival-unobserved',
     'chip-return-late-completion',
     'analysis-jump-chip',
+    'overview-return-reading-place',
     'j14-panel-keyboard',
     'j14-panel-zoom-200-reflow',
     'j14-panel-forced-colors',
@@ -1804,6 +1888,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-saved',
     'model-credential-removed',
     'consistency-offered',
+    'review-plan-rapid-reopen',
     'consistency-review-run',
     'series-scope-review-run',
     'consistency-marks-on-manuscript',
@@ -2491,6 +2576,22 @@ export function collectJourneyPointerFailure(result, journey, failure) {
   if (lines.length !== 1 || lines[0].length - prefix.length > 4096) return null;
   try { const detail = pointerFailureDetail(JSON.parse(lines[0].slice(prefix.length))); return detail === null ? null : JSON.stringify(detail); }
   catch { return null; }
+}
+
+export function collectReadingSizeFailure(result, journey, check) {
+  if (journey !== 'J-08' && journey !== 'J-05') return null;
+  const leg = /^comments-reading-size-(set|restore)-(?:saved|editor-size)$/u.exec(check)?.[1];
+  if (!leg) return null;
+  const prefix = `COMMENTS_READING_SIZE_FAILURE/${leg}/`;
+  const lines = result.stderr.split(/\r?\n/u).filter(line => line.startsWith(prefix));
+  if (lines.length !== 1 || lines[0].length > 256) return null;
+  try {
+    const {target, control, root, focus, width, height, editor} = JSON.parse(lines[0].slice(prefix.length));
+    const pixel = value => Number.isFinite(value) && value >= 0 && value <= 16384;
+    if (![target,width,height].every(pixel) || ![control,root,editor].every(value => value === null || pixel(value)) ||
+        !['slider','body','other'].includes(focus)) return null;
+    return JSON.stringify({target,control,root,focus,width,height,editor});
+  } catch { return null; }
 }
 
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */

@@ -10,6 +10,7 @@ import type {
   ManuscriptBlockProjection,
   ImportStartupProjection,
   ManuscriptWindowProjection,
+  BookSummaryProjection,
 } from '../protocol.js';
 
 // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002, ADR 0036) ----------------------
@@ -716,6 +717,7 @@ export interface OutlineProjection {
 }
 
 export interface PriorWorkItemProjection {
+  library?: Pick<BookSummaryProjection, 'internalNumber' | 'people' | 'lastWorkedAt' | 'seriesNames'>;
   bookId: string;
   bookTitle: string;
   manuscriptId: string;

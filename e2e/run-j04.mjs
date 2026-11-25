@@ -1,8 +1,12 @@
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { chooseImportTarget } from './import-page.mjs';
+import { checkRetainedFindingSources } from './retained-finding-sources.mjs';
+import { pressReachable } from './task-card-reach.mjs';
+import { findingsTextReturnsToFindings } from './return-places.mjs';
+import { capturePointerFailure, chooseDispatch, frozenModelWords, pointerClick, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
-import { launchReviewFromSheet } from './launch-review-sheet.mjs';
+import { launchReviewFromSheet, pressReviewControl } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -419,26 +423,102 @@ async function openAnalysisDestination(renderer, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, `${name}-destination`);
 }
 
+// Opening the drawer also animates the page's reserved space (Issue #1664).
+async function waitForOfflineDrawerSettled(renderer, name) {
+  await waitFor(renderer, `new Promise(resolve => {
+    let previous;
+    const frame = () => {
+      const drawer=document.querySelector('#task-drawer');
+      const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]');
+      if(!drawer || !tab){resolve(false);return;}
+      const owners=[drawer,document.body];
+      const animating=owners.some(node=>node.getAnimations().some(animation=>animation.playState!=='finished'));
+      const rectangle=JSON.stringify([...owners,tab].map(node=>{
+        const r=node.getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+      }));
+      if(!animating && rectangle===previous){resolve(true);return;}
+      if(previous!==undefined || animating){resolve(false);return;}
+      previous=rectangle;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  })`, name);
+}
+
+async function assertOfflineControlReachable(renderer, selector, name) {
+  try {
+    await assertRenderer(renderer, `(() => {
+    const control=document.querySelector(${JSON.stringify(selector)});
+    if(!control)return false;
+    const r=control.getBoundingClientRect();
+    if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;
+    for(let parent=control.parentElement;parent;parent=parent.parentElement){
+      const style=getComputedStyle(parent),box=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<box.left||r.right>box.right))return false;
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<box.top||r.bottom>box.bottom))return false;
+    }
+    return control.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));
+    })()`, name);
+  } catch (error) {
+    Object.defineProperty(error, 'pointerFailure', { value: await capturePointerFailure(renderer, selector, { includeTargetAncestors: true }) });
+    throw error;
+  }
+}
+
+// The history panel is longer than the window. Reach its controls with real wheel
+// input before asserting visibility; pointerClick's scripted scroll is not evidence.
+async function scrollToOfflineControl(renderer, selector, name) {
+  for (let step=0;step<24;step++) {
+    const wheel=await renderer.evaluate(`(() => {
+      const control=document.querySelector(${JSON.stringify(selector)});
+      if(!control)return null;
+      const r=control.getBoundingClientRect();
+      if(r.top>=0&&r.bottom<=innerHeight)return null;
+      const page=document.querySelector('#screen').getBoundingClientRect();
+      return {x:Math.max(1,Math.min(innerWidth-1,page.left+Math.min(80,page.width/2))),
+        y:innerHeight/2,deltaY:Math.max(-500,Math.min(500,r.top+r.height/2-innerHeight/2))};
+    })()`);
+    if(wheel===null)break;
+    await renderer.send('Input.dispatchMouseEvent', {type:'mouseWheel',deltaX:0,...wheel});
+    await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+  await assertOfflineControlReachable(renderer, selector, name);
+}
+
 /**
  * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
-async function startUpdate(renderer, mode, label, name, launch = true) {
+async function startUpdate(renderer, mode, label, name, launch = true, settleOfflineDrawer = false) {
   void label;
   // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
-  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) {
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '.task-result-window [data-task-result-action="close"]', `${name}-result-close-reachable`);
+    await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  }
+  if (settleOfflineDrawer) await waitForOfflineDrawerSettled(renderer, `${name}-drawer-settled`);
   // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
-  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
+  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; ${settleOfflineDrawer ? '' : "tab.scrollIntoView({block:'center',behavior:'instant'});"} const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
   if (await renderer.evaluate(tabCovered)) {
     // Only the overlay form is closed away: a docked drawer (the page made room for it) over the tab is a defect of the page.
     requireJourney(await renderer.evaluate(`Number.parseFloat(getComputedStyle(document.body).paddingRight)===0`) === true, `${name}-docked-drawer-covers-tab`);
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close-reachable`);
     await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
+  }
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-page-settled`);
+    await assertOfflineControlReachable(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab-reachable`);
   }
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
+  if (settleOfflineDrawer) await scrollToOfflineControl(renderer, choice, `${name}-mode-reachable`);
   await pointerClick(renderer, waitFor, choice, `${name}-mode`);
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-launch-drawer-settled`);
+    await scrollToOfflineControl(renderer, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-reachable`);
+  }
   await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
@@ -499,6 +579,48 @@ async function openReviewDestination(renderer, name) {
 async function reviewAction(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
 }
+
+/**
+ * Issue #1683: a control a stage names is brought into view by real wheel input only, then required inside the window and topmost
+ * at its centre — read before the press, with no scripted scroll — and pressed by a real pointer. Each read waits two frames.
+ */
+function measureControl(node) {
+  if (!node) return null;
+  const r = node.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  let inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+  for (let parent = node.parentElement; inside && parent && parent !== document.scrollingElement; parent = parent.parentElement) {
+    const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+    const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+    if (style.overflowX !== 'visible') inside &&= r.left >= left && r.right <= left + parent.clientWidth;
+    if (style.overflowY !== 'visible') inside &&= r.top >= top && r.bottom <= top + parent.clientHeight;
+  }
+  return { x, y, top: r.top, left: r.left, width: innerWidth, height: innerHeight, inside: inside && node.contains(document.elementFromPoint(x, y)) };
+}
+const controlInWindow = (selector) => `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve((${measureControl})(document.querySelector(${JSON.stringify(selector)}))))))`;
+async function wheelIntoWindow(renderer, selector, name) {
+  for (let move = 0; move < 16; move += 1) {
+    const state = await renderer.evaluate(controlInWindow(selector));
+    requireJourney(state !== null, `${name}-present`);
+    if (state.inside) return state;
+    const deltaY = Math.round(state.y - state.height / 2);
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(Math.min(state.width - 8, Math.max(8, state.x))), y: Math.round(state.height / 2), deltaX: 0, deltaY: deltaY === 0 ? 1 : deltaY });
+  }
+  requireJourney(false, `${name}-in-window`);
+}
+async function pressInWindow(renderer, selector, name) {
+  const { x, y } = await wheelIntoWindow(renderer, selector, name);
+  const point = { x, y, button: 'left', clickCount: 1 };
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0 });
+}
+/** Between a source row and its category, the one element that draws a border or its own background (Issue #1683 item 7). */
+const SOURCE_ROW_FRAMES = `((row) => {const framed=(node)=>{const s=getComputedStyle(node);
+  const transparent=(color)=>color==='transparent'||color.startsWith('rgba(')&&parseFloat(color.slice(color.lastIndexOf(',')+1))===0;
+  const border=['Top','Right','Bottom','Left'].some(side=>parseFloat(s['border'+side+'Width'])>0&&s['border'+side+'Style']!=='none'&&!transparent(s['border'+side+'Color']));
+  return border||!transparent(s.backgroundColor)||s.backgroundImage!=='none';};
+  const ancestors=[];for(let node=row.parentElement;node&&!node.matches('section.review-group');node=node.parentElement)if(framed(node))ancestors.push(node.className);
+  return {row:framed(row),ancestors};})`;
 
 async function openMarkMore(renderer, markId, name) {
   await waitFor(renderer, `document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more')`, `${name}-ready`, 30_000);
@@ -593,6 +715,49 @@ async function pressEnter(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
 }
 
+/** One key as a keyboard sends it (J-14). */
+async function pressKey(renderer, key, windowsVirtualKeyCode) {
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode });
+}
+
+/**
+ * 新建审阅's body at the window's own size (Issue #1679): each category is one line high (at most one line of its text plus its own
+ * padding and border), and the switch, 事实核查 and 开始审阅 are on screen with the body unscrolled. Run in the page.
+ */
+function reviewFormGeometry() {
+  const sheet = document.querySelector('dialog.review-sheet'), body = sheet.querySelector('.sheet-body'), view = body.getBoundingClientRect();
+  const rect = (node) => node?.getBoundingClientRect() ?? null;
+  const inBody = (node) => { const r = rect(node); return r !== null && r.width > 0 && r.height > 0 && r.top >= view.top - 0.5 && r.bottom <= view.bottom + 0.5 && r.left >= view.left - 0.5 && r.right <= view.right + 0.5; };
+  const inWindow = (node) => { const r = rect(node); return r !== null && r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; };
+  const rows = Array.from(sheet.querySelectorAll('[data-review-category-option]')).filter((row) => row.getClientRects().length > 0).map((row) => {
+    const style = getComputedStyle(row), extra = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
+    const checkbox = row.querySelector('input'), boxStyle = getComputedStyle(checkbox);
+    const boxHeight = checkbox.getBoundingClientRect().height + parseFloat(boxStyle.marginTop) + parseFloat(boxStyle.marginBottom);
+    const lines = Array.from(row.querySelectorAll('.review-category-name,.review-category-reason,.review-category-basis,.review-category-calls')).filter(node => node.getClientRects().length).map(node => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const fragments = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
+      const wraps = Math.max(...fragments.map(rect => rect.top)) >= Math.min(...fragments.map(rect => rect.bottom));
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;display:block;width:max-content;white-space:nowrap;font:inherit;line-height:inherit';
+      probe.textContent = node.textContent;
+      node.append(probe);
+      const height = probe.getBoundingClientRect().height;
+      probe.remove();
+      return { height, wraps };
+    });
+    const lineHeight = Math.max(...lines.map(line => line.height));
+    return { id: row.dataset.reviewCategoryOption, height: row.getBoundingClientRect().height, boxHeight, lineHeight, extra,
+      limit: Math.max(boxHeight, lineHeight) + extra, wraps: lines.some(line => line.wraps) };
+  });
+  const switchBox = sheet.querySelector('input[name="review-category"][value="local-text-check"]');
+  return { width: innerWidth, height: innerHeight, scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight, rows: rows.length,
+    oneLine: rows.every((row) => !row.wraps && row.height <= row.limit + 1), firstRow: rows[0], tall: rows.filter((row) => row.wraps || row.height > row.limit + 1), switchIn: inBody(switchBox) && inBody(switchBox?.closest('label')),
+    factualIn: inBody(sheet.querySelector('[data-review-category-option="factual-review"]')), startIn: inWindow(sheet.querySelector('[data-review-action="start"]')),
+    wholeIn: inBody(sheet.querySelector('[data-review-scope-option="whole"]')) };
+}
+
 
 /** Wait for the drawer to show one Task's plan in one state, then read it. */
 /**
@@ -677,7 +842,7 @@ async function importSample1(renderer, cancellation, distinct = false) {
     throw error;
   }
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-explicit');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
@@ -903,6 +1068,8 @@ async function main() {
   let loopback;
   let loopbackAcquisition;
   let runRoot;
+  let browserRecordPath;
+  const browserRecord = () => readFile(browserRecordPath, 'utf8').catch((error) => { if (error?.code === 'ENOENT') return ''; throw error; });
   let runRootAcquisition;
   let tempParent;
   let dataRoot;
@@ -1108,12 +1275,16 @@ async function main() {
     // Issue #1430: the overlap relaunch answers its Save dialog with the one-step 导出审阅报告（DOCX）'s file instead.
     const bookReportExportPath = resolve(exportsRoot, BOOK_REPORT_EXPORT_FILE);
     let saveAnswerPath = reportExportPath;
+    // Issue #1641: under the bare --j04-browser-record switch, 在浏览器中打开 appends each address it hands over to this fixed
+    // file the main process places inside the data root, instead of opening the system browser.
+    browserRecordPath = resolve(dataRoot, 'e2e-browser-record', 'addresses.txt');
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
       '--j04-save-path', saveAnswerPath, '--j10-unit-hold-path', unitHoldPath,
+      '--j04-browser-record', 'on',
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
@@ -1251,7 +1422,8 @@ async function main() {
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(renderer, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.baseline-analysis-card')).overflowX!=='scroll'`, 'zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.baseline-analysis-card .analysis-state')).borderStyle!=='none'`, 'forced-colors');
+    // The first-analysis form has no state heading; its card and start control retain their outlines without colour.
+    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.baseline-analysis-card')).borderStyle!=='none' && !document.querySelector('.baseline-analysis-card .analysis-state') && getComputedStyle(document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')).borderStyle!=='none'`, 'forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -1261,6 +1433,10 @@ async function main() {
     await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'prepare-click');
     await launchTaskFromBar(renderer, waitFor, 'baseline');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'prepared', 120_000);
+    // A result still has a state pill, whose outline must survive forced colours as before.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card .analysis-state')).borderStyle!=='none'`, 'result-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     cancellation.throwIfRequested();
     const prepared = await readBaseline(renderer);
     const manifest = prepared?.coverageManifest;
@@ -1315,13 +1491,16 @@ async function main() {
     const bookName = 'J-04 sample1 基线稿件分析';
     const wholeCount = groupedCount(manifest.totalGraphemes);
     const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-opened');
+    const firstPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(prepared.taskIntent.taskIntentId)}})`);
     requireJourney(firstDrawer?.hidden === false && firstDrawer.kind === 'baseline-analysis' && firstDrawer.version === '1' && firstDrawer.mode === 'compact' &&
       firstDrawer.stored === null && firstDrawer.pill === '已完成 · 1/8 个单元未读成' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
+      firstPlan.estimate?.parts === SAMPLE1_UNITS && firstPlan.estimate.fewestRequests === SAMPLE1_UNITS + 1 &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
         发送: '不发送，无模型用量。',
+        预计: firstPlan.estimate.sentence,
         会得到: '一份基线分析。',
         不会: '不改稿、导出发布、存里程碑、读书外内容、作事实判定。',
         中途: '预计无需参与，可随时暂停或取消。',
@@ -1558,7 +1737,7 @@ async function main() {
     // Run has left (V2-UX-LIVE-004).
     const startedDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-bar-started-drawer');
     requireJourney(startedDrawer?.bar?.state === 'started' && startedDrawer.bar.start === 'started' && startedDrawer.bar.status === '已完成' &&
-      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'run-link:查看运行:enabled' && startedDrawer.actions === 0,
+      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'redo:重新开始…:enabled|run-link:查看运行:enabled' && startedDrawer.actions === 0,
     'analysis-bar-started', startedDrawer?.bar);
     await assertRenderer(renderer, `!['正在开始任务…','已进入调度器'].some((text)=>(document.querySelector('#persistence-status')?.textContent??'').includes(text))`, 'analysis-bar-status-settled');
 
@@ -1822,7 +2001,7 @@ async function main() {
     const historicalDataRoot = resolve(runRoot, 'historical-policy-reader');
     await cp(currentDataRoot, historicalDataRoot, { recursive: true, filter: (source) => source !== currentShellRoot });
     const historicalHelper = resolve(runRoot, 'historical-policy-fixture.mjs');
-    await build({ entryPoints: [resolve(ROOT, 'tests/support/analysis-ledger-revisions.ts')], bundle: true,
+    await build({ entryPoints: [resolve(ROOT, 'tests/support/pre94-policy-encoding.ts')], bundle: true,
       platform: 'node', format: 'esm', outfile: historicalHelper, logLevel: 'silent' });
     const { constructPre94PolicyEncoding } = await import(pathToFileURL(historicalHelper).href);
     const historicalDatabase = new DatabaseSync(resolve(historicalDataRoot, 'store', 'ai7.sqlite'));
@@ -2462,7 +2641,7 @@ async function main() {
     at('sync-current-prepare');
     at('connectivity-offline-bar');
     await writeFile(connectivityPath, 'offline');
-    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false);
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false, true);
     // A new start has no prepared record; the optional timing choice and launch remain keyboard reachable.
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
@@ -2482,7 +2661,7 @@ async function main() {
       'offline-launch-no-send',waitingDrawer.bar);
     requireJourney(waitingDrawer.pill==='等待网络' && waitingDrawer.bar.state==='started' && waitingDrawer.bar.statement===null &&
       waitingDrawer.bar.note==='已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
-      barActions(waitingDrawer)==='cancel-wait:取消:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
+      barActions(waitingDrawer)==='cancel-wait:取消任务:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
     requireJourney(waitingAnalysis.authorization.origin==='standard-direct' && waitingAnalysis.authorization.authority==='standard-direct-dispatch' &&
       waitingAnalysis.run.progress===null && waitingAnalysis.run.stateLabel==='等待网络 · 未启动' &&
       sameValue(waitingAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity']),'offline-launch-waiting-record');
@@ -2498,7 +2677,9 @@ async function main() {
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
     const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
-    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)==='run-link:查看运行:enabled','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    const waitingSource = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(offlineIntent)}})`);
+    const waitingActions = waitingSource.relaunch ? 'redo:重新开始…:enabled|run-link:查看运行:enabled' : 'run-link:查看运行:enabled';
+    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)===waitingActions,'offline-launch-cancelled-no-send',cancelledDrawer.bar);
     const cancelledAnalysis=await readBaseline(renderer);
     requireJourney(cancelledAnalysis.run.state==='cancelled'&&cancelledAnalysis.run.stateLabel==='已取消 · 未启动'&&cancelledAnalysis.run.attempt===null&&cancelledAnalysis.taskOutcome===null&&
       sameValue(cancelledAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity','cancelled']),'offline-launch-cancelled-record');
@@ -2781,7 +2962,9 @@ async function main() {
     requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
     await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('input[name="review-category"][value="factual-review"]')?.disabled===false`, 'review-search-ordinary-category-available');
 
-    await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
+    await pointerClick(renderer, waitFor, 'input[name="review-category"][value="factual-review"]', 'review-search-category');
+    await waitFor(renderer, `document.querySelector('input[name="review-category"][value="factual-review"]')?.checked===true && document.querySelector('[data-review-action="open-search-settings"]')?.hidden===false`, 'review-search-category-selected');
+    await reviewAction(renderer, '[data-review-action="open-search-settings"]', 'review-search-settings-action');
     await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
     await openReviewDestination(renderer, 'review-search-return');
 
@@ -2791,11 +2974,42 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
     // Nine model review categories plus the reversible local-only choice, remembered defaults and four pill scopes (#1374).
     // In ordinary mode the consequences are what it reads, sends and costs; 不会做 is the technical layer's (Issue #1413 cluster 4).
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('.task-launch-estimate > summary')?.textContent==='先看计划' && sheet.querySelector('.task-launch-estimate [data-review-action="prepare"]')?.textContent==='更新计划'; })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('.task-launch-estimate > summary')?.textContent==='先看计划' && sheet.querySelector('.task-launch-estimate [data-review-action="prepare"]')?.textContent==='更新计划' && sheet.querySelector('.sheet-body input, .sheet-body select, .sheet-body button')===boxes.find(box=>box.value==='local-text-check') && boxes.find(box=>box.value==='local-text-check').getAttribute('role')==='switch' && boxes.find(box=>box.value==='local-text-check').closest('fieldset.review-category-options')===null && sheet.querySelectorAll('fieldset.review-category-options input[name="review-category"]').length===9; })()`, 'review-sheet-contract');
+    at('review-sheet-form');
+    // 0.7.4 (I-2): 本地文字检查 is a switch above the categories, the nine categories take one line each, and 核查力度 sits under
+    // 事实核查. Everything below is measured at the window's own size (no emulation), once the sheet has stopped loading.
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); return sheet?.open===true && sheet.querySelector('.review-preparation-progress')?.hidden===true && sheet.querySelector('[data-review-action="start"]')?.disabled===false; })()`, 'review-form-settled');
+    const formGeometry = await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve((${reviewFormGeometry.toString()})()))))`);
+    process.stderr.write(`REVIEW_FORM_GEOMETRY/${JSON.stringify(formGeometry)}\n`);
+    requireJourney(formGeometry.scrollTop === 0 && formGeometry.rows === 9 && formGeometry.oneLine && formGeometry.switchIn && formGeometry.factualIn && formGeometry.startIn, 'review-form-geometry', formGeometry);
+    // At the larger window the whole of 审阅范围's first choice is on screen with the body unscrolled; the smaller one scrolls for it.
+    requireJourney(formGeometry.width < 1100 || formGeometry.wholeIn, 'review-form-whole-in-body', formGeometry);
+    const SWITCH = 'dialog.review-sheet input[name="review-category"][value="local-text-check"]';
+    const FACTUAL = 'dialog.review-sheet input[name="review-category"][value="factual-review"]';
+    const LEVEL_TRIGGER = 'dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"] + .ui-select-trigger';
+    const formRows = (hidden) => `(() => { const sheet=document.querySelector('dialog.review-sheet'); const rows=Array.from(sheet.querySelectorAll('[data-review-category-option]')); return rows.length===9 && rows.every((row)=>(row.getClientRects().length===0)===${hidden}); })()`;
+    await pressReviewControl(renderer, waitFor, SWITCH, 'review-form-switch-on', '.sheet-body', { reachable: 'review-form-switch-reachable' });
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const line=sheet.querySelector('.review-local-only-line'); const box=sheet.querySelector('input[name="review-category"][value="local-text-check"]'); return box.checked && line.getClientRects().length>0 && line.textContent==='本次只做本地文字检查；关闭后恢复已选的审阅类别。' && ${formRows(true)} && Array.from(sheet.querySelectorAll('[data-review-category-option] input')).every((input)=>input.disabled && !input.checked) && sheet.querySelector('[data-local-check-options]')?.hidden===false; })()`, 'review-form-switch-on-state');
+    await pressReviewControl(renderer, waitFor, SWITCH, 'review-form-switch-off', '.sheet-body', { reachable: 'review-form-switch-off-reachable' });
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const checked=Array.from(sheet.querySelectorAll('[data-review-category-option] input:checked'), (input)=>input.value).join(','); return !sheet.querySelector('input[name="review-category"][value="local-text-check"]').checked && sheet.querySelector('.review-local-only-line').getClientRects().length===0 && ${formRows(false)} && checked==='typos-and-usage' && sheet.querySelector('[data-local-check-options]')?.hidden===true; })()`, 'review-form-switch-off-state');
+    await pressReviewControl(renderer, waitFor, FACTUAL, 'review-form-factual-tick', '.sheet-body', { reachable: 'review-form-factual-reachable' });
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const row=sheet.querySelector('[data-review-category-option="factual-review"]'); const level=sheet.querySelector('.review-evidence-assurance'); if(!row||!level||level.hidden||level.getClientRects().length===0)return false; const a=row.getBoundingClientRect(), b=level.getBoundingClientRect(), after=row.nextElementSibling===level && level.nextElementSibling?.getBoundingClientRect().top>=b.bottom-0.5; return after && b.top>=a.bottom-0.5 && b.left>a.left+8 && level.querySelector('select[data-review-field="evidenceAssuranceLevel"]')?.value==='standard'; })()`, 'review-form-level-under-factual');
+    // The level is chosen on the control the select is enhanced into, with the keys of a list: Down to 严格核查, Up to 标准核查 and to 快速整理.
+    // The form is left at 快速整理 for the 取消 check below.
+    for (const [key, code, value] of [['ArrowDown', 40, 'strict'], ['ArrowUp', 38, 'standard'], ['ArrowUp', 38, 'quick']]) {
+      await pressReviewControl(renderer, waitFor, LEVEL_TRIGGER, `review-form-level-open-${value}`, '.sheet-body', { wheel: true, reachable: `review-form-level-reachable-${value}` });
+      await pressKey(renderer, key, code);
+      await pressKey(renderer, 'Enter', 13);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]')?.value===${JSON.stringify(value)} && document.activeElement?.matches('.ui-select-trigger') && !!document.querySelector('.review-evidence-assurance .field-note')?.textContent`, `review-form-level-${value}`);
+    }
+    await pressReviewControl(renderer, waitFor, FACTUAL, 'review-form-factual-untick', '.sheet-body', { reachable: 'review-form-factual-untick-reachable' });
+    await waitFor(renderer, `(() => { const level=document.querySelector('dialog.review-sheet .review-evidence-assurance'); return level?.hidden===true && level.getClientRects().length===0; })()`, 'review-form-level-hidden-without-factual');
 
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
+    // 取消 keeps no level: the form was left at 快速整理, and nothing was started or planned with 事实核查 (Issue #1679).
+    requireJourney(await renderer.evaluate(`window.ai7.getPreferences().then((preferences)=>preferences.values['review.evidenceAssuranceLevel']==='standard')`), 'review-form-level-not-kept-on-cancel');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-development-restored-settings-ready');
     await click(renderer, '帮助', 'review-memory-development-restored-help');
@@ -2823,7 +3037,7 @@ async function main() {
     at('review-bar-ready');
     // The former prepared-plan bar cannot occur on a sheet start: its estimate is read-only and Start is the launch.
     requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace().then(page=>page.run===null)`), 'review-estimate-no-prepared-record');
-    await assertRenderer(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false && !!document.querySelector('.review-estimate')?.textContent && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-one-step-ready');
+    await assertRenderer(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false && /^预计.+；(?:用时暂无可靠估计|按最近同类任务，.+)。$/u.test(document.querySelector('dialog.review-sheet .review-consequences [data-consequence="cost"]')?.textContent ?? '') && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-one-step-ready');
     at('review-offline-bar');
     await writeFile(connectivityPath, 'offline');
     await closeOwnedBrowser(); await launchForCleanup();
@@ -2839,7 +3053,7 @@ async function main() {
     const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3 && preparedReview.state==='waiting' && preparedReview.authorization!==null, 'review-launched-waiting-run');
     const waitingReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
-    requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
+    requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消任务:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
     const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     requireJourney(waitingReview.run?.reviewRunId===preparedReview.reviewRunId && waitingReview.run.canContinue===false &&
       waitingReview.run.categories.every(category=>category.state==='waiting') && waitingReview.newReview.available===false,
@@ -2877,7 +3091,7 @@ async function main() {
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
-      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
+      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'redo:重新开始…:enabled|run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
     // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
@@ -2928,7 +3142,11 @@ async function main() {
         synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.top <= synthesisLayout.height * .45 && synthesisLayout.bottom <= synthesisLayout.height,
           `review-first-card-${viewport}-geometry`, synthesisLayout);
-        await pointerClick(renderer, waitFor, '.review-run > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`);
+        // 查看计划 is in the Run's header, above the findings (#1706): on the header's one row — level with 导出 at its end — and
+        // inside the window with the page unscrolled, then pressed.
+        requireJourney(await renderer.evaluate(`(() => {const centre=(node)=>{const box=node.getBoundingClientRect();return box.top+box.height/2;},plan=document.querySelector('.review-run-heading > [data-review-action="view-plan"]'),last=document.querySelector('.review-run-heading > .review-header-export > summary');
+          return !!plan&&!!last&&Math.abs(centre(plan)-centre(last))<plan.getBoundingClientRect().height/2;})()`) === true, `review-first-card-${viewport}-header-one-row`);
+        await pressReviewControl(renderer, waitFor, '.review-run-heading > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`, null);
         await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`, `review-first-card-${viewport}-drawer`);
         await renderer.evaluate(`scrollTo(0, 0)`);
         await waitFor(renderer, `(async () => {const card=document.querySelector('article.review-finding'),width=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const next=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?document.querySelector('#task-drawer').getBoundingClientRect().width:0;return scrollY===0&&Math.abs(width-next)<.1&&Math.abs(next-card.getBoundingClientRect().width)<.1&&Math.abs(padding-target)<1;})()`, `review-first-card-${viewport}-drawer-stable`);
@@ -2995,6 +3213,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll('[data-findings-filter]').length===3 && !root.querySelector('select') && root.querySelector('.finding-row .finding-body .finding-why') && root.querySelector('.finding-row .finding-location'); })()`, 'findings-filter-row-layout');
+    // 回到原文 from a row leaves the way back to 待办汇总, said as 待办汇总 (0.7.9 review, BUG-18).
+    await findingsTextReturnsToFindings(renderer, waitFor, requireJourney, 'book-findings-text');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
 
@@ -3087,6 +3307,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
+    // Stage re-check (0.7.9): in ordinary mode a part that was not read gives its reason without the failure's code in brackets.
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('.findings-center')?.innerText??''; return text.includes('确定性夹具没有该单元与请求摘要对应的响应。') && !/（[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+）/u.test(text); })()`, 'book-findings-gap-reason-words');
     const pollFindings=remainingFindings.filter(item=>item.target.kind==='review').slice(0,2);
     requireJourney(pollFindings.length===2,'findings-poll-two-records');
     await renderer.evaluate(`document.querySelector('[data-findings-filter="category"] [data-filter-value=""]').focus()`);
@@ -3380,6 +3602,8 @@ async function main() {
     try {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        // The level is remembered from the last 先看计划 or 开始审阅 with 事实核查 (Issue #1679). No factual start or plan precedes this sheet
+        // in this profile, so it opens at 标准核查; the loop below ends there too, so the second size opens at it as well.
         await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');if(!select||select.disabled||select.value!=='standard')return false;select.scrollIntoView({block:'nearest'});const focus=select.nextElementSibling?.matches('.ui-select-trigger')?select.nextElementSibling:select;focus.focus();return document.activeElement===focus && Array.from(select.options).map(option=>option.value).join('|')==='quick|standard|strict';})()`, `factual-selector-${width}`);
         for(const level of ['strict','quick','standard']) {
           await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)} && !!document.querySelector('.review-evidence-assurance .field-note')?.textContent;})()`, `factual-level-${level}-${width}`);
@@ -3390,7 +3614,7 @@ async function main() {
     // Strict and quick choices enter the first frozen plan, without executing a different fixture contract.
     // Their full ordinary-production execution is covered by the real-store captured-transport tests.
     await writeFile(connectivityPath,'offline');
-    const reopenFactualSheet = async (name) => {
+    const reopenFactualSheet = async (name, rememberedLevel) => {
       await closeOwnedBrowser(); await launchForCleanup();
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
       await renderer.evaluate(`document.querySelector('button[data-book-id="${factualBook.bookId}"]').click()`);
@@ -3399,8 +3623,11 @@ async function main() {
       await reviewAction(renderer,'[data-review-action="new-review"]',`${name}-new`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `${name}-sheet`);
       await assertRenderer(renderer, `(() => {const sheet=document.querySelector('dialog.review-sheet');for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='factual-review')&&!box.disabled)box.click();sheet.querySelector('input[name="review-scope"][value="whole"]').click();return true;})()`, `${name}-category`);
+      // After a restart the sheet opens at the level the editor last planned or started with, never at the default (Issue #1679).
+      await assertRenderer(renderer, `document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]')?.value===${JSON.stringify(rememberedLevel)}`, `${name}-remembered-level`);
     };
-    await reopenFactualSheet('factual-level-offline');
+    // 先看计划 at 标准核查 was the last press before this restart.
+    await reopenFactualSheet('factual-level-offline', 'standard');
     for(const level of ['strict','quick']) {
       await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet [data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)};})()`, `factual-freeze-${level}`);
       const queuedId=await launchReviewFromSheet(renderer,waitFor);
@@ -3415,7 +3642,13 @@ async function main() {
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-next-sheet-${level}`);
     }
     await writeFile(connectivityPath,'online');
-    await reopenFactualSheet('factual-standard-start');
+    // The last start before this restart was at 快速整理, and the sheet shows it; the editor then chooses 标准核查 with the pointer, so this plan
+    // is the standard one and the recorded factual answer it consumes is unchanged.
+    await reopenFactualSheet('factual-standard-start', 'quick');
+    await pressReviewControl(renderer, waitFor, LEVEL_TRIGGER, 'factual-standard-start-level-open', '.sheet-body', { wheel: true });
+    const standardIndex = await renderer.evaluate(`Array.from(document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]').options).findIndex(option=>option.value==='standard')`);
+    await pressReviewControl(renderer, waitFor, `${LEVEL_TRIGGER} ~ .ui-select-popover .ui-select-option[data-index="${standardIndex}"]`, 'factual-standard-start-level-choose', '.ui-select-options', { wheel: true });
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]').value==='standard'`, 'factual-standard-start-level-current');
     await launchReviewFromSheet(renderer, waitFor);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'factual-settled', 180_000);
@@ -3431,7 +3664,7 @@ async function main() {
       ['待核查', '证据不足'].includes(result.states.factualVerification) && result.policyPin.document === 'docs/policies/factual-verification-policy.md') &&
       sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
     'factual-lens-results', { total: lens?.total, counts: lens?.counts });
-    await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && row.querySelector('article.fact-card')?.dataset.factCard==='collapsed' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>[cell.dataset.stateTerm,cell.textContent]))===JSON.stringify([['事实核查','证据不足']]); })()`, 'factual-lens-columns');
     await assertRenderer(renderer, `(() => { const group=document.querySelector('section.review-group[data-review-category="factual-review"]'); const rows=Array.from(group.querySelectorAll('.fact-lens-row')); return rows.length>0 && group.querySelectorAll(':scope > details.review-category-fold > article.review-finding').length===0 && rows.every(row=>row.querySelectorAll('.review-finding-quote').length===1); })()`, 'factual-results-not-duplicated');
     at('factual-card-evidence');
     // Synchronized delta with Issue #1174 (ADR 0095 §5): the finding's card lists the sources the Evidence Workspace holds for its
@@ -3441,21 +3674,124 @@ async function main() {
     const expectedEvidence = JSON.stringify((attached?.sources ?? []).filter((source) => source.excluded !== true)
       .map((source) => [`${source.checkLabel} · ${source.relation}`, source.sourceKind === 'web' ? source.sourceRef : null, false]));
     requireJourney(attached?.sources?.length === 3 && UUID_PATTERN.test(sourced.markId ?? ''), 'factual-card-evidence-sources', attached?.sources);
+    // Issue #1641: 在浏览器中打开 hands exactly the address the service recorded for a card to the opener — the record file stands
+    // in for the system browser — and answers its host; a source no record holds, by either identity, opens nothing.
+    const webCard = attached.sources.find((source) => source.sourceKind === 'web');
+    const openSource = (input) => renderer.evaluate(`window.ai7.openSourceInBrowser(${JSON.stringify(input)}).then((result)=>({ok:true,result}),(error)=>({ok:false,code:error?.code}))`);
+    const recordBefore = await browserRecord();
+    const opened = await openSource({ bookId: factualBook.bookId, resultId: sourced.resultId, cardId: webCard?.cardId });
+    requireJourney(opened?.ok === true && opened.result.host === new URL(webCard.sourceRef).host && await browserRecord() === `${recordBefore}${webCard.sourceRef}
+`,
+      'source-open-in-browser', { opened });
+    const unknownCard = await openSource({ bookId: factualBook.bookId, resultId: sourced.resultId, cardId: `src_${'0'.repeat(20)}` });
+    const unknownEvidence = await openSource({ bookId: factualBook.bookId, evidenceId: '00000000-0000-4000-8000-000000000000' });
+    requireJourney(unknownCard?.code === 'FACTUAL_VERIFICATION_SOURCE_NOT_FOUND' && unknownEvidence?.code === 'RESEARCH_EVIDENCE_NOT_FOUND' &&
+      await browserRecord() === `${recordBefore}${webCard.sourceRef}
+`, 'source-open-in-browser-unknown-refused', { unknownCard, unknownEvidence });
     const evidenceRows = (root) => `(() => { const list=${root}?.querySelector('.finding-evidence'); return list ? JSON.stringify(Array.from(list.querySelectorAll('li.finding-evidence-source')).map((item)=>[item.querySelector('.finding-evidence-note')?.textContent ?? '', item.querySelector('.finding-evidence-url')?.textContent ?? null, item.querySelector('.finding-evidence-snippet')!==null])) : null; })()`;
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
-    await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
+    // Issue #1683 item 11: collapsed, the fact card lists no source; its rows live in 为这句核对的来源 once it is expanded.
+    await waitFor(renderer, `${factualCard}?.dataset.factCard==='collapsed' && ${factualCard}.querySelector('.finding-evidence')===null`, 'factual-card-evidence', 30_000);
+    // The ordinary successful fixture belongs to the fact lens. Retention without a verification result is exercised
+    // separately at retained-finding-sources, through the real retained-before-verification write ordering.
+    await assertRenderer(renderer, `!!${factualCard}?.closest('.fact-lens')`, 'factual-source-list-fixture-in-fact-lens');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
     await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
+    // The 批注栏 card keeps its list and gains each web source's 复制链接 and 在浏览器中打开 · <域名> (Issue #1683 item 12.1).
+    const expectedControls = JSON.stringify((attached?.sources ?? []).filter((source) => source.excluded !== true)
+      .map((source) => source.sourceKind === 'web' ? [true, `在浏览器中打开 · ${new URL(source.sourceRef).host}`] : [false, null]));
+    await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll('[data-mark-card="${sourced.markId}"] li.finding-evidence-source'), (item)=>[item.querySelector('[data-source-action="copy-link"]')!==null, item.querySelector('[data-source-action="open-in-browser"]')?.textContent ?? null]))===${JSON.stringify(expectedControls)}`, 'factual-mark-card-source-controls');
     await openReviewDestination(renderer, 'factual-card-evidence-back');
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
+
+    at('factual-card-ordinary');
+    // Issue #1683 item 12.2, in ordinary mode and before any decision: the collapsed card is one badge with its place, the wording in
+    // two lines at most, one sentence and its row of controls, all in the window; 展开 shows 结论 → 来源 → 你的决定, and exactly one
+    // element frames a source row — the card. Every rectangle is read from this window's own innerWidth / innerHeight.
+    await setDeveloperMode(renderer, waitFor, false, 'factual-card-ordinary-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-ordinary-review');
+    const factRow = `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]`;
+    const factToggle = `${factRow} [data-fact-action="fact-workspace"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)})?.dataset.factCard==='collapsed'`, 'factual-card-ordinary-lens', 60_000);
+    await wheelIntoWindow(renderer, `${factRow} article.fact-card`, 'factual-card-ordinary-card');
+    const collapsed = await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const card=document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)});
+      const box=(node)=>node.getBoundingClientRect(),style=getComputedStyle(card),px=(value)=>parseFloat(value)||0,line=(node)=>{const s=getComputedStyle(node);return px(s.lineHeight)||px(s.fontSize)*1.5;};
+      const quote=card.querySelector(':scope > .review-finding-quote'),q=getComputedStyle(quote),sentence=card.querySelector('.fact-card-sentence');
+      const parts=['.fact-card-head .fact-card-badge',':scope > .review-finding-quote','.fact-card-sentence','[data-fact-action="fact-workspace"]',
+        '.fact-card-actions [data-review-action="go-to-text"]','.fact-card-actions [data-review-action="ignore-now"]'].map(selector=>(${measureControl})(card.querySelector(selector))?.inside);
+      const vertical=(s)=>px(s.paddingTop)+px(s.paddingBottom)+px(s.borderTopWidth)+px(s.borderBottomWidth);
+      const bound=vertical(style)+box(card.querySelector('.fact-card-head')).height+2*line(quote)+vertical(q)+px(q.marginTop)+px(q.marginBottom)+line(sentence)+box(card.querySelector('.fact-card-actions')).height+3*px(style.rowGap)+2;
+      resolve({width:innerWidth,height:innerHeight,parts,card:box(card).height,bound,quote:box(quote).height,quoteBound:2*line(quote)+vertical(q)+1,
+        address:card.textContent.includes(${JSON.stringify(sourced.quote)}) && !card.textContent.includes('http://') && !card.textContent.includes('https://'),badges:card.querySelectorAll('[data-state-term]').length,
+        buttons:Array.from(card.querySelectorAll('button'),(button)=>button.textContent)});})))`);
+    requireJourney(collapsed.parts.every(Boolean) && collapsed.card <= collapsed.bound && collapsed.quote <= collapsed.quoteBound && collapsed.address && collapsed.badges === 1 &&
+      JSON.stringify(collapsed.buttons) === JSON.stringify(['展开', '回到原文', '忽略']), 'factual-card-ordinary-collapsed', collapsed);
+    // The Task Drawer beside or over the card: docked, 展开 stays topmost; overlaid, closing it by pointer gives the card its place back.
+    await pressInWindow(renderer, '.review-run-heading > [data-review-action="view-plan"]', 'factual-card-ordinary-open-drawer');
+    await waitFor(renderer, `(async () => {const drawer=document.querySelector('#task-drawer');if(drawer?.dataset.taskDrawer!=='open')return false;const before=drawer.getBoundingClientRect().left;await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
+      const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?drawer.getBoundingClientRect().width:0;return Math.abs(before-drawer.getBoundingClientRect().left)<.1&&Math.abs(padding-target)<1;})()`, 'factual-card-ordinary-drawer-settled');
+    const docked = await renderer.evaluate(`innerWidth>=1120`);
+    // Docked, the card keeps its 展开 topmost beside the drawer; overlaid, the drawer moves nothing, so closing it gives the card its place back.
+    const covered = docked ? await wheelIntoWindow(renderer, factToggle, 'factual-card-ordinary-docked-expand') : await renderer.evaluate(controlInWindow(factToggle));
+    await pressInWindow(renderer, '#task-drawer [data-task-drawer-control="close"]', 'factual-card-ordinary-close-drawer');
+    await waitFor(renderer, `(async () => {if(document.querySelector('#task-drawer')?.dataset.taskDrawer==='open')return false;const before=parseFloat(getComputedStyle(document.body).paddingRight);await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);return before===0&&parseFloat(getComputedStyle(document.body).paddingRight)===0;})()`, 'factual-card-ordinary-drawer-closed');
+    const uncovered = await renderer.evaluate(controlInWindow(factToggle));
+    requireJourney(docked ? covered?.inside === true : Math.abs(uncovered.top - covered.top) < 1 && Math.abs(uncovered.left - covered.left) < 1, `factual-card-ordinary-drawer-${docked ? 'docked' : 'overlay'}`, { covered, uncovered });
+    await pressInWindow(renderer, factToggle, 'factual-card-ordinary-expand');
+    const workspaceInRow = `${factRow} .evidence-workspace`;
+    await waitFor(renderer, `document.querySelectorAll(${JSON.stringify(`${workspaceInRow} .evidence-card`)}).length===3 && document.querySelector(${JSON.stringify(factToggle)})?.getAttribute('aria-expanded')==='true'`, 'factual-card-ordinary-expanded');
+    const expanded = await renderer.evaluate(`(() => {const card=document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)}),sections=Array.from(card.querySelectorAll('[data-fact-section]'));
+      return {order:sections.map((node)=>node.dataset.factSection),headings:sections.map((node)=>node.querySelector('.fact-section-heading')?.textContent??''),tops:sections.map((node)=>node.getBoundingClientRect().top),
+        frames:Array.from(card.querySelectorAll('.evidence-card'),${SOURCE_ROW_FRAMES}),address:${JSON.stringify(attached.sources.map((source) => source.sourceRef))}.some((ref)=>card.textContent.includes(ref))};})()`);
+    requireJourney(JSON.stringify(expanded.order) === JSON.stringify(['conclusion', 'sources', 'decision']) && JSON.stringify(expanded.headings) === JSON.stringify(['结论', '为这句核对的来源', '你的决定']) &&
+      expanded.tops[0] < expanded.tops[1] && expanded.tops[1] < expanded.tops[2] && expanded.frames.length === 3 &&
+      expanded.frames.every(({ row, ancestors }) => !row && ancestors.length === 1 && ancestors[0].split(/\s+/u).includes('fact-card')) &&
+      !expanded.address, 'factual-card-ordinary-expanded-order', expanded);
+    cancellation.throwIfRequested();
+
+    at('factual-card-source-open');
+    // 0.7.9 wording follow-up (#1616): in ordinary mode the open fact card names what it goes by as 事实核查规则, never 契约.
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="book-review"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('依据：事实核查规则 · 断言列举与引文定位') && !text.includes('依据：事实核查契约'); })()`, 'factual-card-basis-words');
+    // Issue #1683 item 12.1: 在浏览器中打开 on the web source's row by a real pointer press hands exactly the recorded address to the
+    // opener — the record file stands in for the system browser — once per press sequence, even for two presses before the answer;
+    // 复制链接 puts exactly that address on the clipboard. The label's host is the address's own.
+    const webRow = `${workspaceInRow} .evidence-card[data-card-id=${JSON.stringify(webCard.cardId)}]`;
+    const openControl = `${webRow} [data-source-action="open-in-browser"]`;
+    requireJourney(await renderer.evaluate(`document.querySelector(${JSON.stringify(openControl)})?.textContent`) === `在浏览器中打开 · ${new URL(webCard.sourceRef).host}`, 'factual-card-source-open-label');
+    const pressedBefore = await browserRecord();
+    await pressInWindow(renderer, openControl, 'factual-card-source-open-press');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(openControl)})?.disabled===false && document.querySelector(${JSON.stringify(`${webRow} .source-link-status`)})?.textContent==='已在浏览器中打开。'`, 'factual-card-source-opened');
+    requireJourney(await browserRecord() === `${pressedBefore}${webCard.sourceRef}\n`, 'factual-card-source-open-record');
+    const twiceBefore = await browserRecord();
+    const twice = await wheelIntoWindow(renderer, openControl, 'factual-card-source-open-twice');
+    requireJourney(twice.inside === true, 'factual-card-source-open-twice-in-window');
+    const point = { x: twice.x, y: twice.y, button: 'left' };
+    await Promise.all([
+      renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1, clickCount: 1 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0, clickCount: 1 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1, clickCount: 2 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0, clickCount: 2 }),
+    ]);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(openControl)})?.disabled===false`, 'factual-card-source-open-twice-answered');
+    requireJourney(await browserRecord() === `${twiceBefore}${webCard.sourceRef}\n`, 'factual-card-source-open-twice-once');
+    await renderer.evaluate(`(() => {window.__j04Copied=[];window.__j04CopyListener=(event)=>{const field=event.target;window.__j04Copied.push(field instanceof HTMLTextAreaElement?field.value.slice(field.selectionStart,field.selectionEnd):String(getSelection()));};document.addEventListener('copy',window.__j04CopyListener,true);})()`);
+    try {
+      await pressInWindow(renderer, `${webRow} [data-source-action="copy-link"]`, 'factual-card-source-copy');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${webRow} .source-link-status`)})?.textContent==='已复制链接。'`, 'factual-card-source-copied');
+      requireJourney(JSON.stringify(await renderer.evaluate(`window.__j04Copied`)) === JSON.stringify([webCard.sourceRef]), 'factual-card-source-copy-text');
+    } finally { await renderer.evaluate(`document.removeEventListener('copy',window.__j04CopyListener,true)`); }
+    await setDeveloperMode(renderer, waitFor, true, 'factual-card-developer-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-developer-review');
+    await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-developer-lens', 60_000);
+    cancellation.throwIfRequested();
     at('factual-evidence-workspace');
     await reviewAction(renderer, `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}] [data-fact-action="fact-workspace"]`, 'factual-workspace-open');
     await waitFor(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row.querySelector('.evidence-workspace')!==null && row.querySelector('.finding-evidence')===null; })()`, 'factual-evidence-not-duplicated');
     const workspaceSelector = `.evidence-workspace[data-result-id=${JSON.stringify(sourced.resultId)}]`;
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} .evidence-card').length===3`, 'factual-workspace-cards');
     // Candidates only: never quoted, never counted, each check a discrete state; the summary labelled 非证据 (EVID-003/004/010).
-    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const cards=Array.from(ws.querySelectorAll('.evidence-card')); return cards.every((card)=>card.dataset.checkState==='candidate' && card.querySelector('.evidence-excerpt')===null && card.querySelector('dd')?.textContent==='候选来源 · 尚未核对') && JSON.stringify(cards.map((card)=>card.dataset.relation))===JSON.stringify(['支持','反驳','仅提供背景']) && ws.querySelector('.evidence-summary')?.dataset.label==='非证据' && ws.querySelector('.evidence-quote')?.textContent===${JSON.stringify(sourced.quote)} && ws.querySelector('.evidence-matrix')?.dataset.pinnedCount==='0'; })()`, 'factual-workspace-candidates');
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const cards=Array.from(ws.querySelectorAll('.evidence-card')); return cards.every((card)=>card.dataset.checkState==='candidate' && card.querySelector('.evidence-excerpt')===null && card.querySelector('.evidence-card-check')?.textContent===' · 候选来源 · 尚未核对 · '+card.dataset.relation) && JSON.stringify(cards.map((card)=>card.dataset.relation))===JSON.stringify(['支持','反驳','仅提供背景']) && ws.querySelector('.evidence-sources > .evidence-summary:last-child')?.dataset.label==='非证据' && ws.querySelector('.evidence-summary h6')?.textContent==='AI7 小结 · 非证据' && ws.querySelector('.evidence-quote')?.textContent===${JSON.stringify(sourced.quote)} && ws.querySelector('.evidence-matrix')===null; })()`, 'factual-workspace-candidates');
     // Two cards pinned make the comparison; reading and comparing write nothing (EVID-006, EVID-012).
     for (const index of [0, 1]) {
       await assertRenderer(renderer, `(() => { const pin=document.querySelectorAll('${workspaceSelector} [data-evidence-pin]')[${index}]; if(!(pin instanceof HTMLInputElement)||pin.disabled)return false; pin.click(); return true; })()`, `factual-pin-${index}`);
@@ -3466,14 +3802,27 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('factual-review-decision');
-    // Five unselected choices directly after the result; 维持未决 with one reason taken as suggested is recorded once, bound to
-    // the version read (FREV-004, FREV-005, FREV-006, FREV-009).
-    await assertRenderer(renderer, `(() => { const radios=Array.from(document.querySelectorAll('${workspaceSelector} [data-decision-choice]')); return JSON.stringify(radios.map((radio)=>radio.dataset.decisionChoice))===JSON.stringify(['accept','request-evidence','keep-pending','decline','own-words']) && radios.every((radio)=>!radio.checked) && document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===true; })()`, 'factual-decision-unselected');
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('${workspaceSelector} [data-decision-choice="keep-pending"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return true; })()`, 'factual-decision-choose');
-    await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===false`, 'factual-decision-ready');
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="reason-suggestion"]`, 'factual-reason-suggestion');
+    // One decision row under 你的决定 (Issue #1683 item 10): 采纳结论 and 要补充证据 direct, the other three under ⋯, none preselected
+    // and no separate 记录 button; 维持未决 from ⋯ with one reason taken as suggested in 写理由 is recorded once, bound to the version
+    // read (FREV-004, FREV-005, FREV-006, FREV-009). Every named control is pressed by a real pointer once it is in the window.
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('${workspaceSelector} .evidence-decision-row'); const choices=Array.from(row?.querySelectorAll('[data-decision-choice]') ?? []); return JSON.stringify(choices.map((choice)=>[choice.dataset.decisionChoice, choice.closest('.evidence-decision-more')!==null]))===JSON.stringify([['accept',false],['request-evidence',false],['decline',true],['keep-pending',true],['own-words',true]]) && document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')===null; })()`, 'factual-decision-unselected');
+    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-reasons-fold > summary`, 'factual-reason-fold');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-reasons-fold')?.open===true`, 'factual-reason-fold-open');
+    await pressInWindow(renderer, `${workspaceSelector} [data-evidence-action="reason-suggestion"]`, 'factual-reason-suggestion');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="reason-suggestion"][aria-pressed="true"]') !== null`, 'factual-reason-selected');
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="record-decision"]`, 'factual-decision-record');
+    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-more > summary`, 'factual-decision-more');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-more')?.open===true`, 'factual-decision-more-open');
+    // Recording a decision reads 审阅 again and draws its whole card anew. 准备更正提案 must stand where it stood when the decision
+    // showed as recorded: the watcher reads its top at that moment and again once the card has been replaced.
+    const prepareSelector = `${workspaceSelector} .evidence-decision-row [data-evidence-action="prepare-correction"]`;
+    await renderer.evaluate(`(() => { const seen = { card: null, top: null, repainted: false }; globalThis.__j04PreparePlace = seen;
+      new MutationObserver((_records, observer) => {
+        const card = document.querySelector('.review-workspace-card'), button = document.querySelector(${JSON.stringify(prepareSelector)});
+        if (seen.top === null) { if (button !== null && document.querySelector(${JSON.stringify(`${workspaceSelector} .evidence-decision-recorded`)}) !== null) { seen.card = card; seen.top = button.getBoundingClientRect().top; } }
+        else if (card !== seen.card) { seen.repainted = true; observer.disconnect(); }
+      }).observe(document.body, { childList: true, subtree: true });
+      return true; })()`);
+    await pressInWindow(renderer, `${workspaceSelector} [data-decision-choice="keep-pending"]`, 'factual-decision-record');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-recorded')?.dataset.superseded==='false' && document.querySelector('${workspaceSelector} [data-decision-choice]')===null`, 'factual-decision-recorded');
     const decided = await renderer.evaluate(`window.ai7.inspectEvidenceWorkspace({ bookId: ${JSON.stringify(factualBook.bookId)}, resultId: ${JSON.stringify(sourced.resultId)}, sourcesAfter: null })`);
     requireJourney(decided?.decisions?.length === 1 && decided.decisions[0].disposition === 'keep-pending' && decided.decisions[0].boundVersion === 1 &&
@@ -3484,7 +3833,12 @@ async function main() {
     // 准备更正提案 on a result below the formal gate: the Run's two variants and 自行编辑, the first chosen (Issue #1410 item 18); the range set holds the
     // finding's own words, included; saving makes one ordinary 修改建议 whose card keeps 证据核查未完成 (CORR-001 to CORR-011,
     // EASSURE-012).
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
+    await waitFor(renderer, `globalThis.__j04PreparePlace?.repainted === true`, 'factual-decision-repainted');
+    const preparePlace = await renderer.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => { const button = document.querySelector(${JSON.stringify(prepareSelector)});
+      resolve({ recorded: globalThis.__j04PreparePlace.top, repainted: button?.getBoundingClientRect().top ?? null, window: [innerWidth, innerHeight] }); })))`);
+    console.log(`FACT_PREPARE_PLACE/${JSON.stringify(preparePlace)}`);
+    requireJourney(typeof preparePlace.recorded === 'number' && typeof preparePlace.repainted === 'number' && Math.abs(preparePlace.repainted - preparePlace.recorded) < 1, 'factual-correction-place-kept', preparePlace);
+    await pressInWindow(renderer, prepareSelector, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
     await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.map((input)=>input.checked).join()==='true,false,false' && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===false; })()`, 'factual-correction-first-variant-chosen');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'factual-correction-choose');
@@ -3979,6 +4333,64 @@ async function main() {
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');
 
+    at('evaluation-relaunch-references');
+    // A source with no series in its saved scope. The window stays on its original Book while editing the other Book's references.
+    await writeFile(connectivityPath, 'offline');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'evaluation-reference-tasks');
+    const referenceBook = recordedPausedBook.bookId;
+    const priorBook = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then(route => route?.bookId ?? null)`);
+    requireJourney(priorBook === recordedBook.bookId && priorBook !== referenceBook, 'evaluation-reference-foreign-book');
+    const fixture = await renderer.evaluate(`(async () => {
+      const bookId = ${JSON.stringify(referenceBook)};
+      await window.ai7.inspectTaskOverview();
+      const { seriesId } = await window.ai7.createSeries({ title: '初评参考书系', note: '' });
+      const change = { seriesId, bookId, kind: 'add' };
+      const { previewDigest } = await window.ai7.previewSeriesMembershipChange(change);
+      await window.ai7.changeSeriesMembership({ ...change, previewDigest });
+      const run = await window.ai7.taskOverviewCall({ operation: 'launchInitialEvaluation', bookId, input: { clientCommandId: crypto.randomUUID(), startWhen: 'when-online' } });
+      return { seriesId, ref: run.taskIntentId };
+    })()`);
+    const referenceCard = `[data-task-item=${JSON.stringify('task:' + fixture.ref)}] .task-overview-card-title strong`;
+    await pressReachable(renderer, waitFor, requireJourney, referenceCard, 'evaluation-reference-source');
+    const drawerButton = name => `#task-drawer [data-task-drawer-control=${JSON.stringify(name)}]:not(:disabled)`;
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(fixture.ref)}`, 'evaluation-reference-source-open');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-cancel-wait');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('redo'), 'evaluation-reference-redo');
+    const options = '#task-drawer .task-launch-options > summary';
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options');
+    const series = '#task-drawer select[aria-label="本次任务的书系参考"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ''`, 'evaluation-reference-original-book-only');
+    const choice = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(series)}).options).findIndex(o => o.value === ${JSON.stringify(fixture.seriesId)})`);
+    requireJourney(choice > 0, 'evaluation-reference-target-series');
+    const chooseSeries = async (index, value, label) => {
+      await pressReachable(renderer, waitFor, requireJourney, series + ' + .ui-select-trigger', `evaluation-reference-${label}-chooser`);
+      await pressReachable(renderer, waitFor, requireJourney, series + ` ~ .ui-select-popover [data-index="${index}"]`, `evaluation-reference-${label}-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(value)}`, `evaluation-reference-${label}-selected`);
+    };
+    const closeOptions = async label => {
+      await pressReachable(renderer, waitFor, requireJourney, options, `evaluation-reference-${label}-close`);
+      await waitFor(renderer, `(() => { const node = document.querySelector('#task-drawer .task-launch-options'); return node?.open === false && !node.querySelector(':popover-open'); })()`, `evaluation-reference-${label}-closed`);
+    };
+    await chooseSeries(choice, fixture.seriesId, 'series');
+    await closeOptions('series');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-series-start');
+    // This provider-free policy refuses evaluation with series knowledge. It must retain the chosen series after refusal.
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-refusal')?.textContent.includes('书系') && document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(fixture.seriesId)}`, 'evaluation-reference-series-refusal');
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options-reopen');
+    await chooseSeries(0, '', 'book');
+    await closeOptions('book');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-start');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef !== ${JSON.stringify(fixture.ref)}; })()`, 'evaluation-reference-new-run');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-settle');
+    await waitFor(renderer, `(async () => {
+      const ref = document.querySelector('#task-drawer')?.dataset.taskPlanRef;
+      if (!ref || ref === ${JSON.stringify(fixture.ref)}) return false;
+      const plan = await window.ai7.taskOverviewCall({ operation: 'inspectTaskPlan', bookId: ${JSON.stringify(referenceBook)}, input: { kind: 'initial-evaluation', ref } });
+      const route = await window.ai7.getBookWorkbenchRoute();
+      return plan.state.key === 'cancelled' && plan.relaunch?.operation === 'launchInitialEvaluation' && !Object.hasOwn(plan.relaunch.input, 'seriesId') && (route?.bookId ?? null) === ${JSON.stringify(priorBook)};
+    })()`, 'evaluation-reference-saved-book-only');
+    await writeFile(connectivityPath, 'online');
+
     // #1169: a standalone authored stock review, through the normal UI and the same native unit-child
     // composition the service test verifies by its eight distinct child Session spans. No capture is inherited.
     at('review-relaunch');
@@ -4030,8 +4442,8 @@ async function main() {
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-choice-ready');
     // The official channel currently declares one offline model. As J-12 does, add an independently selected custom
     // fast-role model through Settings, so the chooser has a real second catalogue entry before taking the defaults below.
-    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-choice-custom-model');
-    await fill(renderer, '[data-custom-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
+    await waitFor(renderer, `document.querySelector('[data-custom-flash-model-id]')`, 'dispatch-choice-custom-model');
+    await fill(renderer, '[data-custom-flash-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true; })()`, 'dispatch-choice-catalogue-add');
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='account-future-model')`, 'dispatch-choice-catalogue-ready');
     const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
@@ -4058,8 +4470,19 @@ async function main() {
         await renderer.evaluate(`(() => {const sheet=document.querySelector('dialog.review-sheet');
           for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
           sheet.querySelector('input[name="review-scope"][value="whole"]').click();})()`);
-        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer')).replace(/^模型 /u,'').replace(/ ▾$/u,'');
-        requireJourney(typeof chosenLabel==='string' && chosenLabel.includes('@'), 'dispatch-choice-model-and-effort');
+        // 0.8.0 stage one: the hand-typed account model has no level on record (模型默认 alone, its sentence in view); the model with
+        // levels on record lists its own, and the level chosen for this review — a different one at each size — is what its launch freezes.
+        const levelModel = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>{const binding=settings.roles.find(role=>role.roleId==='main-editorial').binding,model=settings.channels.find(channel=>channel.route===binding.providerId).models.find(model=>model.modelId===binding.modelId);
+          return {modelId:model.modelId,label:model.modelLabel,levels:model.supportedEfforts?.status==='supported'?model.supportedEfforts.levels:[]};})`);
+        requireJourney(levelModel.levels.length>1, 'dispatch-choice-model-has-levels', levelModel);
+        const level = levelModel.levels[width===1280 ? 0 : levelModel.levels.length-1];
+        let unknownSeen = null, levelSeen = null;
+        const unknownLabel = await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-unknown', { model: 'account-future-model', seen: (facts) => { unknownSeen = facts; } });
+        requireJourney(unknownLabel.includes('account-future-model') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values)==='["off"]' && unknownSeen.selected==='off' &&
+          unknownSeen.note===EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside===true, 'dispatch-choice-unknown-default-only', unknownSeen);
+        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer', { model: levelModel.label, effort: level, seen: (facts) => { levelSeen = facts; } })).replace(/^模型 /u,'').replace(/ ▾$/u,'');
+        // The chooser's summary says the level as this mode shows a frozen label: its word in ordinary mode, its recorded name in developer mode.
+        requireJourney(chosenLabel===await frozenModelWords(renderer, `${levelModel.label}@${level}`) && JSON.stringify(levelSeen.values)===JSON.stringify(['off', ...levelModel.levels]) && levelSeen.selected===level && levelSeen.note==='', 'dispatch-choice-model-and-effort', levelSeen);
         await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
         await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');
         const before = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -4071,7 +4494,7 @@ async function main() {
         try {
           requireJourney(after.prepare('SELECT count(*) n FROM task_launch_snapshots').get().n===snapshotsBefore+1 && after.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).n===1, 'dispatch-choice-one-launch');
           const frozen=JSON.parse(after.prepare('SELECT canonical_json FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).canonical_json);
-          requireJourney(frozen.executionConfig.reasoningEffort && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
+          requireJourney(frozen.executionConfig.reasoningEffort===level && frozen.executionConfig.modelId===levelModel.modelId && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
         } finally { after.close(); }
         requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`)===dispatchDefaults, 'dispatch-choice-role-defaults-unchanged');
         if(width===1008) {
@@ -4095,12 +4518,18 @@ async function main() {
             // 查看结果 — at the wide window and at the Gate's. 查看结果 opens the result, and closing it brings the drawer back on the same Task.
             at('task-status-finished');
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
-            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-${planWidth}`,30_000);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: await frozenModelWords(renderer, `${levelModel.label}@${level}`) }),`task-status-finished-card-${planWidth}`,30_000);
             // The card's own controls, by pointer: 查看计划 and 运行 go to the plan and back, and 查看结果 opens the result.
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="full-link"]',`task-status-finished-plan-${planWidth}`);
             await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
+            // #1616 (stage-4/5 rework R6): the review plan's 统合 step reads in the editor's words — 部分, 未完成的部分, 审阅偏好.
+            await assertRenderer(renderer,`(() => {const text=document.querySelector('#task-drawer').innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && text.includes('若覆盖多个部分') && text.includes('并说明未完成的部分、缩短与省略数量') && !/阅读范围|缺口|本社审阅偏好/u.test(text);})()`,`task-status-finished-plan-words-${planWidth}`);
+            // 0.7.9 wording follow-up: the disclosure under 设为快速开始默认 says what it lists in the editor's words.
+            await assertRenderer(renderer,`(() => {const summary=document.querySelector('#task-drawer .task-plan-default-rule-detail > summary');return summary instanceof HTMLElement && summary.getClientRects().length>0 && summary.innerText.trim()==='设为默认后会沿用哪些设置';})()`,`task-status-finished-default-rule-words-${planWidth}`);
+            // Stage re-check (0.7.9): a Task that has run shows no PLAN-007 line to an ordinary editor.
+            await assertRenderer(renderer,`(() => {const drawer=document.querySelector('#task-drawer'),footer=drawer.querySelector('.task-drawer-footer');return footer instanceof HTMLElement && getComputedStyle(footer).display==='none' && !/运行授权|这里只是计划/u.test(drawer.innerText);})()`,`task-status-finished-no-plan-line-${planWidth}`);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
-            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: await frozenModelWords(renderer, `${levelModel.label}@${level}`) }),`task-status-finished-card-again-${planWidth}`,30_000);
             await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
             await waitFor(renderer,`document.querySelector('.task-result-window [data-task-result-action="close"]') && document.querySelector('#task-drawer')?.hidden===true`,`task-status-finished-result-open-${planWidth}`);
             await pointerClick(renderer,waitFor,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
@@ -4110,10 +4539,14 @@ async function main() {
           await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
         }
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-choice-tasks');
-        await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenLabel)})`, 'dispatch-choice-frozen-task-row');
+        await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(await frozenModelWords(renderer, `${levelModel.label}@${level}`))})`, 'dispatch-choice-frozen-task-row');
+        // #1616 (stage-4/5 rework R6): on 任务, in ordinary mode, a finished analysis that left parts unread counts them in the editor's words.
+        if (width===1008) await waitFor(renderer, `(() => { const text=document.querySelector('[data-screen="task-overview"]')?.innerText??''; return document.documentElement.dataset.technicalLayerVisible==='false' && /已完成 · \\d+ 个部分中有 \\d+ 个没有读成/u.test(text) && !text.includes('单元未读成'); })()`, 'dispatch-choice-task-card-words');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
+    at('retained-finding-sources');
+    await checkRetainedFindingSources({ renderer, waitFor, assertRenderer, requireJourney, press: pressInWindow }, dataRoot, ROOT, runRoot, browserRecord);
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

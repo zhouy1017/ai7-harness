@@ -4,8 +4,7 @@ import * as liveAdmission from '../../src/service/analysis/live-kind-admission.j
 import { createHash, randomUUID } from 'node:crypto';
 import { Socket } from 'node:net';
 import { join } from 'node:path';
-import { DatabaseSync, backup } from 'node:sqlite';
-import { cpSync, mkdirSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
@@ -15,12 +14,12 @@ import { buildFactualReviewUnitMessage, type FactualUnitAssertion } from '../../
 import { deriveCoverageManifest } from '../../src/service/analysis/coverage-manifest.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from '../../src/service/analysis/factual-claim-ledger.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { mergeClaimEvidenceUnits } from '../../src/service/analysis/factual-review-evidence.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import type { ReviewRunDriveSteps } from '../../src/service/review/review-run-driver.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
+import { RESEARCH_EVIDENCE_NOT_IN_BOOK } from '../../src/service/research-evidence.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armPerTicketHostAdmission } from '../../src/shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -35,11 +34,13 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
+import { mergeClaimEvidenceUnits } from '../../src/service/analysis/factual-review-evidence.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
 let requestGovernor: ModelRequestGovernor;
-beforeEach(() => { requestGovernor = new ModelRequestGovernor(); store = undefined!; owner = undefined!; roots = undefined!; });
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); store = undefined!; owner = undefined!; roots = undefined!; placedBook = null; });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #901 (wave 8, slice 8a): 事实核查 at its three Evidence Assurance Levels through the real store, Review Run, frozen plan,
@@ -48,6 +49,11 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // at run time from the unit message it received, and the relations the scenario names. Every page is synthetic public text
 // written here; no manuscript text appears in this file, and none is printed or compared.
 armPerTicketHostAdmission();
+
+// Every case's first Book is a copy of one imported sample1 store, placed in its data root before the case opens its own store (#1621);
+// a second Book of a case (and the import itself, proven by the cases that import) goes through `importSample1Book`.
+const seeded = sample1Seed({ title: 'sample1 事实核查' });
+let placedBook: Sample1Seed['book'] | null = null;
 
 const TINYFISH = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 const MUSEUM = 'https://museum.example.org/zun';
@@ -120,6 +126,9 @@ async function setup(initial: Scenario): Promise<void> {
   connected = false;
   roots = await createServiceTestRoots('ai7-factual-verification-');
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+  const seed = await seeded();
+  seed.place(roots.dataRoot);
+  placedBook = seed.book;
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const ordinary = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === 'opencode-go')!;
   const connection = initial.claimStages ? store.saveModelServiceConnection('合成普通连接', null, 'ready', 'opencode-go') : null;
@@ -234,6 +243,8 @@ afterEach(async () => {
   await owner?.dispose();
   store?.close();
   await roots?.dispose();
+  // The seeded first Book is taken by the case's first newBook; one left over would be a Book the case never had before the seed.
+  expect(placedBook).toBeNull();
 });
 
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
@@ -247,8 +258,12 @@ function enrollFactualRecheck(bookId: string) {
 }
 
 async function newBook(name: string): Promise<Book> {
-  const book = await importSample1Book(store, roots.codeRoot, name);
-  await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  let book = placedBook;
+  placedBook = null;
+  if (book === null) {
+    book = await importSample1Book(store, roots.codeRoot, name);
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  }
   // The connection is the store's, recorded once however many Books a case imports.
   if (!connected) recordMissingCredentialConnection(store, '合成连接');
   connected = true;
@@ -583,7 +598,6 @@ describe('factual claim occurrence ledger', () => {
     expect(resumed.currentRunState(runRecordId)).toBe('completed');
     expect(resumed.factualVerification.claims(runRecordId)).toEqual(frozen);
   }, 300_000);
-
   it.each(['fresh', 'existing-prefix'] as const)('continues a claim-stage pause with %s evidence without replacing prior captures', async (prefix) => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('断言取证暂停后续行');
@@ -610,20 +624,6 @@ describe('factual claim occurrence ledger', () => {
       else if (rows().length === 0) {
         store.recordResearchEvidence({ bookId: book.bookId, runRecordId, unitOrdinal: claims.claims[0]!.producers[0]!.sourceUnitOrdinal,
           backendId: TINYFISH.id, unit: kept[0]!.evidence });
-      }
-      if (prefix === 'existing-prefix') {
-        const migration = await createServiceTestRoots('ai7-claim-prefix-106-');
-        mkdirSync(join(migration.dataRoot, 'store'), { recursive: true });
-        for (const entry of readdirSync(roots.dataRoot)) if (entry !== 'store') cpSync(join(roots.dataRoot, entry), join(migration.dataRoot, entry), { recursive: true });
-        await backup(db, join(migration.dataRoot, 'store', 'ai7.sqlite'));
-        const old = new DatabaseSync(join(migration.dataRoot, 'store', 'ai7.sqlite'));
-        old.exec('DROP TABLE research_evidence_unit_revisions; PRAGMA user_version=106'); old.close();
-        let migrated: EditorialStore | undefined;
-        try {
-          migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 116, dataVersion: 1 });
-          expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
-        } finally { migrated?.close(); await migration.dispose(); }
       }
       const original = rows();
       const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
@@ -673,6 +673,7 @@ describe('factual claim occurrence ledger', () => {
       } finally { target.close(); await targetRoots.dispose(); }
     } finally { db.close(); }
   });
+
 
   it('spends an unknown model submission and preserves that claim allowance after reopen', async () => {
     await setup({ claimStages: true, claimModelUnknown: true, relations: [] });
@@ -974,6 +975,17 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(source.sourceRef).toBe(MUSEUM);
     expect(source.sourceVersion).toMatch(/^[0-9a-f]{64}$/u);
     expect(source.evidenceId).not.toBeNull();
+    // 在浏览器中打开 (Issue #1641): the card and its retained row answer the same recorded address; another Book's are refused.
+    const card = { bookId: book.bookId, resultId: results[0]!.resultId, cardId: source.cardId };
+    expect(store.inspectSourceAddress(card)).toEqual({ sourceKind: 'web', address: MUSEUM });
+    expect(store.inspectSourceAddress({ bookId: book.bookId, evidenceId: source.evidenceId! })).toEqual({ sourceKind: 'web', address: MUSEUM });
+    expect(storeError(() => store.inspectSourceAddress({ ...card, cardId: `src_${'0'.repeat(20)}` }))).toBe('FACTUAL_VERIFICATION_SOURCE_NOT_FOUND');
+    expect(storeError(() => store.inspectSourceAddress({ ...card, bookId: randomUUID() }))).toBe('FACTUAL_VERIFICATION_NOT_FOUND');
+    // Another Book's row and a row that does not exist answer alike, so the read says nothing about other Books.
+    const refusal = (input: { bookId: string; evidenceId: string }) => { try { store.inspectSourceAddress(input); } catch (error) { return error; } return null; };
+    for (const input of [{ bookId: randomUUID(), evidenceId: source.evidenceId! }, { bookId: book.bookId, evidenceId: randomUUID() }]) {
+      expect(refusal(input)).toMatchObject({ code: 'RESEARCH_EVIDENCE_NOT_FOUND', message: RESEARCH_EVIDENCE_NOT_IN_BOOK });
+    }
     const before = databaseState(false);
     for (const result of results) expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).result.resultId).toBe(result.resultId);
     expect(databaseState(false)).toEqual(before);

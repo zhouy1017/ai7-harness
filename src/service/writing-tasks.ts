@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { procedureBasePromptDigest } from './procedures/execution.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
@@ -62,36 +63,10 @@ export const WRITING_TASK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const WRITING_TASK_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(WRITING_TASK_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'WRITING_TASK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'WRITING_TASK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the two relations, in the exact-schema validator's own spelling. */
-export const WRITING_TASK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  writing_tasks: [
-    'baseline_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'evaluation_record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-  writing_drafts: [
-    'analysis_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const WRITING_TASK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  writing_tasks: 'WRITING_TASK_LEDGER_IMMUTABLE',
+  writing_drafts: 'WRITING_TASK_LEDGER_IMMUTABLE',
+});
 
 export class WritingTaskError extends Error {
   constructor(readonly code: string, message: string) {
@@ -111,23 +86,6 @@ const DRAFT_SCHEMA = 'ai7.writing-draft/1';
 /** The parser identity a drafted document's record names: its words are AI7's draft, read from no file. */
 export const WRITING_DRAFT_PARSER_IDENTITY = 'ai7.writing-draft/1' as const;
 const CORRUPT = '写作任务记录已损坏。';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'writing_tasks'";
-
-/** Revision 65's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeWritingTaskSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(WRITING_TASK_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(WRITING_TASK_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Writing task schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /**
  * One exemplar version a Task's contract read, by reference only (#688 review): which document and delivered revision, whose

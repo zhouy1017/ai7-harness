@@ -1,10 +1,12 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
+import { pressReachable as wheelPress } from './task-card-reach.mjs';
 import { setDeveloperMode } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -13,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
+import { answer, dropFile, holdEarlierNotice, noImportDraft, pressReachable, questionOffers, questionOutlastsNotice, reachable } from './import-entry-stages.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -152,6 +155,10 @@ const SCOPED_HELPERS = `(() => {
 
 const WRITING_LIBRARY_TEXT = '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。\n\n讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。\n';
 const WRITING_LIBRARY_CHARACTERS = 85;
+// 衍生稿件's management page imports a file of its own: the Book already holds the library's file as a source version, and a file the Book already holds must be chosen explicitly to be reused.
+const MANAGEMENT_IMPORT_FILE = '管理页导入稿.txt';
+const MANAGEMENT_IMPORT_TITLE = '管理页导入稿';
+const MANAGEMENT_IMPORT_TEXT = '这是管理页导入的一份短稿。\n\n第二段说明它只用于验证导入文件的新建方式。';
 const WRITING_LIBRARY_REQUEST = Object.freeze({ typeId: 'review-article', audience: '关注历史题材小说的读者', channel: '读书网站书评栏目' });
 const WRITING_LIBRARY_DRAFT_TITLE = '一封古怪的来信与一门安静的学问';
 const WRITING_MATERIALS_NONE = '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。';
@@ -516,6 +523,8 @@ const PAGE_HELPERS = `(() => {
     pkg: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-package-slot > section.deliverables-package'),
     condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
     packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
+    // A heading of the preview with another heading or nothing after it (Issue #1550 rework): the preview's headings that stand over nothing.
+    emptyPreviewHeadings: () => Array.from(window.__j07.pkg()?.querySelectorAll('.package-preview > h5') ?? []).filter((heading) => heading.nextElementSibling === null || /^H[1-6]$/.test(heading.nextElementSibling.tagName)).map((heading) => heading.textContent),
     packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
     // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
     packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
@@ -685,14 +694,14 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title, distinct = false, start = 'landing') {
+async function importAndOpen(renderer, title, distinct = false, start = 'landing', stayOnOverview = false) {
   requireJourney(start === 'landing' || start === 'target', 'import-entry-stage');
   if (start === 'landing') {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
     await click(renderer, '导入稿件', 'import-start');
   }
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -700,6 +709,7 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
+  if (stayOnOverview) return;
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
@@ -714,7 +724,7 @@ async function reviewHistoricalPublication(renderer, sourceDigest, sourceBytes) 
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'historical-publication-landing');
   await click(renderer, '导入稿件', 'historical-publication-stage');
   await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'historical-publication-target');
-  await clickImportControl(renderer, '[data-import-target-choice="new-book"]', true, 'historical-publication-new-book');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'historical-publication-new-book');
   await waitFor(renderer, `document.querySelector('[data-import-relationship="source-only"]')`, 'historical-publication-relationship');
   await clickImportControl(renderer, '[data-import-relationship="source-only"]', true, 'historical-publication-source-only');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'historical-publication-title');
@@ -805,7 +815,7 @@ async function importDraftAsSource(renderer, bookId) {
   await assertRenderer(renderer, PAGE_HELPERS, 'draft-page-helpers');
   await click(renderer, '导入稿件', 'draft-import');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'draft-target');
-  await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!(target instanceof HTMLInputElement)) return false; target.click(); return target.checked; })()`, 'draft-target-book');
+  await chooseImportTarget(renderer, waitFor, `existing-book:${bookId}`, 'draft-target-book');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices] [data-import-relationship="source-only"]')`, 'draft-relationship');
   await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!(source instanceof HTMLInputElement)) return false; source.click(); return source.checked; })()`, 'draft-source-only');
   await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(bookId)}]')`, 'draft-review-action');
@@ -836,9 +846,9 @@ async function openManuscript(renderer, name) {
  * before the type, so choosing the type keeps it, and the way of making the document is chosen last.
  */
 async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
   await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
-  await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
+  await clickSelector(renderer, '[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]', `${name}-open`);
   await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
   if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
   await assertRenderer(renderer, `(() => { const type = document.querySelector('.derivative-create-form select[data-document-field="type"]'); if (!(type instanceof HTMLSelectElement)) return false; type.value = ${JSON.stringify(typeId)}; type.dispatchEvent(new Event('change', { bubbles: true })); const mode = document.querySelector('.derivative-create-form input[name="derivative-mode"][value=${JSON.stringify(mode)}]'); if (!(mode instanceof HTMLInputElement)) return false; mode.click(); return type.value === ${JSON.stringify(typeId)} && mode.checked; })()`, `${name}-type-and-mode`);
@@ -865,8 +875,8 @@ async function saveMilestone(renderer, milestone, revisionLabel, name) {
  * sequence moved on and nothing is left pending.
  */
 async function acknowledgedEdit(renderer, text, name) {
-  const before = await renderer.evaluate(`window.__j07.journal()`);
-  requireJourney(Number.isSafeInteger(before), `${name}-journal-before`);
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, `${name}-journal-before`);
   const typed = await renderer.evaluate(`(() => {
     const editor = document.querySelector('[data-testid="manuscript-editor"]');
     const block = editor?.querySelector(':scope > p[data-block-id]');
@@ -882,9 +892,12 @@ async function acknowledgedEdit(renderer, text, name) {
     return ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)}) && (block.textContent ?? '') === original + ${JSON.stringify(text)};
   })()`);
   requireJourney(typed === true, `${name}-typed`);
-  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
+  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before.journalSequence}; })()`, `${name}-dirty`, 30_000);
   await renderer.evaluate(`(() => { const save = document.querySelector('[data-editor-persistence]'); if (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
-  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return window.__j07.journal() > ${before} && save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed') && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
+  // #1539 I-10 remembers direct-edit mode: reopening no longer emits the mode-switch success toast.
+  // Persistence is the acknowledged journal and exact saved words, independent of the current toast.
+  await waitFor(renderer, journalEditPersisted(before, text), `${name}-acknowledged`, 120_000);
+  await assertRenderer(renderer, `document.documentElement.dataset.ai7CloseRisk !== 'true'`, `${name}-close-safe`);
   // Real editor reconciliation must retain the loaded preview while paragraph edits still reach the journal.
   await waitFor(renderer, `(async()=>{const image=document.querySelector('.manuscript-source-image img');
     if(!image||image.naturalWidth===0)return false;const source=image.src;
@@ -1120,7 +1133,7 @@ async function main() {
       await waitFor(native, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
       await click(native, '导入稿件', `${name}-picker`);
       await waitFor(native, `document.querySelector('[data-import-target-choice="new-book"]')`, `${name}-target`);
-      await clickImportControl(native, '[data-import-target-choice="new-book"]', true, `${name}-new-book`);
+      await chooseImportTarget(native, waitFor, 'new-book', `${name}-new-book`);
       await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
       await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
       await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);
@@ -1234,6 +1247,26 @@ async function main() {
     await nativeWordExport('suggestions', 'word-suggestions-export');
     await nativeWordExport('accepted-baseline', 'word-accepted-export');
 
+    at('deliverables-save-in-place');
+    const inlineRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'inline-deliverables-data'), checkout);
+    const inline = await launch({ root: inlineRoot, picker: manuscript });
+    await importAndOpen(inline, EXCERPT.title, false, 'landing', true);
+    await pointerClick(inline, waitFor, SIDEBAR.section('deliverables'), 'inline-deliverables-entry');
+    await waitFor(inline, `document.querySelector('[data-publication-action="designate"]')?.textContent === '存为里程碑并设为发稿版本…'`, 'inline-save-ready');
+    await assertRenderer(inline, `(() => { const lines = Array.from(document.querySelectorAll('.deliverables-definition')); return lines.length === 3 && lines.every(line => { const r=line.getBoundingClientRect(); return r.width>0 && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth; }); })()`, 'inline-definitions-in-window');
+    await assertRenderer(inline, `(() => { const button=document.querySelector('[data-publication-action="designate"]'); const r=button?.getBoundingClientRect(); return r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-save-in-first-screenful');
+    await inline.evaluate(`document.querySelector('[data-publication-action="designate"]').addEventListener('click', (event) => { const style=getComputedStyle(event.currentTarget); window.__j07InlineBusy=event.currentTarget.getAttribute('aria-disabled')==='true' && style.opacity==='0.5' && style.cursor==='default'; }, { once: true })`);
+    await pointerClick(inline, waitFor, '[data-publication-action="designate"]', 'inline-save-milestone');
+    await assertRenderer(inline, `window.__j07InlineBusy === true`, 'inline-saving-disabled-style');
+    await waitFor(inline, `document.querySelector('form.publication-designate input[type="radio"]')?.checked === true`, 'inline-saved-form');
+    await assertRenderer(inline, `document.querySelector('[data-publication-field="scope"]')?.value === '全书定稿' && document.querySelector('[data-publication-field="basis"]')?.value === '编辑审定通过' && !document.querySelector('[data-testid="manuscript-editor"]')`, 'inline-defaults');
+    await assertRenderer(inline, `(() => { const confirm=document.querySelector('[data-publication-action="confirm"]'); const r=confirm?.getBoundingClientRect(); return confirm===document.activeElement && r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-confirm-focused-in-window');
+    await pressEnter(inline);
+    await waitFor(inline, `document.querySelector('.publication-versions > li') !== null && document.querySelector('form.publication-designate') === null`, 'inline-designated');
+    await assertRenderer(inline, `(async () => { const value=await window.ai7.inspectDeliverables(); const milestones=value.publication.milestones; const designations=value.publication.designations; return milestones.length===1 && milestones[0].label.startsWith('阶段留档 · ') && designations.length===1 && designations[0].current && designations[0].milestoneId===milestones[0].milestoneId; })()`, 'inline-single-saved-designation');
+    await waitFor(inline, `document.querySelector('[data-package-ready="true"] [data-package-action="prepare"]')?.disabled === false`, 'inline-package-preparable');
+    await close();
+
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
@@ -1270,7 +1303,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('deliverables-before-milestone');
-    // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
+    // Before any milestone the in-place save action is ready (Issue #1550).
     await openDeliverables(renderer, 'before-milestone');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .page-content', returnTo: SIDEBAR.section('deliverables') });
@@ -1279,13 +1312,12 @@ async function main() {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();
       const designate = window.__j07.action('designate');
-      const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
       return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
         page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
         actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
-        designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
+        designate instanceof HTMLButtonElement && !designate.disabled && designate.textContent === '存为里程碑并设为发稿版本…' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
@@ -1293,7 +1325,7 @@ async function main() {
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
           card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
           card.querySelector('[data-document-action="notForThisBook"]') instanceof HTMLButtonElement);
-    })()`, 'designate-unavailable-before-a-milestone');
+    })()`, 'save-and-designate-available-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
     await assertRenderer(renderer, `(() => {
@@ -1302,7 +1334,10 @@ async function main() {
       return bundle.querySelector(':scope > h3')?.textContent === '图书交付包' && bundle.parentElement?.parentElement?.lastElementChild === bundle.parentElement &&
         window.__j07.condition('publication')?.dataset.conditionMet === 'false' && window.__j07.condition('work-records')?.dataset.conditionMet === 'true' &&
         prepare instanceof HTMLButtonElement && prepare.disabled &&
-        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0;
+        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0 &&
+        // A package with nothing to limit it has no 限制 heading, and no heading of the preview stands over nothing.
+        bundle.querySelector('.package-preview') !== null && !Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
+        window.__j07.emptyPreviewHeadings().length === 0;
     })()`, 'package-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
@@ -1827,7 +1862,7 @@ async function main() {
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation","comments"]',
         // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
-        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
           shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
@@ -2176,7 +2211,7 @@ async function main() {
     at('package-evaluation');
     // 评估 定稿 (Issue #429, S81a; BUNDLE-001): the Book's first Evaluation Record is scored and finalized through 评估's own
     // operations — five scores, both risks 低 with a statement, 修改后再议 — so the package has a 定稿 评估记录 to name. The Book
-    // has no 审稿意见, which the package lists under 不包含 with the reason; the drafting itself is J-11's.
+    // has no 审稿意见; the drafting itself is J-11's.
     const evaluationStart = await renderer.evaluate(`window.ai7.startEvaluation({ fromInitial: false }).then((page) => ({ recordId: page.record.recordId, entries: page.record.entries, content: page.record.content }))`);
     requireJourney(typeof evaluationStart?.recordId === 'string' && evaluationStart.content?.items?.length === 5 && evaluationStart.content.risks?.length === 2, 'package-evaluation-started', evaluationStart);
     const evaluationContent = {
@@ -2204,8 +2239,7 @@ async function main() {
       return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
         JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
           `publication:true:发稿版本「${FIRST.label}」 · r1`,
-          'document:news-release:true:第 2 次交付 · 版本 3',
-          ...OTHER_TYPES.map((typeId) => `document:${typeId}:false:尚未创建`),
+          'document:news-release:true:版本 3',
           'work-records:true:暂无审阅记录',
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
@@ -2215,11 +2249,8 @@ async function main() {
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
     // A purpose the editor writes still has its limit: past 80 characters 准备 is held with the reason, and clearing the field
-    // gives the routine purpose back; the four documents not yet created never hold it.
+    // gives the routine purpose back; the four documents not yet created never hold it, and have no row (Issue #1639).
     await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); const prepare=()=>window.__j07.pkg().querySelector('[data-package-action=prepare]'); input.value='长'.repeat(81); input.dispatchEvent(new Event('input',{bubbles:true})); const held=prepare().disabled && window.__j07.packageReason()==='交付包用途过长。'; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return held && !prepare().disabled && window.__j07.packageReason()===''; })()`, 'package-optional-documents-do-not-block');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
-    // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
-    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
     // The four other types 本书不做 on their own cards: every condition holds, 准备 is available on the routine purpose, and the
@@ -2235,11 +2266,10 @@ async function main() {
       const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.firstChild?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
       return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
-        JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
-          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'readers-report:审稿意见', 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
-        ]))} &&
-        bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
+        // No 不包含 list at all (Issue #1639): neither the four types nor the fixed exclusions are itemised.
+        bundle.querySelector('ul.package-excluded') === null && !(bundle.textContent ?? '').includes('不包含') &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
+        window.__j07.emptyPreviewHeadings().length === 0 && Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
         !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
         bundle.querySelector('[data-package-field="purpose"]')?.value === '';
     })()`, 'package-preview-lists-what-it-holds');
@@ -2402,12 +2432,10 @@ async function main() {
       `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`,
       `- ${manifestInputs.included[2].label}（定稿于 ${manifestInputs.included[2].detail.split(' · 定稿于 ')[1]}）`, '',
       '## 交付记录', '', '### 新闻稿', '',
-      ...manifestInputs.deliveries.map((delivery) =>
+      // The record names the 新闻稿's saved 版本 3 (the newest, held by default): its Delivery Records are that version's.
+      ...manifestInputs.deliveries.filter((delivery) => delivery.versionLabel === '版本 3').map((delivery) =>
         `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
       '',
-      '## 不包含', '',
-      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
-      '- 审稿意见：本书没有审稿意见', '',
       '## 说明', '',
       ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
     ].join('\n');
@@ -2775,6 +2803,137 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-deliverables"]') && document.querySelector('[data-publication-action="actuals"]')`, 'actuals-ordinary-back');
     await setDeveloperMode(renderer, waitFor, true, 'actuals-ordinary-on');
 
+    await close();
+    const versionPath = resolve(exportsRoot, '版本留档.docx');
+    renderer = await launch({ save: versionPath });
+    await reopenDeliverables(renderer, 'version-list');
+    const showVersions = async (name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
+      await waitFor(renderer, `document.querySelector('.book-versions > summary')`, `${name}-entry`);
+      await clickSelector(renderer, '.book-versions > summary', `${name}-open`);
+      await waitFor(renderer, `document.querySelector('.book-versions[open][data-version-state="ready"] li')`, `${name}-rows`);
+    };
+    const findVersion = async (kind, label, name) => {
+      let restart = true;
+      for (;;) {
+        const page = await renderer.evaluate(`(() => {
+          const root=document.querySelector('.book-versions');
+          const offset=Number(root.dataset.versionOffset);
+          const row=Array.from(root.querySelectorAll('li[data-kind="${kind}"]')).find(item=>item.querySelector('strong').textContent===${JSON.stringify(label)});
+          if(row)return {id:row.dataset.revisionId,index:Array.from(row.parentElement.children).indexOf(row)+1,offset};
+          const buttons=Array.from(root.querySelectorAll(':scope > .button-row button'));
+          const button=buttons.find(item=>item.textContent===(${restart} && offset>0?'上一页版本':'下一页版本'));
+          if(button)button.click();return {offset,moved:Boolean(button)};
+        })()`);
+        if (typeof page.id === 'string') return `.book-versions li[data-kind="${kind}"][data-revision-id="${page.id}"]` + (kind === 'revision' ? '' : `:nth-child(${page.index})`);
+        requireJourney(page.moved, name);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${page.offset}"])')`, name);
+        if (page.offset === 0) restart = false;
+      }
+    };
+    await showVersions('version-list');
+    for (const direction of ['next','previous']) {
+      const label = direction === 'next' ? '下一页版本' : '上一页版本';
+      let pages = 0;
+      for (;;) {
+        const offset = await renderer.evaluate(`(() => { const root=document.querySelector('.book-versions');const button=Array.from(root.querySelectorAll(':scope > .button-row button')).find(item=>item.textContent===${JSON.stringify(label)});if(!button)return null;button.focus();return root.dataset.versionOffset; })()`);
+        if (offset === null) break;
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${offset}"])')`, 'version-list-keyboard-paged');
+        await assertRenderer(renderer, `document.activeElement.matches('.book-versions > .button-row button')`, 'version-list-page-focus');
+        pages++;
+      }
+      requireJourney(pages > 0, 'version-list-reached-edge');
+    }
+    const versionRow = await findVersion('revision', '已保存修订 · r1', 'version-list-original');
+    const revisionId = await renderer.evaluate(`document.querySelector(${JSON.stringify(versionRow)}).dataset.revisionId`);
+    await clickSelector(renderer, `${versionRow} .button-row > button:first-child`, 'version-list-view');
+    await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('r1') && document.querySelector('.version-paragraph') && !document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-readonly');
+    await clickSelector(renderer, `${versionRow} [data-export-menu] > summary`, 'version-list-export-menu');
+    await clickSelector(renderer, `${versionRow} [data-export-clean]`, 'version-list-export-docx');
+    await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, 'version-list-exported', 120_000);
+    const selectedDocx = await readExportedDocx(versionPath);
+    requireJourney(selectedDocx.paragraphs.length === excerpt.length && selectedDocx.paragraphs.every((para, index) => para.digest === digestOf(excerpt[index])), 'version-list-selected-docx-content');
+    await assertRenderer(renderer, `window.ai7.inspectDeliverables().then(result => result.exports.some(record => record.target.kind === 'revision' && record.target.revisionId === ${JSON.stringify(revisionId)} && record.outcome === 'created'))`, 'version-list-selected-receipt');
+    for (const kind of ['milestone', 'publication']) {
+      const label = kind === 'milestone' ? '里程碑 · ' + SECOND.label : '发稿版本 · 第 2 次';
+      const edit = kind === 'milestone' ? FIRST_EDIT : '';
+      await close();
+      const destination = resolve(exportsRoot, kind + '.docx');
+      renderer = await launch({ save: destination });
+      await reopenDeliverables(renderer, `version-${kind}`);
+      await showVersions(`version-${kind}`);
+      const row = await findVersion(kind, label, 'version-selection-binding');
+      await clickSelector(renderer, row + ' .button-row > button:first-child', `version-${kind}-select`);
+      await waitFor(renderer, `document.activeElement?.matches('.version-selection h4') && document.activeElement.textContent.includes(${JSON.stringify(label)})`, `version-${kind}-preview`);
+      await clickSelector(renderer, row + ' [data-export-menu] > summary', `version-${kind}-menu`);
+      await clickSelector(renderer, row + ' [data-export-clean]', `version-${kind}-docx`);
+      await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, `version-${kind}-receipt`);
+      const output = await readExportedDocx(destination);
+      requireJourney(output.paragraphs.length === excerpt.length && output.paragraphs.every((para, index) => para.digest === digestOf(index === 0 ? excerpt[0] + edit : excerpt[index])), `version-${kind}-contents`);
+    }
+    await findVersion('revision', '已保存修订 · r1', 'version-list-original-again');
+    await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-restore');
+    await clickSelector(renderer, '.version-selection button.primary', 'version-list-confirm');
+    const editorWords = `document.querySelector('[data-testid="manuscript-editor"]')`;
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-restored');
+    const versionKey = async (redo) => {
+      await waitFor(renderer, `document.querySelector('.editor-history-undo:not(:disabled)') && ${editorWords}?.getAttribute('contenteditable') === 'true'`, 'version-history-ready-for-key');
+      await renderer.evaluate(`${editorWords}.focus()`);
+      const key = { key: redo ? 'Z' : 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: (process.platform === 'darwin' ? 4 : 2) | (redo ? 8 : 0) };
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    };
+    await versionKey(false);
+    await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-ctrl-z');
+    await acknowledgedEdit(renderer, '〔撤销后输入〕', 'version-list-type-after-undo');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes('〔撤销后输入〕')`, 'version-list-type-after-undo-cleared');
+    await showVersions('version-list-repeat');
+    await findVersion('revision', '已保存修订 · r1', 'version-list-repeat-original');
+    await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-repeat-restore');
+    await clickSelector(renderer, '.version-selection button.primary', 'version-list-repeat-confirm');
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-restored');
+    await versionKey(false);
+    await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-undone');
+    await versionKey(true);
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-redo');
+    const versionBinding = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null}).then(({manuscriptAnchor}) => ({manuscriptId:manuscriptAnchor.manuscriptId,branchId:manuscriptAnchor.branchId}))`);
+    const restoreId = await renderer.evaluate(`window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(state => state.undo?.stepId)`);
+    requireJourney(typeof restoreId === 'string', 'version-list-restore-step');
+    await acknowledgedEdit(renderer, FIRST_EDIT, 'version-list-later-edit');
+    await assertRenderer(renderer, `(async () => { const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null}); try { await window.ai7.undoManuscript({...scope,expectedWorkingDigest:page.workingDigest,expectedStepId:${JSON.stringify(restoreId)}}); } catch(error) { return error.code === 'HISTORY_STEP_CHANGED' && ${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)}); } return false; })()`, 'version-list-refused-after-edit');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)})`, 'version-list-later-edit-undone');
+    const conflict = await renderer.evaluate(`(async () => {
+      const scope=${JSON.stringify(versionBinding)};
+      const read=()=>window.ai7.getManuscriptWindow({...scope,cursor:null});
+      const page=await read();
+      const block=page.blocks.find(row=>row.kind==='paragraph' && [...row.text].length>16);
+      const binding={...scope,windowStartBlockId:page.blocks[0].blockId};
+      const selectedText=[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(block.text)].slice(4,8).map(part=>part.segment).join('');
+      const {markId}=await window.ai7.createEditorialMark({...binding,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:4,toGrapheme:8,selectedText,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'',rationale:null});
+      await window.ai7.applyChangeSuggestion({...binding,markId,clientEffectId:crypto.randomUUID(),interaction:'accept-and-apply',editedText:null,reason:null});
+      const applied=await read();
+      await window.ai7.flushJournalEdit({...binding,clientEditId:crypto.randomUUID(),baseRevisionId:applied.revisionId,expectedJournalSequence:applied.journalSequence,blockId:block.blockId,baseBlockDigest:applied.blocks.find(row=>row.blockId===block.blockId).digest,fromGrapheme:3,toGrapheme:5,insertText:'〔跨〕'});
+      return {position:block.position,markId,blockId:block.blockId};
+    })()`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'version-conflict-overview');
+    await waitFor(renderer, `document.querySelector('.book-versions')`, 'version-conflict-overview-visible');
+    await openManuscript(renderer, 'version-conflict');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='accept')`, 'version-conflict-edit-undone');
+    await assertRenderer(renderer, `window.ai7.getEditorialMarkCard({...${JSON.stringify(versionBinding)},markId:${JSON.stringify(conflict.markId)}}).then(card=>card.anchorState==='drifted' && card.status==='applied')`, 'version-conflict-drifted-point');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='restore')`, 'version-conflict-accept-kept');
+    const conflictDigest = await renderer.evaluate(`window.ai7.getManuscriptWindow({...${JSON.stringify(versionBinding)},cursor:null}).then(page=>page.workingDigest)`);
+    await versionKey(false);
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('不能撤销这次恢复') || document.querySelector('[data-toast]')?.textContent.includes('不能撤销这次恢复')`, 'version-conflict-whole-state-refusal');
+    await assertRenderer(renderer, `(async()=>{const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null});const card=await window.ai7.getEditorialMarkCard({...scope,markId:${JSON.stringify(conflict.markId)}});return page.workingDigest===${JSON.stringify(conflictDigest)} && card.status==='applied';})()`, 'version-conflict-decision-and-text-kept');
+    await showVersions('version-list-find-autosave');
+    await assertRenderer(renderer, `(() => { const row=Array.from(document.querySelectorAll('.book-versions li')).find(item=>item.querySelector('strong').textContent.startsWith('恢复前自动保存')); if(!row)return false; row.querySelector('button').click(); return true; })()`, 'version-list-open-autosave');
+    await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('恢复前自动保存') && document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-autosave-retrievable');
+
     // Twenty further real Books make the last Deliverables entry fall beyond the first bounded settings page.
     for (let index = 0; index < 20; index += 1) {
       await close();
@@ -2924,6 +3083,17 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
     requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
       [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
+    // 相似段落检索 says what leaves the machine (0.7.9 review 2.3): beside the field what a search may send, beside the answer what
+    // this one sent. The editor writes words and presses 检索相似段落 — each reached by the wheel and asserted inside the window
+    // before its press. This guest connects no model, so the answer reads 没有发送.
+    const similar = '[data-screen="editor"] .writing-task .similar-materials';
+    await assertRenderer(renderer, `(() => { const field=document.querySelector(${JSON.stringify(similar)}); const mode=field?.querySelector('.similar-materials-mode');
+      return field?.querySelector('.similar-materials-note')?.textContent==='已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && mode instanceof HTMLElement && mode.hidden && getComputedStyle(mode).display==='none'; })()`, 'writing-retrieval-note');
+    await wheelPress(renderer, waitFor, requireJourney, `${similar} textarea`, 'writing-retrieval-field');
+    await renderer.send('Input.insertText', { text: '宣传' });
+    await wheelPress(renderer, waitFor, requireJourney, `${similar} [data-similar-action="search"]`, 'writing-retrieval-search');
+    await waitFor(renderer, `(() => { const line=document.querySelector(${JSON.stringify(`${similar} .similar-materials-mode`)}); if (!(line instanceof HTMLElement) || line.hidden) return false; const r=line.getBoundingClientRect();
+      return line.dataset.retrievalAssist==='local' && line.textContent==='本次：没有发送，只在本机按字面检索。' && r.width>0 && r.height>0 && getComputedStyle(line).display!=='none'; })()`, 'writing-retrieval-mode');
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, typeId === WRITING_REQUEST.typeId, false])) &&
       JSON.stringify(writingSheet.references) === JSON.stringify([
         '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的宣传文章范例，本次不参考范例',
@@ -3142,7 +3312,7 @@ async function main() {
     // Issue #1403: in ordinary mode 稿件 lists the manuscript and every derivative document by type and title, and makes new ones.
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
-    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
+    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
     requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '新建 / 导入衍生稿件…', null], ['manage', '管理全部衍生稿件（2）', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3157,7 +3327,28 @@ async function main() {
     at('multi-documents-ordinary-rename');
     // 重命名 on the document's own title: Enter saves, the editor stays the same one, its text untouched.
     await assertRenderer(renderer, `(() => { window.__j07.renameEditor = document.querySelector('[data-testid="manuscript-editor"]'); return window.__j07.renameEditor instanceof HTMLElement; })()`, 'multi-rename-hold-editor');
-    await clickSelector(renderer, '.editor-toolbar [data-document-action="rename"]', 'multi-rename-open');
+    // The name row as the editor reads it at this window (stage-4/5 R2), from the engine's own geometry: the type, the title — whole, or a
+    // readable part and then an ellipsis — and 重命名 stand on one line inside the window, 重命名's words on one line, the info line uncut.
+    const titleRow = await renderer.evaluate(`(() => {
+      const row = document.querySelector('.editor-toolbar .document-title-row');
+      const heading = row?.querySelector('.document-title-heading'), rename = row?.querySelector('[data-document-action="rename"]'), badge = row?.querySelector('.document-type-badge');
+      if (!(heading instanceof HTMLElement) || !(rename instanceof HTMLElement) || !(badge instanceof HTMLElement)) return null;
+      const h = heading.getBoundingClientRect(), r = rename.getBoundingClientRect(), b = badge.getBoundingClientRect(), style = getComputedStyle(heading);
+      const words = document.createRange(); words.selectNodeContents(rename);
+      return {
+        window: [innerWidth, innerHeight], title: heading.textContent, badge: [b.left, b.top, b.right, b.bottom], heading: [h.left, h.top, h.right, h.bottom], rename: [r.left, r.top, r.right, r.bottom],
+        whole: h.width > 0 && heading.scrollWidth <= heading.clientWidth,
+        readablePart: style.textOverflow === 'ellipsis' && h.width >= 8 * parseFloat(style.fontSize),
+        renameLines: new Set(Array.from(words.getClientRects(), (line) => Math.round(line.top))).size,
+        oneLine: b.right <= h.left + 1 && h.right <= r.left + 1 && [b, r].every((box) => box.top < h.bottom && box.bottom > h.top),
+        inWindow: b.left >= 0 && r.right <= innerWidth && Math.min(b.top, h.top, r.top) >= 0 && Math.max(b.bottom, h.bottom, r.bottom) <= innerHeight,
+        info: Array.from(document.querySelectorAll('.editor-toolbar .editor-meta > :is(.editor-revision, .editor-word-count)'), (node) => [node.textContent, node.getBoundingClientRect().width > 0 && node.scrollWidth <= node.clientWidth]),
+      };
+    })()`);
+    console.log(`J07_TITLE_ROW/${JSON.stringify(titleRow)}`);
+    requireJourney(titleRow !== null && titleRow.title === offeredTitle && (titleRow.whole || titleRow.readablePart) && titleRow.renameLines === 1 && titleRow.oneLine && titleRow.inWindow &&
+      titleRow.info.length === 2 && titleRow.info.every(([, uncut]) => uncut), 'multi-title-row-readable', titleRow);
+    await pressReachable({ renderer, waitFor, assertRenderer }, '.editor-toolbar [data-document-action="rename"]', 'multi-rename-open');
     await waitFor(renderer, `document.activeElement === document.querySelector('.editor-toolbar .document-title-input')`, 'multi-rename-input');
     await fill(renderer, '.editor-toolbar .document-title-input', '另一篇宣传文章', 'multi-rename-title');
     await assertRenderer(renderer, `(() => { const input = document.querySelector('.editor-toolbar .document-title-input'); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`, 'multi-rename-enter');
@@ -3180,10 +3371,304 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-derivatives"]')?.textContent === '前往衍生稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
     const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
-    await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
+    // Every derivative with a saved version is ticked by default (Issue #1639): the control's real state says so before anything is
+    // pressed, the package lists the document as held, and the editor's own presses untick and tick it again.
+    const renamedBox = `.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]`;
+    const renamedHeld = `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`;
+    const renamedState = (checked) => `(() => { const box = document.querySelector(${JSON.stringify(renamedBox)}); return box instanceof HTMLInputElement && !box.disabled && box.checked === ${checked} && ${renamedHeld} === ${checked}; })()`;
+    await waitFor(renderer, renamedState(true), 'multi-package-default-ticked');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.package-document-choices > li input[type="checkbox"]'), (box) => box.checked).every((checked) => checked === true)`, 'multi-package-every-document-ticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-untick');
+    await waitFor(renderer, renamedState(false), 'multi-package-unticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-retick');
+    await waitFor(renderer, renamedState(true), 'multi-package-included');
     const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
     requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
+
+    at('derivatives-management');
+    // Issue #1551: 衍生稿件's management page makes a document through 稿件's own four-mode form, renames a title in
+    // place, and asks about deleting a category in an app strip that names it and how many documents it holds. Every
+    // press and every text entry below is a pointer or a key event; nothing about the page is set from script.
+    await openManuscript(renderer, 'management-manuscript');
+    const managementPage = '[data-screen="book-derivatives"]';
+    const managementForm = `${managementPage} .derivative-create-form`;
+    const openManagement = async (name) => {
+      await waitFor(renderer, `document.querySelector('.editor-toolbar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
+      await pointerClick(renderer, waitFor, '[data-derivative-menu]', `${name}-menu`);
+      await pointerClick(renderer, waitFor, '.editor-toolbar [data-manuscript-switch="manage"]', `${name}-open`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-action="new"]`)}) !== null`, `${name}-ready`, 60_000);
+    };
+    const openCreateForm = async (name) => {
+      await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `${name}-new`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} [data-document-field="title"]`)}) !== null`, `${name}-form`, 60_000);
+    };
+    /** The type is chosen from the select's own control by pointer, then read back before anything else is pressed. */
+    const chooseCreateType = async (value, name) => {
+      const select = `${managementForm} select[data-document-field="type"]`;
+      const index = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(select)})?.options ?? []).findIndex((option) => option.value === ${JSON.stringify(value)})`);
+      requireJourney(Number.isSafeInteger(index) && index >= 0, `${name}-type-offered`, index);
+      await pointerClick(renderer, waitFor, `${select} + .ui-select-trigger`, `${name}-type-open`);
+      await pointerClick(renderer, waitFor, `${select} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-type-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(select)})?.value === ${JSON.stringify(value)}`, `${name}-type`, 30_000);
+    };
+    /** One of the form's four ways, pressed on its own radio; the form stays until a way is chosen. */
+    const chooseCreateMode = async (mode, name) => {
+      const radio = `${managementForm} .derivative-modes input[value="${mode}"]`;
+      // 空白新建 is what the form opens on: nothing is pressed for it, and it is read.
+      if (mode === 'blank') {
+        await assertRenderer(renderer, `document.querySelector(${JSON.stringify(radio)})?.checked === true`, `${name}-mode-default`);
+        return;
+      }
+      await pointerClick(renderer, waitFor, radio, `${name}-mode`);
+      if (mode === 'writing') return;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(radio)})?.checked === true`, `${name}-mode-chosen`, 30_000);
+    };
+    /** Text written into one field as a hand writes it: the field is pressed, its text selected, then typed. */
+    const typeInto = async (selector, text, name) => {
+      await pointerClick(renderer, waitFor, selector, `${name}-field`);
+      const selectAll = { key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2 };
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...selectAll, commands: ['selectAll'] });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...selectAll });
+      await renderer.send('Input.insertText', { text });
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(text)}`, `${name}-text`, 30_000);
+    };
+    const confirmCreate = async (name) => {
+      await pointerClick(renderer, waitFor, `${managementForm} [data-document-action="create-derivative"]`, `${name}-confirm`);
+    };
+    const pressEscape = async () => {
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS.Escape });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS.Escape });
+    };
+    /** Two presses on one point, the way a hand opens a title for editing. */
+    const doubleClick = async (selector, name) => {
+      const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()`);
+      for (const clickCount of [1, 2]) {
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount });
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount });
+      }
+      await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input')`, `${name}-input`, 30_000);
+    };
+    await openManagement('management-page');
+    await openCreateForm('management-form');
+    await assertRenderer(renderer, `(() => { const form=document.querySelector(${JSON.stringify(managementForm)}); if(!(form instanceof HTMLFormElement)) return false; if(form.querySelector('[data-document-field]')?.dataset.documentField!=='title') return false; return Array.from(form.querySelectorAll('.derivative-modes input'),(radio)=>radio.value).join('|')==='blank|writing|source|import'; })()`, 'management-one-create-form');
+    at('derivatives-management-blank');
+    const managementBlankTitle = `《${WRITING_TITLE}》管理页稿`;
+    await chooseCreateType('promotion-article', 'management-blank');
+    await chooseCreateMode('blank', 'management-blank');
+    await typeInto(`${managementForm} [data-document-field="title"]`, managementBlankTitle, 'management-blank-title');
+    await confirmCreate('management-blank');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(managementBlankTitle)}`, 'management-blank-open', 120_000);
+    const managementBlankId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title===${JSON.stringify(managementBlankTitle)})?.documentId ?? null)`);
+    requireJourney(UUID_PATTERN.test(managementBlankId ?? ''), 'management-blank-id', managementBlankId);
+    at('derivatives-management-rename');
+    // 改名 makes the row's own 稿件题目 editable: Enter saves, leaving the field saves, Escape leaves it alone, and a
+    // double-click starts the same edit.
+    await openManagement('management-rename');
+    const renamedRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
+    const renamedTitle = `${managementBlankTitle} 改名`;
+    await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-open');
+    await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input') && document.querySelector('.derivatives-item-title-input').value === ${JSON.stringify(managementBlankTitle)}`, 'management-rename-input');
+    await renderer.send('Input.insertText', { text: renamedTitle });
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)}`, 'management-renamed', 60_000);
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)})`, 'management-renamed-recorded');
+    await doubleClick(`${renamedRow} .derivatives-item-title-text`, 'management-rename-double');
+    await renderer.send('Input.insertText', { text: `${renamedTitle} 不要` });
+    await pressEscape();
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)} && document.activeElement?.textContent === '改名'`, 'management-rename-escaped', 30_000);
+    const blurredTitle = `${renamedTitle} 2`;
+    await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-again');
+    await renderer.send('Input.insertText', { text: blurredTitle });
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-filters input[type="search"]`, 'management-rename-blur');
+    await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)})`, 'management-renamed-on-blur', 60_000);
+    at('derivatives-management-import');
+    // 导入文件 in the same form: the file names the document unless the editor wrote a title. The launch's scripted picker
+    // answers once and the stage 'multi-import' used it; the Book also holds that stage's file as a source version already,
+    // and reusing one needs an explicit choice. So a file of this stage's own is written and the product is launched again
+    // with it as the answer, and the Book is opened from the landing screen; the stage then starts on 稿件.
+    const managementImportPath = resolve(runRoot, MANAGEMENT_IMPORT_FILE);
+    await writeFile(managementImportPath, MANAGEMENT_IMPORT_TEXT, 'utf8');
+    await close();
+    renderer = await launch({ picker: managementImportPath, adapter: WRITING_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]')`, 'management-product-ready');
+    await pointerClick(renderer, waitFor, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'management-book-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'management-book-ready', 120_000);
+    await openManagement('management-import');
+    await openCreateForm('management-import');
+    await chooseCreateType('promotion-article', 'management-import');
+    await chooseCreateMode('import', 'management-import');
+    await confirmCreate('management-import');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(MANAGEMENT_IMPORT_TITLE)}`, 'management-import-open', 120_000);
+    at('derivatives-management-source');
+    // 从来源材料创建 begins with the Book's first source chosen; the document opens at its first paragraph.
+    await openManagement('management-source');
+    await openCreateForm('management-source');
+    await chooseCreateType('promotion-article', 'management-source');
+    await chooseCreateMode('source', 'management-source');
+    await waitFor(renderer, `(() => { const radios=Array.from(document.querySelectorAll(${JSON.stringify(`${managementForm} input[name="derivative-source"]`)})); return radios.length>0 && radios[0].checked; })()`, 'management-source-chosen');
+    await confirmCreate('management-source');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'management-source-open', 120_000);
+    at('derivatives-management-writing');
+    // AI 写作生成 opens the one writing sheet here with the title and type carried; its draft becomes the document.
+    await openManagement('management-writing');
+    await openCreateForm('management-writing');
+    await chooseCreateType('promotion-article', 'management-writing');
+    await chooseCreateMode('writing', 'management-writing');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet`)})?.open === true`, 'management-writing-sheet', 60_000);
+    // 0.7.9 wording follow-up (#1616): in ordinary mode the sheet says what a ticked 资料库 item is read as in the editor's words.
+    await waitFor(renderer, `(() => { const line=document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet .writing-materials-statement`)});
+      return document.documentElement.dataset.technicalLayerVisible==='false' && line instanceof HTMLElement && line.getClientRects().length>0 &&
+        line.innerText.trim().startsWith('勾选的资料列进这次计划的「允许参考」，按任务开始时的资料内容读取：') && !line.innerText.includes('索引版本'); })()`, 'management-writing-materials-words', 60_000);
+    const managementWritingTitle = await renderer.evaluate(`document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet [data-document-field="title"]`)})?.value ?? null`);
+    requireJourney(typeof managementWritingTitle === 'string' && managementWritingTitle.length > 0, 'management-writing-title', managementWritingTitle);
+    await typeInto(`${managementPage} .writing-task [data-writing-field="audience"]`, WRITING_REQUEST.audience, 'management-writing-audience');
+    await typeInto(`${managementPage} .writing-task [data-writing-field="channel"]`, WRITING_REQUEST.channel, 'management-writing-channel');
+    // The sheet carries the launch bar itself (0.7.3), so its start is the one press. The plan is not opened: a draft the editor
+    // began here opens by itself once written, and only a plan they looked at first leaves it waiting (J-07's writing-library stages).
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .writing-task [data-writing-action="start"]`)})?.disabled===false`, 'management-writing-start-ready');
+    await pointerClick(renderer, waitFor, `${managementPage} .writing-task [data-writing-action="start"]`, 'management-writing-start');
+    // The page is the ordinary one, so the heading is the document's title alone (the 版本 suffix is the technical layer's).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .document-title-heading')?.textContent === ${JSON.stringify(managementWritingTitle)}`, 'management-writing-open', 120_000);
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.some(doc=>doc.title===${JSON.stringify(managementWritingTitle)} && doc.origin.drafted===true))`, 'management-writing-drafted');
+    // The started task's drawer is open beside the draft; the editor closes it with its own control before using the page's menus.
+    await waitFor(renderer, `document.body.dataset.taskDrawer === 'open'`, 'management-writing-drawer-open');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'management-writing-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open' && document.body.getAnimations().length === 0`, 'management-writing-drawer-closed');
+    at('derivatives-management-menus');
+    // 导出 ▾ and ⋯ on a row: both open on a press, hold their entries inside the window at both sizes, and 设为定稿
+    // turns the entry into 取消定稿.
+    await openManagement('management-menus');
+    const menusRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
+    const menusPill = `document.querySelector(${JSON.stringify(`${menusRow} .status-pill`)})?.textContent`;
+    /**
+     * A row menu opened by its button holds its panel inside the content area: right of the sidebar's real right edge, inside the
+     * window's right and bottom edges, and clear of the button that opened it. The panel is read once its opening animation has
+     * ended (and its placement is applied), never after a fixed sleep; every bound is the window's or the sidebar's own.
+     */
+    const assertRowMenuInside = async (menu, name) => {
+      const summarySelector = `${menusRow} [data-derivative-row-menu="${menu}"]`;
+      const panelSelector = `${menusRow} [data-derivative-row-menu-body="${menu}"]`;
+      await waitFor(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); return summary?.parentElement?.open===true && panel instanceof HTMLElement && getComputedStyle(panel).position==='fixed' && panel.getAnimations().length===0; })()`, `${name}-settled`, 30_000);
+      await assertRenderer(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); const sidebar=document.querySelector('#app-sidebar'); if(!(summary instanceof HTMLElement && panel instanceof HTMLElement && sidebar instanceof HTMLElement)) return false; const box=panel.getBoundingClientRect(), button=summary.getBoundingClientRect(), edge=sidebar.getBoundingClientRect().right; const clear=box.bottom<=button.top || box.top>=button.bottom || box.right<=button.left || box.left>=button.right; return box.width>0 && box.height>0 && edge>0 && box.left>=edge && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight && clear; })()`, `${name}-inside`);
+    };
+    // The window's own size first: the page is standing here before any size is emulated.
+    for (const menu of ['export', 'more']) {
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own`);
+      await assertRowMenuInside(menu, `management-${menu}-own`);
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own-close`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="${menu}"]`)})?.parentElement?.open === false`, `management-${menu}-own-closed`, 30_000);
+    }
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-${width}`);
+        await assertRowMenuInside('export', `management-export-${width}`);
+        await assertRenderer(renderer, `Array.from(document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}).querySelectorAll('button'), (button)=>button.textContent).join('|')==='导出 DOCX|导出 MD'`, `management-export-entries-${width}`);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-close-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)})?.parentElement?.open === false`, `management-export-closed-${width}`, 30_000);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-${width}`);
+        await assertRowMenuInside('more', `management-more-${width}`);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="finalize"]`, `management-finalize-${width}`);
+        await waitFor(renderer, `${menusPill} === '已定稿'`, `management-finalized-${width}`, 60_000);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-again-${width}`);
+        await assertRenderer(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="more"]`)}); return Array.from(panel?.querySelectorAll('button') ?? [], (button)=>button.textContent).includes('取消定稿'); })()`, `management-unfinalize-entry-${width}`);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="unfinalize"]`, `management-unfinalize-${width}`);
+        await waitFor(renderer, `${menusPill} === '草稿'`, `management-unfinalized-${width}`, 60_000);
+        // The create form fills this window too: its own confirm stays inside it, and the section closes again.
+        await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `management-form-${width}`);
+        await waitFor(renderer, `(() => { const form=document.querySelector(${JSON.stringify(managementForm)}); const confirm=form?.querySelector('[data-document-action="create-derivative"]'); if(!(form instanceof HTMLFormElement)||!(confirm instanceof HTMLElement)) return false; const box=form.getBoundingClientRect(), button=confirm.getBoundingClientRect(); return box.width>0 && box.left>=0 && box.right<=innerWidth && button.left>=0 && button.right<=innerWidth; })()`, `management-form-visible-${width}`, 30_000);
+        await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `management-form-close-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(managementForm)}) === null`, `management-form-closed-${width}`, 30_000);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    at('derivatives-management-category');
+    // 删除类别 asks in an app strip that names the category and how many documents it holds; 确认删除 on a category still in
+    // use is refused by the service and the refusal is said in the strip, and 取消 returns to the row it was asked from.
+    // The menus stage leaves the management page showing, so this stage starts on it.
+    await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="categories"]`, 'management-category-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-type="promotion-article"]`)}) !== null`, 'management-category-rows');
+    const promotionCount = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article')?.documents.length ?? -1)`);
+    requireJourney(Number.isSafeInteger(promotionCount) && promotionCount > 0, 'management-category-count', promotionCount);
+    await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-type="promotion-article"] [data-derivative-action="delete-type"]`, 'management-category-ask');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-refuse');
+    await waitFor(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); const problem=strip?.querySelector('.derivatives-confirm-problem'); return strip instanceof HTMLElement && problem instanceof HTMLElement && (problem.textContent ?? '').trim().length > 0 && strip.textContent.includes('宣传文章'); })()`, 'management-category-refusal', 60_000);
+    // The refusal is said once, in the strip the editor is looking at: the bottom bar does not repeat it.
+    await assertRenderer(renderer, `(() => { const problem=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm-problem`)})?.textContent?.trim() ?? ''; const bar=document.querySelector('#persistence-status'); return problem.length > 0 && bar instanceof HTMLElement && !(bar.textContent ?? '').includes(problem); })()`, 'management-category-refusal-once');
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount}))`, 'management-category-kept');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');
+    await typeInto(`${managementPage} .derivatives-category-editor [aria-label="新类别名称"]`, '校样', 'management-category-name');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-category-editor [data-derivative-action="add-type"]`, 'management-category-add');
+    await waitFor(renderer, `Array.from(document.querySelectorAll(${JSON.stringify(`${managementPage} [data-derivative-type] input`)}), (input)=>input.value).includes('校样')`, 'management-category-added', 60_000);
+    const proofTypeId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.label==='校样')?.typeId ?? null)`);
+    requireJourney(typeof proofTypeId === 'string' && proofTypeId.length > 0, 'management-category-id', proofTypeId);
+    const proofRow = `${managementPage} [data-derivative-type=${JSON.stringify(proofTypeId)}]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(proofRow)}) !== null`, 'management-category-row');
+    await pointerClick(renderer, waitFor, `${proofRow} [data-derivative-action="delete-type"]`, 'management-category-empty-ask');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-delete');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
+
+    at('derivatives-drop');
+    // Issue #1682 (N.10): a file dropped on 衍生稿件管理 asks what it is. Nothing is staged before an answer; 存为衍生稿件 opens the
+    // same form in 导入文件 with the file named and the title taken from its name, and 创建并打开 reads that file without a picker.
+    const dropIo = { renderer, waitFor, assertRenderer };
+    const reopenManagement = async (name) => {
+      await pressReachable(dropIo, SIDEBAR.destination('library'), `${name}-library`);
+      await pressReachable(dropIo, `[data-screen="landing"] button[data-book-id="${writingBookId}"]`, `${name}-book`);
+      await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${writingBookId}"] [data-testid="manuscript-editor"]')`, `${name}-editor`);
+      await pressReachable(dropIo, SIDEBAR.section('derivatives'), `${name}-management`);
+    };
+    // The page is where 删除类别 left it: 衍生稿件管理.
+    const longDropPath = resolve(runRoot, 'public-sample-import-question-with-a-long-filename-that-wraps-across-the-question-heading.docx');
+    await copyFile(SAMPLE1_PATH, longDropPath);
+    await holdEarlierNotice(dropIo, 'drop-management');
+    await dropFile(dropIo, longDropPath, managementPage, 'drop-management');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management');
+    await questionOutlastsNotice(dropIo, 'drop-management');
+    await noImportDraft(dropIo, 'drop-management-unanswered');
+    await answer(dropIo, 'cancel', 'drop-management');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-management-closed');
+    await noImportDraft(dropIo, 'drop-management-cancelled');
+    await reopenManagement('drop-management-reopen');
+    await waitFor(renderer, `document.querySelector('${managementPage} .derivatives-item')`, 'drop-management-ready');
+    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management-again');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management-again');
+    await answer(dropIo, 'derivative', 'drop-management-again');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} [data-dropped-file]`)}) !== null`, 'drop-management-form', 60_000);
+    await assertRenderer(renderer, `(() => { const form = document.querySelector(${JSON.stringify(managementForm)}); return form?.querySelector('[data-dropped-file]')?.textContent === '已选择文件：sample1.docx' && form.querySelector('.derivative-modes input[value="import"]')?.checked === true && form.querySelector('[data-document-field="title"]')?.value === 'sample1'; })()`, 'drop-management-form-names-file');
+    await assertRenderer(renderer, reachable(`${managementForm} [data-document-action="create-derivative"]`), 'drop-management-confirm-in-window');
+    await pressReachable(dropIo, `${managementForm} [data-document-action="create-derivative"]`, 'drop-management-confirm');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .document-title-heading')?.textContent === 'sample1'`, 'drop-management-open', 120_000);
+
+    await noImportDraft(dropIo, 'drop-management-created');
+
+    at('derivatives-drop-editor');
+    // On a 衍生稿件 open in the editor the same question offers 更新稿件 and 存为衍生稿件; 取消 stages nothing.
+    await dropFile(dropIo, SAMPLE1_PATH, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-editor');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-editor');
+    await noImportDraft(dropIo, 'drop-editor-unanswered');
+    await answer(dropIo, 'cancel', 'drop-editor');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-editor-closed');
+    await noImportDraft(dropIo, 'drop-editor-cancelled');
+
+    at('derivatives-drop-text');
+    // A file that is not DOCX, on the editor and on the management page, is answered in words and nothing is staged. The file is one
+    // word of text this Journey writes into its own run root.
+    const dropTextPath = resolve(runRoot, 'drop-note.txt');
+    await writeFile(dropTextPath, '稿', 'utf8');
+    const notDocx = `document.querySelector('#persistence-status')?.textContent === '请拖入 DOCX 格式的文件。'`;
+    await dropFile(dropIo, dropTextPath, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-text-editor');
+    await waitFor(renderer, notDocx, 'drop-text-editor-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-editor-no-question');
+    await noImportDraft(dropIo, 'drop-text-editor');
+    await reopenManagement('drop-text-reopen');
+    await waitFor(renderer, `document.querySelector('${managementPage} .derivatives-workspace')`, 'drop-text-management-ready');
+    await dropFile(dropIo, dropTextPath, managementPage, 'drop-text-management');
+    await waitFor(renderer, notDocx, 'drop-text-management-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-management-no-question');
+    await noImportDraft(dropIo, 'drop-text-management');
 
     at('scoped-ai-edit');
     // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the

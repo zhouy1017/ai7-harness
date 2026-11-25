@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type { NavigationCheckpoint } from './navigation-generation.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
@@ -60,8 +61,8 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
   /** `latest` is the line just said, kept in the hidden bar's element with its tone. */
   const paint = (latest: string, tone?: StatusTone): void => {
     if (line.parentElement !== surface) surface.replaceChildren(line);
-    write(errorText, error ?? '');
-    write(busyText, busy === null ? (error === null ? latest : '') : `${error === null ? '' : ' · '}${busy}`);
+    write(errorText, serviceWords(error ?? ''));
+    write(busyText, busy === null ? (error === null ? serviceWords(latest) : '') : `${error === null ? '' : ' · '}${serviceWords(busy)}`);
     if (error === null) dismiss.remove();
     else if (dismiss.parentElement !== surface) surface.append(dismiss);
     surface.hidden = error === null && busy === null;
@@ -72,15 +73,15 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
   const update = (message: string, tone?: StatusTone): void => {
     if (message === '') busy = null;
     // A new error is said again even when its words repeat the standing one: the bar's text is replaced.
-    else if (tone === 'error') { error = message; busy = null; errorText.textContent = message; }
+    else if (tone === 'error') { error = message; busy = null; errorText.textContent = serviceWords(message); }
     else if (tone === 'busy') busy = message;
     else {
       busy = null;
-      if (tone === 'success') { error = null; showToast(message, { tone }); }
+      if (tone === 'success') { error = null; showToast(serviceWords(message), { tone }); }
     }
     paint(message, tone);
     // Said once: a success by its toast, an error or busy line by the bar, any other line by the announcer.
-    if (announcer !== undefined) announcer.textContent = tone === undefined ? message : '';
+    if (announcer !== undefined) announcer.textContent = tone === undefined ? serviceWords(message) : '';
   };
   return Object.assign(update, {
     clearError: (): void => { if (error !== null) { error = null; paint(''); } },
@@ -95,13 +96,22 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
  * that is in the lower half of the window, and on the manuscript it keeps to the text column (clear of the right edge, the
  * supporting regions and an overlaying Task Drawer). The page publishes that clearance as `--bottom-controls`; the scroll
  * padding that lets a page's last line be scrolled clear of the bar applies only while `data-status-bar="shown"`.
+ *
+ * What floats over the manuscript's text — a 批注 composer, a mark's card — is not a bottom control: it stands where its words
+ * are. The page publishes how far the bar reaches into the text pane as `--status-bar-cover`, the pane's scroll padding, so a
+ * composer or card revealed while the bar shows stops above it; one already open when the bar appears, or when the bar grows
+ * or moves up, is revealed again, once (Issue #1710). The editor's own scrolling afterwards is left alone.
  */
-const BOTTOM_CONTROLS = '#screen .commit-bar, #screen .workbench-actions, #screen .task-overview-confirm:not([hidden]), #screen .window-actions .btn:not([hidden]), #screen .editor-identities, .technical-layer-control';
+const BOTTOM_CONTROLS = '#screen .commit-bar, #screen .workbench-actions, #screen .evaluation-action-bar, #screen .task-overview-confirm:not([hidden]), #screen .window-actions .btn:not([hidden]), #screen .editor-identities, .technical-layer-control';
 const STATUS_AREA = '#screen .manuscript-surface';
+const TEXT_PANE = '#screen .editor-window';
+const FLOATING = '.editorial-mark-layer > *';
 
 export function followBottomControls(bar: HTMLElement): void {
   const root = document.documentElement;
   let queued = false;
+  /** The cover last published, and whether the last placement was the first: the placement after it is final. */
+  let covered = 0, settling = false;
   // The bar's own frame source, taken as it mounts: placing it is not one of the frames a page's paint waits for (J-01 holds
   // those and counts the completion's alone).
   const nextFrame = window.requestAnimationFrame.bind(window);
@@ -109,7 +119,8 @@ export function followBottomControls(bar: HTMLElement): void {
     queued = false;
     if (bar.hidden) {
       delete root.dataset['statusBar'];
-      for (const name of ['--bottom-controls', '--status-area-right', '--status-bar-height']) root.style.removeProperty(name);
+      for (const name of ['--bottom-controls', '--status-area-right', '--status-bar-height', '--status-bar-cover']) root.style.removeProperty(name);
+      covered = 0; settling = false;
       return;
     }
     const area = document.querySelector(STATUS_AREA)?.getBoundingClientRect();
@@ -124,6 +135,17 @@ export function followBottomControls(bar: HTMLElement): void {
     // The first placement adds the scroll padding and the space above a sticky bar, which moves the controls once more.
     const first = root.dataset['statusBar'] !== 'shown';
     root.dataset['statusBar'] = 'shown';
+    const pane = document.querySelector<HTMLElement>(TEXT_PANE);
+    const box = bar.getBoundingClientRect();
+    const cover = pane === null ? 0 : Math.max(0, Math.ceil(pane.getBoundingClientRect().bottom - box.top));
+    root.style.setProperty('--status-bar-cover', `${cover}px`);
+    if (pane !== null && (first || settling || cover !== covered)) {
+      for (const floating of pane.querySelectorAll<HTMLElement>(FLOATING)) {
+        const at = floating.getBoundingClientRect();
+        if (at.width > 0 && at.height > 0 && at.bottom > box.top && at.top < box.bottom && at.right > box.left && at.left < box.right) floating.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    covered = cover; settling = first;
     if (first) schedule();
   };
   // Only while the bar shows (and once more as it hides) is anything measured: once per frame in a visible window, and in a

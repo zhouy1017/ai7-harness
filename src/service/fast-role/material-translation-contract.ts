@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import type { SourceTranslator } from '../analysis/factual-review-evidence.js';
+import type { FlashTaskContract } from './flash-task-contract.js';
+import { DEFAULT_TRANSPORT_SETTINGS } from '../provider/request-deadlines.js';
 import { extractModelJson, type SalvagedModelResult, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MATERIAL_TRANSLATION_LABEL } from '../../shared/protocol.js';
 import { FastRoleError } from './fast-role-error.js';
@@ -107,6 +111,15 @@ export const DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS: ReadonlySet<string> 
   'c70bad7ab24b39554f8925d0e357395d87855aed1442611760e0b06473fc42cc',
 ]);
 
+export const materialTranslation = {
+  kindId: MATERIAL_TRANSLATION_KIND, label: '生成来源译文', role: 'underlying-flash', outboundCategory: 'public-or-synthetic',
+  productionCategory: 'frozen-material-reference-excerpt', slice: 'S80', systemPrompt: MATERIAL_TRANSLATION_PROMPT_CONTRACT.systemPrompt,
+  promptContractDigest: MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST, message: buildMaterialTranslationMessage,
+  budget: { ...DEFAULT_TRANSPORT_SETTINGS, maxInputBytes: 32000, maxOutputTokens: 16384 },
+  validateAndTrace: (text: string, source: readonly string[]) => readMaterialTranslationAnswer(text, source.length),
+  fallback: () => null,
+} as const satisfies FlashTaskContract<readonly string[], ReturnType<typeof readMaterialTranslationAnswer>>;
+
 /** How the made translations are recorded: the model, route, rule and contract of the request that answered. */
 export interface MaterialTranslationMade {
   readonly model: string;
@@ -157,7 +170,7 @@ export function materialTranslator(
         return { kind: 'failed', message: error instanceof FastRoleError ? error.message : '生成来源译文没有完成；没有记录任何译文。' };
       }
       if (answer.kind === 'failed') return { kind: 'failed', message: answer.message, ...(answer.provenance === undefined ? {} : { provenance: answer.provenance }) };
-      const texts = readMaterialTranslationAnswer(answer.text, paragraphs.length);
+      const texts = materialTranslation.validateAndTrace(answer.text, paragraphs);
       if (texts === null) return { kind: 'failed', message: `模型给出的${MATERIAL_TRANSLATION_LABEL}没有与原文逐段对齐；这一批没有记录任何译文。`,
         ...(answer.binding.provenance === undefined ? {} : { provenance: { ...answer.binding.provenance, failureCode: 'MATERIAL_TRANSLATION_CONTRACT_INVALID' } }) };
       return {
@@ -173,5 +186,19 @@ export function materialTranslator(
         },
       };
     },
+  };
+}
+
+/** Factual evidence and library translation share the same underlying model owner. */
+export function evidenceTranslator(underlying: () => FastRoleExecutionOwner): SourceTranslator {
+  return async ({ text }) => {
+    const owner = underlying();
+    if (owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
+    try {
+      const answer = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
+      if (answer.kind !== 'answered') return null;
+      const translated = readMaterialTranslationAnswer(answer.text, 1)?.[0];
+      return translated == null ? null : { text: translated, route: answer.binding.route, model: answer.binding.model };
+    } catch { return null; }
   };
 }

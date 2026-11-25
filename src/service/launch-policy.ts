@@ -1,13 +1,21 @@
+import { STRUCTURED_FLASH_TASKS } from './fast-role/flash-task-contract.js';
+import { modelRoleOfTaskKind } from '../shared/protocol/model-roles.js';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import defaults from '../../config/runtime-execution-defaults.json' with { type: 'json' };
-import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
+import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRecommendedModels, modelServiceRouteRefusal, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
+import type { DiscoveredModel } from '../shared/protocol/model-service.js';
+import { supportedEffortsOf } from './provider/model-efforts.js';
 import { modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
 import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
 import { GENERATED_MODEL_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { DEFAULT_TRANSPORT_SETTINGS } from './provider/request-deadlines.js';
+import { recordingBindingFor, recordingProviderFor, type RecordingProvider } from './recording-launch.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
+import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND } from '../shared/protocol/task-kinds.js';
+import { SYNTHETIC_FLASH_RECORDING_KINDS } from './fast-role/recording-inputs.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   isSupportedProviderProcessingVersion, selectedPolicyIdentityOf, localFixtureProfileOf, LOCAL_FIXTURE_RULE_IDS } from '../shared/protocol.js';
 
@@ -79,7 +87,7 @@ export function productionBindingRefusal(model: ProviderModelProfile, role: 'mai
 }
 
 /** Catalogue choices inherit protocol capabilities and are eligible on admitted channels, independent of model evidence. */
-export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly import('../shared/protocol.js').DiscoveredModel[]): ModelServiceChannelProjection[] {
+export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly DiscoveredModel[]): ModelServiceChannelProjection[] {
   const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
     const refused = productionBindingRefusal(model, role);
     if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'channel-not-admitted-by-selected-policy'>;
@@ -87,7 +95,7 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
   };
   return MODEL_SERVICE_CHANNELS.map((channelId) => {
     const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
-    const entries = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
+    const entries: readonly DiscoveredModel[] = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
       .filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`))
       .map((model) => ({ modelId: model.model, modelLabel: model.displayName }));
     return {
@@ -97,15 +105,18 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
       models: entries.map((entry) => {
         const runtime = modelServiceRuntimeBinding(channelId, entry.modelId, 'main');
         const model = modelProfileFor(runtime?.route ?? channelId, entry.modelId)!;
+        const supportedEfforts = supportedEffortsOf(entry, model);
         return {
           modelId: model.model,
           modelLabel: entry.modelLabel,
           family: model.capabilities.requestShape,
           capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
-          main: disposition(model, 'main'),
-          fast: disposition(model, 'fast'),
+          ...(supportedEfforts === undefined ? {} : { supportedEfforts }),
+          main: modelServiceRouteRefusal(channelId, entry.modelId, 'main') === null ? disposition(model, 'main') : 'route-not-served',
+          fast: modelServiceRouteRefusal(channelId, entry.modelId, 'fast') === null ? disposition(model, 'fast') : 'route-not-served',
         };
       }).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
+      ...(modelServiceRecommendedModels(channelId) === undefined ? {} : { recommended: structuredClone(modelServiceRecommendedModels(channelId)!) }),
     };
   });
 }
@@ -115,6 +126,7 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
  * development validation the launch performs.
  */
 export interface DeveloperLiveLaunch {
+  readonly recordingProvider?: RecordingProvider;
   /** The explicit form ceiling, or the policy's per-frozen-unit default when the form left it unset. */
   readonly runBudgetCeiling: DeveloperLiveCeiling;
   readonly providerCacheRoot: string;
@@ -184,7 +196,15 @@ export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot
   // developer-live is a developer-test scope: a launch that names no development validation fails closed here, before any
   // Run could dispatch, rather than sending outside the ledger.
   if (form.validation === null) throw new Error('LAUNCH_VALIDATION_INTENT_REQUIRED');
-  return { runBudgetCeiling, providerCacheRoot, validation: form.validation };
+  const recordingProvider = recordingProviderFor(form.validation);
+  return { runBudgetCeiling, providerCacheRoot, validation: form.validation, ...(recordingProvider === null ? {} : { recordingProvider }) };
+}
+
+export function developerLiveBindingFor(launch: DeveloperLiveLaunch, taskKind: string = BASELINE_ANALYSIS_KIND) {
+  const binding: ReturnType<typeof recordingBindingFor> = launch.recordingProvider === undefined
+    ? { ...CONFIGURED_RUNTIME_MODEL_TABLE.developerLive, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE }
+    : recordingBindingFor(launch.recordingProvider, taskKind);
+  return { ...binding, runBudgetCeiling: launch.runBudgetCeiling };
 }
 
 function deny(reason: string): LaunchPolicyProjection {
@@ -275,17 +295,41 @@ export interface SearchFallbackTerms {
 /** Compatibility version fields describe the existing record format, never a selected policy. */
 export const ACTIVE_SET_VERSION = 'no-policy-lock' as const;
 export const DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION = 'v24' as const;
-export const ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION = 'v35' as const;
+export const ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION = 'v36' as const;
 
 export function searchFallbackTermsOf(projection: LaunchPolicyProjection | null | undefined): SearchFallbackTerms | null {
   return projection?.operationalScope === 'ordinary-production' ? structuredClone(defaults.searchFallback) as unknown as SearchFallbackTerms : null;
 }
 
+const NEW_FLASH_TASK_KINDS = new Set(Object.keys(STRUCTURED_FLASH_TASKS));
+
+interface UnderlyingBindings { pro: ConfiguredProviderBinding | null; flash: ConfiguredProviderBinding | null }
+
 function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBinding | null,
-  fastBinding: ConfiguredProviderBinding | null): AdmittedProviderRule[] {
-  const templates = scope === 'developer-live' ? defaults.developer : defaults.ordinary;
+  fastBinding: ConfiguredProviderBinding | null, underlying: UnderlyingBindings, recording?: DeveloperLiveLaunch): AdmittedProviderRule[] {
+  const recordingProvider = recording?.recordingProvider;
+  const recordingKinds = new Set<string>([...SYNTHETIC_FLASH_RECORDING_KINDS, CONNECTION_TEST_KIND]);
+  const factualStages = defaults.ordinary.find(rule => rule.taskKinds.includes(FACTUAL_REVIEW_KIND))?.claimScopedFactualStages;
+  const templates = scope !== 'developer-live' ? defaults.ordinary : recordingProvider === undefined ? defaults.developer :
+    [...defaults.developer.map(rule => rule.taskKinds.includes(FACTUAL_REVIEW_KIND) ? { ...rule, claimScopedFactualStages: factualStages } : rule),
+      ...defaults.ordinary.flatMap(rule => {
+        const caseId = recording?.validation?.case;
+        const reviewKind = caseId === 'plot-consistency' || caseId === 'publication-risk' ? 'editorial-review/' + caseId : null;
+        const review = reviewKind !== null && rule.taskKinds.includes(reviewKind);
+        const kind = review ? reviewKind : caseId !== undefined && rule.taskKinds.includes(caseId) ? caseId : rule.taskKinds[0]!;
+        const recordingOnly = kind === caseId && recordingKinds.has(kind);
+        const learning = caseId === 'learning-curation' && (kind === 'learning-curation' || kind === 'learning-sample-tidying');
+        const dialogue = kind === caseId && (kind === 'global-agent-dialogue' || kind === 'global-agent-scoped-dialogue');
+        const factualRecheck = caseId === 'factual-recheck' && kind === caseId;
+        if (!recordingOnly && !learning && !dialogue && !factualRecheck && !review) return [];
+        return [{ ...rule, ruleId: review ? 'recording-080-review' : rule.ruleId.replace('ordinary-production', 'recording-080'),
+          taskKinds: [kind], ...(factualRecheck ? { platformTools: 1 } : {}),
+          outboundDataCategories: recordingOnly || factualRecheck || review ? ['public-or-synthetic'] : rule.outboundDataCategories }];
+      })];
   return templates.flatMap((template) => {
-    const selected = scope === 'developer-live' ? DEVELOPER_LIVE_POLICY_BINDING
+    const selected = scope === 'developer-live' ? recordingProvider === undefined ? DEVELOPER_LIVE_POLICY_BINDING : recordingBindingFor(recordingProvider, template.taskKinds[0]!)
+      : modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-pro' ? underlying.pro
+      : template.modelRole === 'Fast Interaction Role' && modelRoleOfTaskKind(template.taskKinds[0]!) === 'underlying-flash' ? underlying.flash
       : template.modelRole === 'Fast Interaction Role' ? fastBinding : binding;
     if (selected === null) return [];
     const localTools = typeof template.localTools === 'number' ? defaults.localTools[template.localTools] : template.localTools;
@@ -298,20 +342,22 @@ function recipes(scope: TrustedOperationalScope, binding: ConfiguredProviderBind
 /** Scope selects the transport boundary. No document, fingerprint or policy selection participates. */
 export function resolveSourceCheckoutLaunchPolicySync(_codeRoot: string,
   requestedScope: TrustedOperationalScope = 'development-ci', configuredBinding: ConfiguredProviderBinding | null = null,
-  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding): LaunchPolicyProjection {
+  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
+  underlying: UnderlyingBindings = { pro: configuredBinding, flash: configuredFastBinding },
+  recording?: DeveloperLiveLaunch): LaunchPolicyProjection {
   if (!isTrustedOperationalScope(requestedScope)) return deny('launch-scope-not-selectable');
-  if (requestedScope === 'ordinary-production' && [configuredBinding, configuredFastBinding].some((binding) =>
+  if (requestedScope === 'ordinary-production' && [configuredBinding, configuredFastBinding, underlying.pro, underlying.flash].some((binding) =>
     binding !== null && allowedProductionBindingOf(binding, 'fast-interaction') === null)) return deny('binding-not-allowed');
   const ci = requestedScope === 'development-ci';
   const ordinary = requestedScope === 'ordinary-production';
-  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding);
+  const admittedRules = ci ? [] : recipes(requestedScope, configuredBinding, configuredFastBinding, underlying, recording);
   const configured = !ci && admittedRules.length > 0;
   return {
     integrityState: 'verified', denialReason: null, operationalScope: requestedScope, activePolicySetVersion: ACTIVE_SET_VERSION,
-    selectedPolicyIdentity: { providerProcessingVersion: ci ? 'v1' : ordinary ? 'v35' : 'v24',
+    selectedPolicyIdentity: { providerProcessingVersion: ci ? 'v1' : ordinary ? 'v36' : 'v24',
       providerProcessingSha256: '0'.repeat(64), activePolicySetVersion: ACTIVE_SET_VERSION, activePolicySetSha256: '0'.repeat(64) },
     providerProcessing: {
-      version: ci ? 'v1' : ordinary ? 'v35' : 'v24', decision: ci ? 'deny' : 'eligible-only',
+      version: ci ? 'v1' : ordinary ? 'v36' : 'v24', decision: ci ? 'deny' : 'eligible-only',
       authorizedLiveTransmissionCount: ci ? 0 : 'bounded-by-run', liveTransmissionAllowed: configured,
       crossUnitReductionAllowed: !ci, assuranceSamplingAllowed: !ci, runReportReflectionAllowed: !ci, admittedRules,
       ...(ordinary ? { bindingState: configured ? 'configured' : 'setup-required',
@@ -341,6 +387,10 @@ export function readRetainedBoundAnalysisPolicySync(codeRoot: string, pin: impor
   binding: ConfiguredProviderBinding): LaunchPolicyProjection | null {
   if (pin.operationalScope !== 'ordinary-production') return null;
   const projection = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', binding);
+  if (pin.providerProcessingVersion !== 'v36') {
+    projection.providerProcessing = { ...projection.providerProcessing, admittedRules: projection.providerProcessing.admittedRules?.filter(rule =>
+      !NEW_FLASH_TASK_KINDS.has(rule.taskKinds[0]!)) ?? [] };
+  }
   delete projection.selectedPolicyIdentity;
   projection.activePolicySetVersion = pin.activePolicySetVersion;
   projection.providerProcessing.version = pin.providerProcessingVersion;

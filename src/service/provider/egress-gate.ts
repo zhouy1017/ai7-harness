@@ -17,6 +17,7 @@ import {
   toolSetEqualsPlatformSchemas,
   type PlatformToolArguments,
   type PlatformToolName,
+  type ToolSchemaVersion,
   type PlatformToolsRule as LegacyPlatformToolsRule,
 } from './platform-tools.js';
 
@@ -133,6 +134,8 @@ export interface SearchBackendBinding {
 export interface EgressBindingFacts {
   readonly reasoningEffort?: string | null;
   readonly factualClaimScope?: { readonly stage: 'claim-extraction' | 'web-verification'; readonly current: () => boolean };
+  /** Exact user packet built by a bounded Flash contract or its Pro learning continuation. */
+  readonly structuredTaskMessageDigest?: string;
   readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
@@ -177,6 +180,7 @@ export interface EgressBindingFacts {
    */
   readonly platformTools?: PlatformToolsRule | null;
   readonly localTools?: LocalToolsRule | null;
+  readonly toolSchemaVersion?: ToolSchemaVersion;
 }
 
 /**
@@ -535,7 +539,7 @@ function evaluateToolMessage(
   const toolCalls = assistantToolCalls(message);
   if (toolCalls !== null) {
     if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
-        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools).some((schema) => schema.name === call.name)) ||
+        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools, binding.toolSchemaVersion).some((schema) => schema.name === call.name)) ||
         !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content, message.source.replayState)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
@@ -567,7 +571,7 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
 function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
-  if (ruleNamedToolSchemas(false, binding.localTools).some((schema) => schema.name === admitted.tool)) {
+  if (ruleNamedToolSchemas(false, binding.localTools, binding.toolSchemaVersion).some((schema) => schema.name === admitted.tool)) {
     return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES;
   }
   if (admitted.sourceUrl === null) return true;
@@ -603,6 +607,13 @@ export function evaluateEgress(
     return refuse('payload-out-of-scope', '请求思考强度与冻结的执行配置不一致；未发送任何内容。');
   if ((payload.system ?? '') !== binding.systemPrompt)
     return refuse('system-prompt-mismatch', '系统提示与冻结的任务契约不一致；未发送任何内容。');
+  if (binding.structuredTaskMessageDigest !== undefined) {
+    if (!binding.ruleOutboundCategories?.has(binding.outboundDataCategory))
+      return refuse('outbound-category-mismatch', '处理规则不包含此任务的数据类别。');
+    const packet = payload.messages.length === 1 && payload.messages[0]!.role === 'user' ? messageText(payload.messages[0]!) : null;
+    if (packet === null || sha256Hex(packet) !== binding.structuredTaskMessageDigest)
+      return refuse('payload-out-of-scope', '结构化请求与已经核对的输入不一致。');
+  }
   const last = payload.messages.at(-1);
   if (last?.source.kind === 'tool' && scope.breakerState?.() === 'tripped')
     return refuse('circuit-breaker-tripped', '联网核查未完成：工具往返已达到熔断上限；未发送任何内容。');
@@ -610,7 +621,7 @@ export function evaluateEgress(
     return refuse('circuit-breaker-tripped', '检索未完成：工具往返已达到熔断上限；未发送任何内容。');
   // Validate the actual registered tool exchange and retained provenance, independent of any policy version/category.
   const rule = platformToolsOf(binding);
-  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools);
+  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools, binding.toolSchemaVersion);
   if (payload.tools?.length && !toolSetEqualsPlatformSchemas(payload.tools, schemas))
     return refuse('tools-present', '工具声明与本次运行注册的工具不一致；未发送任何内容。');
   const calls = { open: new Map<string, PlatformToolName>(), seen: new Set<string>() };

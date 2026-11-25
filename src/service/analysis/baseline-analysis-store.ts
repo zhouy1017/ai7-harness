@@ -1,5 +1,6 @@
 import { analysisUsesAutomaticMemory } from '../learning/memory-facade.js';
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
+import { paragraphCount, rowsFrom } from '../manuscript/working-positions.js';
 import { freezeTaskBaselineSynopses, remainingSynopsisMessageBytes } from './baseline-synopsis.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
@@ -38,9 +39,9 @@ import {
 import {
   type CompositionOptions,
   describeComposition,
-  STOCK_TYPOS_FANOUT,
-  STOCK_TYPOS_LEAF,
+  STOCK_TYPOS_FANOUT, STOCK_TYPOS_LEAF,
 } from '../harness/primary-agent-harness.js';
+import { toolSchemaPinForNewPlan } from '../provider/platform-tools.js';
 import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration, liveKindAdmission, liveKindRule, kindLocalTools } from './live-kind-admission.js';
 import {
@@ -83,7 +84,6 @@ import {
   type BaselineAnalysisResultSetRevisionProjection,
   type BaselineAnalysisRevisionUpdateProjection,
   type BaselineAnalysisRunState,
-  type ResumableStopReason,
   type BaselineAnalysisSelectedRange,
   type BaselineAnalysisUnitProjection,
   type BaselineAnalysisUpdateControlsProjection,
@@ -107,11 +107,6 @@ import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
 
-function resumableStopReasonOf(value: unknown): ResumableStopReason | undefined {
-  if (!isRecord(value)) return undefined;
-  return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
-    ? value.stopReason : undefined;
-}
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -309,6 +304,8 @@ import {
   runBudgetCeilingStateOf,
   runIsActive,
   runStopOf,
+  runStopReasonOf,
+  validateTaskRedo,
   sameRange,
   transact,
   unconfirmedOutcomeKey,
@@ -456,7 +453,7 @@ export class BaselineAnalysisStore {
   }
 
   settleCuration(run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted',
-    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
+    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; retryAfterCredential?: boolean; reason: string }): void {
     return curationRuns.settleCuration(this.#curationRunsHost, run, state, evidence);
   }
 
@@ -783,13 +780,9 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
-    // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
     const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
-    // Editorial memory is read from the Store that owns this ledger, which binds its reader first: a launch carried over from
-    // another (possibly closed) Store never redirects a plan's memory read to that Store's database.
     const editorialMemory = this.#launch.editorialMemory ?? launch.editorialMemory;
-    if ((launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
+    if (launch.liveForKind === undefined && (launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
     else {
       const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
       for (const key of Reflect.ownKeys(descriptors)) {
@@ -798,6 +791,7 @@ export class BaselineAnalysisStore {
         if (descriptor.set !== undefined) descriptor.set = descriptor.set.bind(launch);
       }
       this.#launch = Object.defineProperties({}, { ...descriptors,
+        ...(launch.liveForKind === undefined ? {} : { live: { get: () => launch.liveForKind!(this.#definition.kind), enumerable: true } }),
         ...(retainedPolicyFor === undefined ? {} : { retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }),
         ...(editorialMemory === undefined ? {} : { editorialMemory: { value: editorialMemory, enumerable: true } }) }) as LaunchBinding;
     }
@@ -1248,8 +1242,8 @@ export class BaselineAnalysisStore {
               const detail = parseCanonicalJson(asString(row.last_state_json)) as { resumeFailure?: string };
               return typeof detail.resumeFailure === 'string' ? { resumeFailure: detail.resumeFailure } : {};
             })()),
-            ...(state === 'resumable' && row.last_state_json !== null
-              ? (() => { const stopReason = resumableStopReasonOf(parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
+            ...(row.last_state_json !== null
+              ? (() => { const stopReason = runStopReasonOf(this.#db, runRecordId, state, parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
             planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
@@ -1562,7 +1556,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35', 'v36'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -2151,7 +2145,7 @@ export class BaselineAnalysisStore {
    * What a redo's first plan version leaves out (Issue #422, S76c; CONT-013: a redo begins from a copyable prior plan):
    * the edits of the redone Task's last plan version; nothing for any other Task.
    */
-  #redoPlanEdits(intent: IntentFacts): PlanEdits {
+  #redoPlanEdits(intent: Pick<IntentFacts, 'record' | 'redoOfRunRecordId'>): PlanEdits {
     if (isRecord(intent.record.factualDecision)) return intent.record.factualDecision.level === 'strict'
       ? { ...NO_PLAN_EDITS, evidenceAssuranceLevel: 'strict' } : NO_PLAN_EDITS;
     if (intent.redoOfRunRecordId === null) return NO_PLAN_EDITS;
@@ -2246,7 +2240,7 @@ export class BaselineAnalysisStore {
     // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
     // reasons were durable falls back to the bound launch.
     const currentRecord = parseCanonicalJson(asString(states[states.length - 1]!.canonical_json)) as Record<string, unknown>;
-    const stopReason = current.state === 'resumable' ? resumableStopReasonOf(currentRecord) : undefined;
+    const stopReason = runStopReasonOf(this.#db, runRecordId, current.state, currentRecord);
     const recordedReasons = Array.isArray(currentRecord.reasons) && currentRecord.reasons.every((reason) => typeof reason === 'string')
       ? currentRecord.reasons as ReadonlyArray<string>
       : null;
@@ -3126,32 +3120,33 @@ export class BaselineAnalysisStore {
 
   /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
   previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
-    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never): never {
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>, components: Readonly<Record<string, unknown>>) => never, afterCancellation = false): never {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
-    const existing = this.inspect(input.bookId);
+    const inspected = this.inspect(input.bookId), existing = afterCancellation && inspected.run !== null ? { ...inspected, run: { ...inspected.run, state: 'cancelled' as const } } : inspected;
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
     const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    validateTaskRedo(existing, update, this.#definition.kind, input.redoOf ?? null, input.reconfirm);
     const mode = update?.mode ?? this.#definition.initialMode, modeDefinition = this.#definition.mode(mode);
     requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
     const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
     requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
     const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
-    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
+    const canonical = canonicalPlanEdits(edits ?? this.#redoPlanEdits({ record: {}, redoOfRunRecordId: input.redoOf ?? null }), this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
     const instant = new Date().toISOString(), taskIntentId = randomUUID();
     const record = { bookId: input.bookId, taskIntentId, mode, goal: input.goal, createdAt: instant,
       expectedOutcome: this.#definition.expectedOutcome, selectedRange, predecessorRevisionId: predecessor?.revisionId ?? null,
       ...(selected === null ? {} : { procedure: selected }) };
-    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: null, preparedByEnrollmentVersionId: null,
+    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: input.redoOf ?? null, preparedByEnrollmentVersionId: null,
       backgroundRunBudgetCeiling: null, intentDraftVersionId: null, intentDraftParagraphs: null };
     this.#writePlanVersion({ policy: input.launchPolicy, intent, checkpoint: { bookId: input.bookId, manuscriptId: binding.manuscriptId,
       branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
       revisionDigest: head.currentWorkingDigest, journalSequence: head.currentJournalSequence, createdForDirtyJournal: false },
       checkpointDigest: canonicalRecord(record).digest, ordinal: 1, selectedRange, planRevisionId: null, instant, edits: canonical,
-      preview: { blocks, consume: projection => describe(projection, blocks) } });
+      preview: { blocks, consume: (projection, components) => describe(projection, blocks, components) } });
     throw new AnalysisError('ANALYSIS_PREVIEW_INVALID', '这次计划暂时无法读取。');
   }
 
@@ -3192,6 +3187,7 @@ export class BaselineAnalysisStore {
     const existing = this.inspect(input.bookId);
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    validateTaskRedo(existing, update, this.#definition.kind, input.redoOf ?? null, input.reconfirm);
     const mode = update?.mode ?? this.#definition.initialMode;
     const modeDefinition = this.#definition.mode(mode);
     requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
@@ -3332,23 +3328,7 @@ export class BaselineAnalysisStore {
     // wherever it is not closed (同步到当前稿件 reuses every closed range and re-reads every gap); a Run that kept
     // nothing is redone as the Task it was — the same way over the same range, or the first baseline again.
     const redoOf = input.redoOf ?? null;
-    if (redoOf !== null) {
-      const run = existing.run;
-      // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
-      // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
-      const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
-      requireAnalysis(run !== null && run.runRecordId === redoOf &&
-        ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
-      'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
-      const expected = latest !== null && latest.provenance.runRecordId === redoOf
-        ? { mode: 'sync-current', selectedRange: null }
-        : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
-      requireAnalysis(!input.reconfirm && (this.#definition.kind !== BASELINE_ANALYSIS_KIND || (expected === null
-        ? update === null
-        : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
-          update.selectedRange?.endPosition === expected.selectedRange?.endPosition)),
-      'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
-    }
+    validateTaskRedo(existing, update, this.#definition.kind, redoOf, input.reconfirm);
     // The latest Task asked for again as it was — the same way over the same range, its predecessor still the latest
     // revision: 重新准备 (Issue #536; OFF-008) of a Task whose Run a moved plan blocked before it began, and 重新确认计划
     // of a Task prepared and not yet started (Issue #551). A way ②A's own controls do not offer now stays open to it: a
@@ -3622,7 +3602,7 @@ export class BaselineAnalysisStore {
      * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
      */
     credentialReadiness?: ModelCredentialOperationState;
-    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
+    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection, components: Readonly<Record<string, unknown>>) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
@@ -3760,12 +3740,15 @@ export class BaselineAnalysisStore {
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
     const { webToolsBackend, searchCredentialReference, webToolsFallback } = this.#currentSearchPlan(definition, intent.preparedByEnrollmentVersionId, input.policy);
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
-    const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
+    const planComposition = this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected);
+    const localTools = live === null ? planComposition.localTools ?? false
+      : intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false;
+    const toolSchemaPin = toolSchemaPinForNewPlan(localTools);
+    const composition = describeComposition(live?.route ?? LOCAL_DETERMINISTIC_ROUTE, live?.model ?? LOCAL_DETERMINISTIC_MODEL, promptContractDigest,
+      { ...planComposition, ...toolSchemaPin, localTools, ...(live === null ? {} : {
+        platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
         researchDeclaration: definition.factualClaims === undefined ? researchDeclaration : { webSearch: false, searchEngine: null },
-        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected),
-        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
+      }) });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }), ...(webToolsFallback === undefined ? {} : { webToolsFallback }),
@@ -3817,7 +3800,7 @@ export class BaselineAnalysisStore {
     const stopCondition = production !== null
       ? `Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} binds the configured ${production.route} under ordinary-production; the Coverage Manifest unit count and the plan's own Run Budget Ceiling, when set, bound every transmission`
       : live !== null
-      ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
+      ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds ${live.route} under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
@@ -3903,10 +3886,7 @@ export class BaselineAnalysisStore {
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
-      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: composition.version === 4 ? STOCK_TYPOS_FANOUT : STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
-        ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
-        ...(composition.stages === undefined ? {} : { stages: composition.stages }),
-        ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
+      compositionOptions: { ...planComposition, ...toolSchemaPin },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
       boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], true,
@@ -3941,7 +3921,7 @@ export class BaselineAnalysisStore {
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
         update: this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, reusePlan, records['reuse-plan']?.digest ?? null,
           this.inspect(checkpoint.bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null) : null,
-        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }));
+        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }), components);
     }
     const insert = this.#db.prepare(
       'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -4087,7 +4067,7 @@ export class BaselineAnalysisStore {
     // 取消 on a Task of another kind whose Run never began: blocked before dispatch after it waited — its plan moved, or this
     // launch could not start it (Issue #764). Under developer-live 初评 cannot be prepared again, so nothing else would end it;
     // the item leaves 待我处理 once the Run is cancelled. A Run that began (so one holding a 结果待确认 range) is never here.
-    if (run.state === 'blocked-before-dispatch' && this.#definition.kind !== BASELINE_ANALYSIS_KIND && !runBegan(run.transitions)) {
+    if (run.state === 'blocked-before-dispatch' && !runBegan(run.transitions)) {
       this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑取消了这项没能开始的任务；没有发送任何内容，也没有产生用量。' });
       return this.inspect(bookId);
     }
@@ -4785,8 +4765,10 @@ export class BaselineAnalysisStore {
       productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot,
         ...('reasoningEffort' in route && typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}) };
     } else if (live !== null && live.scope !== 'ordinary-production') {
-      requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
-        providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
+      const route = providerPlan.executionRoute;
+      requireAnalysis(route.kind === live.route && route.model === live.model && route.endpoint === live.endpoint &&
+        ('reasoningEffort' in route ? route.reasoningEffort ?? null : null) ===
+          effectiveModelReasoningEffort(modelProfileFor(live.route, live.model), live.reasoningEffort), 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
         canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, 'unset', intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');
@@ -4795,9 +4777,19 @@ export class BaselineAnalysisStore {
       requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
         this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
     }
+    let frozenPolicyPin = retainedBinding?.binding.policyPin;
+    if (frozenPolicyPin === undefined && productionBinding !== null && selectedMetadata.selectedPolicyIdentity !== undefined) {
+      // Authorization freezes the version before dispatch creates the first execution binding.
+      const processing = providerPlan.remoteBinding.providerProcessing;
+      const pin = { operationalScope: processing.operationalScope, providerProcessingVersion: processing.version,
+        activePolicySetVersion: selectedMetadata.selectedPolicyIdentity.activePolicySetVersion, liveTransmissions: processing.authorizedLiveTransmissionCount };
+      requireAnalysis(isResultSetPolicyPin(pin), 'ANALYSIS_RECORD_INVALID', '冻结计划的策略 pin 无效。');
+      frozenPolicyPin = pin;
+    }
     let retainedPolicy: LaunchPolicyProjection | null = null;
-    if (retainedBinding !== null && selectedMetadata.selectedPolicyIdentity === undefined && productionBinding !== null) {
-      retainedPolicy = this.#launch.retainedPolicyFor?.(retainedBinding.binding.policyPin,
+    if (frozenPolicyPin !== undefined && productionBinding !== null && (selectedMetadata.selectedPolicyIdentity === undefined ||
+        frozenPolicyPin.providerProcessingVersion !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION)) {
+      retainedPolicy = this.#launch.retainedPolicyFor?.(frozenPolicyPin,
         { ...productionBinding, credentialReference: providerPlan.remoteBinding.credentialReference }) ?? null;
       requireAnalysis(retainedPolicy !== null, 'ANALYSIS_RECORD_INVALID', '历史执行绑定缺少准确的已核实策略阅读。');
     }
@@ -4892,7 +4884,7 @@ export class BaselineAnalysisStore {
       // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
       ...selectedMetadata,
-      ...(retainedBinding === null ? {} : { retainedPolicyPin: retainedBinding.binding.policyPin }),
+      ...(frozenPolicyPin === undefined ? {} : { retainedPolicyPin: frozenPolicyPin }),
       ...(retainedPolicy === null ? {} : { retainedPolicy }),
       ...(localFixtureRuntime == null ? {} : { localFixtureRuntime }),
       productionBinding,
@@ -4947,10 +4939,9 @@ export class BaselineAnalysisStore {
 
   readWorkingBlocks(branchId: string): ManifestBlockInput[] {
     requireAnalysis(UUID_PATTERN.test(branchId), 'ANALYSIS_RECORD_INVALID', '分支身份无效。');
-    const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? ORDER BY position`,
-    ).all(branchId) as SqlRow[];
+    // The working state in reading order, numbered from 1 (ADR 0105 §6: the paragraph number is computed, not stored).
+    const rows = rowsFrom(this.#db, branchId, 1, paragraphCount(this.#db, branchId)).map((row) => ({ block_id: row.blockId, position: row.position,
+      kind: row.kind, level: row.level, text: row.text, digest: row.digest, grapheme_length: row.graphemeLength })) as SqlRow[];
     return rows.map((row) => this.#blockInput(row));
   }
 

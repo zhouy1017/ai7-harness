@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import type { AnalysisError } from './analysis/baseline-analysis-store.js';
 import { StoreError } from './store-records.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -56,6 +57,7 @@ import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisio
   requireWordManuscriptSourceSegments, wordCompilationForReadings, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * Local export of a Manuscript version to DOCX (Issue #413, plan slice S64; External Export Policy v2; ADR 0038,
@@ -84,8 +86,8 @@ import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMark
  * rename both check it, so a file put there since is never overwritten (`EXPORT_TARGET_CHANGED`). Cancelling
  * before the approval creates nothing but the preparation (EXP-020). Nothing is sent anywhere (EXP-015).
  *
- * Nothing existing moves (ADR 0079 §1.1): the three relations are added once, shape-detected, by
- * `initializeExportLedgerSchema` before `EditorialStore.open` stamps the version.
+ * The storage baseline (#1634) creates the three relations once, with every other, when it builds an
+ * empty store (`createStoreAtBaseline`); an open checks them exactly and creates nothing.
  */
 const TARGET_KINDS = "'manuscript-revision', 'milestone-version', 'production-document-version', 'book-delivery-package-version', 'report', 'database-export-package'";
 
@@ -144,33 +146,11 @@ export const EXPORT_LEDGER_SCHEMA_SQL = {
 } as const;
 
 /** Every export relation is a ledger: a row is appended once and never rewritten or removed. */
-export const EXPORT_LEDGER_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(EXPORT_LEDGER_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EXPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EXPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const EXPORT_LEDGER_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  export_preparations: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  export_approvals: ['preparation_id>export_preparations.preparation_id:NO ACTION/NO ACTION/NONE'],
-  export_receipts: [
-    'approval_id>export_approvals.approval_id:NO ACTION/NO ACTION/NONE',
-    'preparation_id>export_preparations.preparation_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const EXPORT_LEDGER_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  export_preparations: 'EXPORT_LEDGER_IMMUTABLE',
+  export_approvals: 'EXPORT_LEDGER_IMMUTABLE',
+  export_receipts: 'EXPORT_LEDGER_IMMUTABLE',
+});
 
 export class ExportLedgerError extends Error {
   constructor(readonly code: string, message: string) {
@@ -181,28 +161,6 @@ export class ExportLedgerError extends Error {
 
 function requireExport(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new ExportLedgerError(code, message);
-}
-
-/**
- * Revision 29's three relations and their ledger triggers, created once and never rebuilt: a store that
- * predates them gains three empty relations and nothing existing moves. Shape-detected, like revisions 21 to
- * 28, and run before the version is stamped in `task-authorization.ts`.
- */
-export function initializeExportLedgerSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'export_preparations'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EXPORT_LEDGER_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EXPORT_LEDGER_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Export ledger schema rollback failed.');
-    }
-    throw error;
-  }
-  requireExport(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- words ----------------------------------------------------------------------------------------
@@ -528,7 +486,7 @@ export interface PackageManifest {
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
 interface ResolvedTarget {
-  kind: 'current' | 'milestone' | 'report' | 'document' | 'manifest';
+  kind: 'current' | 'revision' | 'milestone' | 'report' | 'document' | 'manifest';
   targetKind: 'manuscript-revision' | 'milestone-version' | 'report' | 'production-document-version' | 'book-delivery-package-version';
   targetId: string;
   milestoneId: string | null;
@@ -634,6 +592,7 @@ function requireFormat(value: unknown): ManuscriptExportFormat {
 function requireTarget(value: unknown): ManuscriptExportTargetInput {
   requireExport(
     isRecord(value) && ((value.kind === 'current' && Object.keys(value).length === 1) ||
+      (value.kind === 'revision' && Object.keys(value).length === 2 && typeof value.revisionId === 'string' && UUID_PATTERN.test(value.revisionId)) ||
       (value.kind === 'milestone' && Object.keys(value).length === 2 && typeof value.milestoneId === 'string' && UUID_PATTERN.test(value.milestoneId)) ||
       (value.kind === 'report' && Object.keys(value).length === 2 && typeof value.reportId === 'string' && UUID_PATTERN.test(value.reportId)) ||
       (value.kind === 'document' && Object.keys(value).length === 3 && typeof value.documentId === 'string' && UUID_PATTERN.test(value.documentId) &&
@@ -642,6 +601,7 @@ function requireTarget(value: unknown): ManuscriptExportTargetInput {
     '导出对象无效。',
   );
   if (value.kind === 'current') return { kind: 'current' };
+  if (value.kind === 'revision') return { kind: 'revision', revisionId: value.revisionId as string };
   if (value.kind === 'document') return { kind: 'document', documentId: value.documentId as string, revisionId: value.revisionId as string };
   return value.kind === 'milestone' ? { kind: 'milestone', milestoneId: value.milestoneId as string } : { kind: 'report', reportId: value.reportId as string };
 }
@@ -1213,6 +1173,7 @@ export class ManuscriptExportStore {
       revisionDigest: resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionDigest : null,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
+      ...(resolved.kind === 'revision' ? { selectedRevision: true } : {}),
       ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
       ...(resolved.document === null ? {} : { documentId: resolved.document.documentId, documentVersionDigest: resolved.revisionDigest }),
       ...(resolved.manifest === null ? {} : {
@@ -1535,6 +1496,12 @@ export class ManuscriptExportStore {
     if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
     if (target.kind === 'document') return this.#documentTarget(bookId, target.documentId, target.revisionId);
     let head = this.#head(bookId);
+    if (target.kind === 'revision') {
+      const revision = this.#revision(target.revisionId);
+      requireExport(revision.manuscriptId === head.manuscriptId && revision.branchId === head.branchId, 'EXPORT_TARGET_NOT_FOUND', '所选版本不属于本书主稿。');
+      return { ...revision, kind: 'revision', revisionId: target.revisionId, targetKind: 'manuscript-revision', targetId: target.revisionId,
+        milestoneId: null, milestoneLabel: null, bookTitle: head.bookTitle, savedForExport: false, report: null, document: null, manifest: null };
+    }
     if (target.kind === 'milestone') {
       const row = this.#db.prepare(
         `SELECT mv.milestone_id, mv.label, mv.revision_id FROM milestone_versions mv
@@ -1689,14 +1656,15 @@ export class ManuscriptExportStore {
     const head = this.#head(bookId);
     const revisionId = text(row.revision_id);
     const revision = this.#revision(revisionId);
-    requireExport(revision.revisionDigest === text(row.revision_digest) && revision.manuscriptId === head.manuscriptId,
+    requireExport(revision.revisionDigest === text(row.revision_digest) && revision.manuscriptId === head.manuscriptId && revision.branchId === head.branchId,
       'EXPORT_RECORD_INVALID', '导出准备不再对应其精确修订版。');
     const milestone = text(row.target_kind) === 'milestone-version';
+    const stored = parseCanonicalJson(text(row.canonical_json));
     const label = milestone
       ? (this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)
       : undefined;
     return {
-      kind: milestone ? 'milestone' : 'current',
+      kind: milestone ? 'milestone' : isRecord(stored) && stored.selectedRevision === true ? 'revision' : 'current',
       targetKind: milestone ? 'milestone-version' : 'manuscript-revision',
       targetId: text(row.target_id),
       milestoneId: milestone ? text(row.target_id) : null,
@@ -1909,7 +1877,7 @@ export class ManuscriptExportStore {
        WHERE em.branch_id = ? AND em.status IN ('open', 'resolved', 'applied') AND em.kind <> 'personal-highlight'
        ORDER BY em.created_at, em.mark_id`,
     ).all(branchId) as SqlRow[];
-    const inlineRevisions = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined;
+    const inlineRevisions = schemaHas(this.#db, 'editor_inline_revision_marks');
     const item = this.#db.prepare(inlineRevisions
       ? `SELECT i.item_id, coalesce(r.before_text, i.current_text) current_text, coalesce(r.after_text, i.proposed_text) proposed_text
          FROM proposal_change_items i LEFT JOIN editor_inline_revision_marks r ON r.mark_id = i.mark_id WHERE i.mark_id = ?`
@@ -2126,6 +2094,9 @@ export class ManuscriptExportStore {
       : null;
     const disposition = text(row.disposition) as ManuscriptExportDisposition;
     const stored = parseCanonicalJson(text(row.canonical_json));
+    const selectedRevision = isRecord(stored) && stored.selectedRevision !== undefined;
+    if (selectedRevision) requireExport(stored.selectedRevision === true && targetKind === 'manuscript-revision' && row.target_id === revisionId,
+      'EXPORT_RECORD_INVALID', '导出记录没有绑定所选修订。');
     if (isRecord(stored) && (stored.wordSource !== undefined || stored.writer === WORD_DOCX_EXPORT_WRITER_IDENTITY)) {
       validateWordExportBinding(stored.wordSource);
       requireExport(typeof stored.wordInputDigest === 'string' && DIGEST_PATTERN.test(stored.wordInputDigest) &&
@@ -2183,7 +2154,7 @@ export class ManuscriptExportStore {
         document: null,
         packageVersion: { packageVersionId: manifest.packageVersionId, versionLabel: manifest.versionLabel },
       } : report !== null ? this.#targetProjection(report) : {
-        kind: targetKind === 'milestone-version' ? 'milestone' : 'current',
+        kind: targetKind === 'milestone-version' ? 'milestone' : selectedRevision ? 'revision' : 'current',
         milestoneId: targetKind === 'milestone-version' ? text(row.target_id) : null,
         milestoneLabel,
         revisionId,

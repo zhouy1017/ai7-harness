@@ -58,7 +58,7 @@ it('a menu panel wider than its narrow anchor stays inside the window near the r
   // Inside its 83 px anchor the nowrap content measures 83 px; once fixed with room to grow it is 340 px.
   const panel = { style, scrollHeight: 120, get offsetWidth() { return values['position'] === 'fixed' && values['left'] !== undefined ? 340 : 83; } };
   const summary = { getBoundingClientRect: () => ({ left: 907, right: 990, top: 8, bottom: 40 }) };
-  const menu = { open: true, querySelector: () => summary };
+  const menu = { open: true, dataset: {}, querySelector: () => summary };
   const position = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
     menus: () => [menu], panelOf: () => panel, fixedOrigin: () => ({ left: 0, top: 0 }), view: { innerWidth: 1008, innerHeight: 681 },
   });
@@ -66,6 +66,13 @@ it('a menu panel wider than its narrow anchor stays inside the window near the r
   const left = Number.parseFloat(values['left'] ?? 'NaN');
   expect(left).toBeGreaterThanOrEqual(8);
   expect(left + 340).toBeLessThanOrEqual(1008 - 8);
+  // A menu that opts in opens from its button's left edge, so it never reaches back over what is left of the button (the sidebar).
+  const start = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
+    menus: () => [{ ...menu, dataset: { menuAnchor: 'start' }, querySelector: () => ({ getBoundingClientRect: () => ({ left: 300, right: 383, top: 8, bottom: 40 }) }) }],
+    panelOf: () => panel, fixedOrigin: () => ({ left: 0, top: 0 }), view: { innerWidth: 1008, innerHeight: 681 },
+  });
+  start();
+  expect(Number.parseFloat(values['left'] ?? 'NaN')).toBe(300);
 });
 
 it('Space chooses the active option in an open select and preserves spaces in its filter', () => {
@@ -95,4 +102,23 @@ it('keeps Space in an active typeahead phrase without committing its first match
   });
   for (const key of [' ', 't']) keydown({ key, target: {}, preventDefault: () => {}, stopPropagation: () => {} });
   expect(chosen).toEqual([]); expect(active.at(-1)).toBe(1);
+});
+
+
+it('renders labelled option groups only for callers that opt in', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const renderer = source.slice(source.indexOf('  const renderOptions = ():'), source.indexOf('  const sync = ():'));
+  for (const optIn of [false, true]) {
+    const list = document.createElement('div'), group = document.createElement('optgroup'); group.setAttribute('label', '推荐');
+    const render = runInNewContext(transpileModule(`let signature='',visible=[],rows=[],active=-1; ${renderer}; renderOptions;`, {}).outputText, {
+      select: { dataset: { showOptionGroups: String(optIn) }, selectedIndex: 0, options: [{ text: '合成模型', value: 'synthetic', selected: true, hidden: false, parentElement: group }] },
+      filter: { value: '' }, list, doc: document, optionDisabled: () => false, empty: {}, setActive: () => {}, position: () => {},
+    });
+    render();
+    const node = list as unknown as MiniElement;
+    expect(node.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(node.querySelectorAll('[role="group"]')).toHaveLength(optIn ? 1 : 0);
+    if (optIn) expect(node.querySelector('[role="group"]')!.getAttribute('aria-label')).toBe('推荐');
+    else expect(node.textContent).not.toContain('推荐');
+  }
 });

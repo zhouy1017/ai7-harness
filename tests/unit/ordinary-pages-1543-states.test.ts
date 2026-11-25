@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { DatabaseSync } from 'node:sqlite';
 import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,7 @@ import { CUSTOM_TAB_STOPPED } from '../../src/renderer/custom-analysis-labels.js
 import { mountHouseWordList } from '../../src/renderer/house-word-list.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { styleInput } from '../../src/renderer/components/controls.js';
-import { HouseWordLists, initializeHouseWordListSchema } from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, HOUSE_WORD_LIST_SCHEMA_SQL } from '../../src/service/review/house-word-list.js';
 import type { HouseWordListApi } from '../../src/shared/protocol/house-word-list.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
@@ -34,7 +35,7 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   const state = (root: unknown): string | undefined => q(root, '[data-house-word-list]')?.dataset['houseState'];
 
   it('says it is reading, then that the read failed with a way to read again, and only then that nothing is saved', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     let fail = true;
     const { root, panel, setStatus } = mount({
@@ -57,7 +58,7 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   });
 
   it('keeps focus on the editor\'s next control after create, add, remove and save, and says every status in ordinary words', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     const { root, panel, setStatus } = mount({ inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) });
     const press = async (selector: string): Promise<void> => { (q(root, selector) as MiniElement).click(); await settle(); };
@@ -91,7 +92,7 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   });
 
   it('names a read that failed after a save, and every refusal, in ordinary words', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     let failRead = false;
     const { root, panel, setStatus } = mount({
@@ -117,7 +118,7 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   });
 
   it('lists only the lists before the current one, each to the second, and draws a pager only past one page', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: [entry('合成甲')] });
     const first = owner.inspect().current!;
@@ -135,7 +136,7 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
 
 describe('本社词表: the fold and the pager keep the place of the editor', () => {
   it('keeps the history fold open across a paint and hands a pager at its boundary to its other button, never to 保存', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: Array.from({ length: 53 }, (_, index) => entry(`词${index}`)) });
     const first = owner.inspect().current!;

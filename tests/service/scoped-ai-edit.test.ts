@@ -3,7 +3,9 @@ import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
+import { planModelDestination } from '../../src/service/task-plan.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { aiLocksOfWindow } from '../../src/service/ai-edit-locks.js';
 import { FastRoleExecutionOwner } from '../../src/service/fast-role/fast-role-execution.js';
@@ -47,6 +49,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   db?.close();
   try { store.close(); } catch { /* closed by its test */ }
   requestGovernor.close();
@@ -122,7 +125,56 @@ async function settled(requests: FastRoleRequests, projection: ScopedAiEditProje
 
 const primary = (): Target => ({ manuscriptId: book.manuscriptId, branchId: book.branchId });
 
+function rowCounts() {
+  return db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map(row =>
+    [row.name, db.prepare(`SELECT count(*) n FROM "${String(row.name).replaceAll('"', '""')}"`).get()!.n]);
+}
+
 describe('就选中部分让 AI 修改: the scoped splice guard', () => {
+  it('names the channel and display model destination without a raw off effort (#1657 F2)', () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = { ...base(target, '检查选中的文字', spanOver(blocks)), clientCommandId: randomUUID() };
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find(entry => entry.route === 'opencode-go')!, credentialReference: randomUUID(), reasoningEffort: 'off' };
+    vi.spyOn(store, 'scopedAiEditLaunchChoice').mockReturnValue({ executionConfig: {}, binding });
+    const preview = requests.previewScopedEdit(book.bookId, input);
+    expect(preview.send).toContain(`，发往 ${planModelDestination({ kind: binding.route, model: binding.model, reasoningEffort: 'off' })}`);
+    expect(preview.send).not.toContain('@off');
+  });
+
+  it('keeps stale-revision and all-locked scope refusals before legacy model resolution (#1657 F2)', () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = base(target, '检查选中的文字', spanOver(blocks));
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const resolver = vi.spyOn(store, 'scopedAiEditLaunchChoice').mockImplementation(() => { throw new Error('scope must be checked first'); });
+    const stale = { ...input, baseRevisionId: randomUUID() };
+    const before = rowCounts();
+    expect(() => requests.previewScopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'MARK_BINDING_CHANGED' }));
+    expect(() => requests.scopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'MARK_BINDING_CHANGED' }));
+    expect(rowCounts()).toEqual(before);
+    store.setAiEditLocks({ ...target, targets: blocks.map(block => ({ kind: 'block' as const, blockId: block.blockId })), locked: true, expectedLocksDigest: locksDigest(target) });
+    const locked = base(target, input.instruction, input.scope), afterLock = rowCounts();
+    expect(() => requests.previewScopedEdit(book.bookId, locked)).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
+    expect(() => requests.scopedEdit(book.bookId, locked)).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
+    expect(rowCounts()).toEqual(afterLock);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+  it('previews the frozen selection without rows, request entries or a send, with unchanged refusals (#1657)', async () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = { ...base(target, '检查选中的文字', spanOver(blocks)), clientCommandId: randomUUID() };
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const before = rowCounts();
+    const preview = requests.previewScopedEdit(book.bookId, input);
+    expect(preview).toMatchObject({ units: prepared.targets.length, scope: '所选文字中未锁定的部分', usage: '调用模型 1 次；实际用量在完成后确定。' });
+    await requests.settled();
+    expect(rowCounts()).toEqual(before);
+    expect(() => requests.inspectScopedEdit(book.bookId, prepared.requestId)).toThrow(expect.objectContaining({ code: 'FAST_ROLE_REQUEST_NOT_FOUND' }));
+    const stale = { ...input, expectedLocksDigest: '0'.repeat(64) };
+    expect(() => requests.previewScopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'AI_EDIT_LOCKS_STALE' }));
+    expect(() => requests.scopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'AI_EDIT_LOCKS_STALE' }));
+    expect(rowCounts()).toEqual(before);
+    expect((await settled(requests, requests.scopedEdit(book.bookId, input))).state).toBe('unchanged');
+  });
   it('replays a scoped launch command once and refuses changed input without another edit (#1455)', async () => {
     const target = primary();
     const { blocks } = threeParagraphs(target);
@@ -173,6 +225,31 @@ describe('就选中部分让 AI 修改: the scoped splice guard', () => {
     const reversed = allBlocks(target);
     expect(reversed.get(a.blockId)!.text).toBe(a.text);
     expect(reversed.get(c.blockId)!.text).toBe(`〔丙改〕${from(c.text, 4)}`);
+  }, 300_000);
+
+  it('is one editor step: one Ctrl+Z takes back every applied change, redo puts them back, and each card still reverses alone (#1654)', async () => {
+    const target = primary();
+    const { blocks } = threeParagraphs(target);
+    const [a, b, c] = blocks;
+    const before = allBlocks(target);
+    const input = base(target, '把这几段改得更紧凑', spanOver(blocks));
+    const requests = answering(frozen(input), { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [{ id: 'T1', text: '〔甲改〕' }, { id: 'T3', text: '〔丙改〕' }] });
+    const result = await settled(requests, requests.scopedEdit(book.bookId, input));
+    expect(result.state).toBe('applied');
+    const applied = allBlocks(target);
+    expect(store.inspectEditorHistory(target.manuscriptId, target.branchId).undo).toMatchObject({ kind: 'ai-edit', changeCount: 2, label: 'AI 修改（2 处）' });
+    const digest = (): string => store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest;
+    expect(store.undoManuscript(target.manuscriptId, target.branchId, digest()).completionLabel).toMatch(/^已撤销：AI 修改（2 处）/);
+    expect(allBlocks(target)).toEqual(before);
+    store.redoManuscript(target.manuscriptId, target.branchId, digest());
+    expect(allBlocks(target)).toEqual(applied);
+    // Each change keeps its own card: taking back A leaves C applied, and C's card then takes back C.
+    store.reverseAppliedChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[0]!, clientEffectId: randomUUID() });
+    expect(allBlocks(target).get(a.blockId)!.text).toBe(a.text);
+    expect(allBlocks(target).get(c.blockId)!.text).toBe(applied.get(c.blockId)!.text);
+    store.reverseAppliedChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[1]!, clientEffectId: randomUUID() });
+    expect(allBlocks(target).get(c.blockId)!.text).toBe(c.text);
+    expect(allBlocks(target).get(b.blockId)!.text).toBe(b.text);
   }, 300_000);
 
   it('never changes a locked block inside the selection, and the store refuses any AI7 suggestion onto a locked block', async () => {
@@ -272,6 +349,10 @@ describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
     // also tries to sneak the locked paragraph's words in under a target of its own.
     const round1 = base(target, '第一轮：语气更正式', { mode: 'unlocked-only', range: { kind: 'section', headingBlockId: headingId } });
     const prepared1 = frozen(round1);
+    const sectionPreview = answering(prepared1, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const beforePreview = rowCounts();
+    expect(sectionPreview.previewScopedEdit(book.bookId, round1)).toMatchObject({ units: prepared1.targets.length, scope: '所选章节中未锁定的段落' });
+    expect(rowCounts()).toEqual(beforePreview);
     expect(prepared1.targets.some((item) => item.blockId === first)).toBe(false);
     expect(prepared1.targets.some((item) => item.blockId === second)).toBe(true);
     // The heading itself is the section's; the next heading of its level ends it and is only context.

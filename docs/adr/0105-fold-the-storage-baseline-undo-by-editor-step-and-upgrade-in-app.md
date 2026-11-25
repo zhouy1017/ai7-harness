@@ -13,7 +13,7 @@ decides: the R5 details left open by the Owner's D3 and D7 of #1458
 
 ## Context
 
-The Owner's decision D3 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6818574586), 2026-11-12) allows the store to be folded when a database upgrade tool is provided: 「延续约定不是强制，可以在提供数据库升级工具的前提下升级」. D7 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458), 2026-11-14) decides that per-step undo of edits made before the upgrade is not carried: 「不保留」. Round [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) (R5 → 0.8.0 Alpha) asks for:
+The Owner's decision D3 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6818574586), 2026-11-12) allows the store to be folded when a database upgrade tool is provided: 「延续约定不是强制，可以在提供数据库升级工具的前提下升级」. D7 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458), 2026-11-14) decides that per-step undo of edits made before the upgrade is not carried: 「不保留」. Round [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) (originally planned as R5 → 0.8.0 Alpha) asks for:
 
 - trustworthy undo;
 - a real version list with restore;
@@ -45,6 +45,8 @@ Every editor action writes one **editor step** in its existing transaction: typi
 - The Apply Effects it **owns**, by generation.
 - For a restore, the mark anchors before and after.
 
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654): a split or merge step records the pre / post anchors of the marks at its caret (and of an absorbed block whose boundary fuses graphemes); an undo restores them only when the mark's current anchor equals the recorded post side (ED-044 holds: the words are byte-identical). A step owns its Effects per Effect (one slot per Effect it wrote, each a chain of generations), not per proposal item, because a reversal consumes its whole Effect.
+
 **What Ctrl+Z does.**
 - Ctrl+Z takes back the newest step as **one** transaction, whatever its kind. Redo replays the oldest undone step.
 - Text steps replay their command groups. Apply steps write the governed reversal through the existing Effect path (UI ADR 0003 kept: receipts are never rewritten). The reversal is recorded with its own interaction value, `undo-step` or `redo-step`, never `confirm-reverse-apply`, because no confirmation is shown.
@@ -67,8 +69,8 @@ Every editor action writes one **editor step** in its existing transaction: typi
 
 ### 2 · Split and join keep a mark's undo
 
-- **Moved whole:** a mark that moves whole with its words, and whose words did not change, keeps its anchor state across 分段 and 合段.
-- **Cut through:** a mark the caret cuts through becomes drifted, and so does a point mark exactly at the caret.
+- **Moved whole:** a mark that moves whole with its words, and whose words did not change, keeps its anchor state across 分段 and 合段. *Clarification of 2026-11-20 (Commander, reported to the Owner):* two kinds of mark still drift when they move, because their place cannot be trusted afterwards — the marks of a 就地编辑修订 session, which the session finds again by their offsets in the paragraph before the move, and the marks of a paragraph absorbed by a join whose boundary fuses two graphemes into one, where the joined paragraph is shorter than its two parts.
+- **Cut through:** a mark the caret cuts through becomes drifted, and so does a point mark exactly at the caret. *Clarification of 2026-11-20 (Commander, reported to the Owner):* a point at a caret that stands at the very start or end of the paragraph is not cut — one side is empty — so it keeps its state: at the start it moves with the words, at the end it stays.
 - **Moved targets:** reversing an Apply accepts a target that moved, when the original block reaches it through block lineage, whatever the status of the command groups.
 - **Touching pair from different paragraphs:** two touching reversal targets that came from different original paragraphs are refused, not reordered.
 
@@ -88,7 +90,11 @@ The version list in 工作概览 holds milestones, saved revisions and publicati
 
 **Ctrl+Z after a restore** puts back the auto-saved text and the mark positions, but only after checking that the whole post-restore state still stands. If a later change still stands, it is refused like any blocked step. It restores anchors only, never a mark's status, so a decision made after the restore stays.
 
+Sealing the earlier editor steps does not erase the paragraph merges that still explain where a footnote or source image belongs. Restore and replay use the journal prefix captured by each revision since the selected version's last changed import to reinstate its effective merges; this does not reopen those steps for undo. A changed reimport starts new source mappings even when it reuses the same source file. Footnotes use the mappings from that import, not the latest import of the book.
+
 ### 4 · One baseline: revision 117, Data Version 2
+
+R5-5 keeps the two immutable revision references for a restore in `editor_step_restore_revisions`; both sides of its marks use `editor_step_mark_anchors`, including detached anchors. The R5-6 conversion must retain existing revision, milestone and publication identities and create this baseline shape without inventing restore steps or anchors for old history.
 
 **The baseline.**
 - One creation path, `createBaselineSchema`, builds the store from the final-shape definitions at **revision 117**. Every predecessor shape and initializer is deleted.
@@ -104,6 +110,8 @@ The version list in 工作概览 holds milestones, saved revisions and publicati
 - The fold never lands on the integration branch without a working converter: R5-2 through R5-6 travel as one train (§7).
 
 **Triggers.** All 408 `RAISE(ABORT)` triggers of a schema-115/116 store stay. They are counted on the admitted SampleBook fixture; schema 116 adds none.
+
+> Clarification, 2026-11-21 (Commander decision; R5-F2c, #1653): the similarity-vector table that ADR 0107 §4 point 5 retires owned two of the 382 append-only ledger triggers, so the 117 baseline holds 406 — 380 ledger, 12 guards, 14 cleanup; every trigger of a table that stays, stays.
 
 | Kind | Triggers | Reason to keep |
 | --- | --- | --- |
@@ -148,22 +156,22 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
    On any mismatch nothing is switched, the old data stays usable, and the editor is told which items did not match (Owner item 12).
 6. **Switch.**
    1. Write the Data Version 2 marker into `store.upgrading/`.
-   2. Rename `store/` → `store-before-0.8.0-<time>/`.
+   2. Rename `store/` → `store-before-<software-version>-<id>/`.
    3. Rename `store.upgrading/` → `store/`.
    4. Open, and append the Data Version 2 version record.
    5. Show the before / after comparison in plain words.
 
-   Every set-aside directory carries a timestamp, so a second upgrade-then-rollback never collides.
+   Both retained names use the software version recorded when the upgrade starts and an ID containing a timestamp. Rollback parks the newer store under `shell/store-after-<software-version>-<id>/`.
 7. **Keep the old store** until the editor deletes it (Owner item 3).
 
-**「回到升级前的数据」 (Owner item 4)** is a dedicated cross-version restore. It does not use the replacement path, which would reopen the data under 0.8.0.
+**「回到升级前的数据」 (Owner item 4)** is a dedicated cross-version restore. It does not use the replacement path, which would reopen the data under 0.7.9.
 - It first verifies every file the old store needs.
 - If any is missing, it extracts, verifies and marks the backup package in staging, then publishes it through the same resumable renames.
 - It ends with **Data Version 1 installed, with its marker, for the previous AI7**. It neither opens nor converts it.
 - The editor is told that changes made after the upgrade are not in the old data.
 
 **Old packages (Owner item 5).**
-- A `.ai7db` exported by 0.7.2 or later imports directly into 0.8.0 through the same conversion, after every payload class is installed and verified.
+- A `.ai7db` exported by 0.7.2 or later imports directly into 0.7.9 through the same conversion, after every payload class is installed and verified.
 - Older packages, and older data (Owner item 1), go through 0.7.4 first.
 
 ### 6 · Positions without write amplification
@@ -184,7 +192,13 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
 - a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes, and grows less than 2× from the smallest size to the largest;
 - typing, window, outline, offset and whole-book mark-list reads stay within 10 % of the baseline.
 
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654; reported to the Owner): two targets are revised after the measurements on the test guests.
+> - **Consecutive Enters.** "20 consecutive Enters write under 5 % of one base split" becomes: one Enter costs the same at any manuscript size and position, and at 46,000 paragraphs it writes under 1 % of one base split. Each Enter must write its journal, command-history and lineage rows, about 30 pages, so the old target sat below that floor. Measured: one Enter writes 0.43 % of a base split at 46,000 paragraphs.
+> - **The write lock of a large undo** (§1). "At most 2 s for a 2,000-place 全部替换" becomes: at most the time the 全部替换 itself takes, flat as the history grows, with the 「正在撤销 N 处修改…」 line. A scoped AI edit holds the lock for at most 2 s. Two ways to reach 2 s were declined, because each breaks a guarantee of §1: one Effect per step (each card's own 撤销本次修改) and undo in chunks (one Ctrl+Z, all or nothing).
+
 ### 7 · Delivery
+
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
 
 R5 builds on `codex/integration-0.8.0` after 0.7.3 is delivered (#1540).
 
@@ -195,7 +209,7 @@ R5 builds on `codex/integration-0.8.0` after 0.7.3 is delivered (#1540).
 | R5-3 + R5-4 | Positions (§6) and editor steps (§1), one train because they rewrite the same functions | After R5-2 and R5-1 |
 | R5-5 | Version list, view, export, restore (§3) | After R5-3 + R5-4 |
 | R5-6 | The upgrade tool (§5); its merge lands the train on `codex/integration-0.8.0` | After R5-5 and #1556 |
-| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, every phase interrupted and resumed, rollback drills, DOCX round trip, 15 Journeys, full guest ladder and hosted Full Gate; 0.8.0 | After the train and 0.7.4 |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, every phase interrupted and resumed, rollback drills, DOCX round trip, 15 Journeys, full guest ladder and hosted Full Gate; 0.7.9 | After the train and integration of the 0.7.4 interface round |
 
 R5 needs four things from #1536's storage-facing interface:
 1. One module owning the working-block, outline and offset reads and writes.
@@ -221,6 +235,6 @@ R5 needs four things from #1536's storage-facing interface:
 - Accepted suggestions survive split and join with their undo.
 - Versions can be viewed, exported and restored.
 - Structural edits on large manuscripts stop writing tens of megabytes.
-- Upgrading to 0.8.0 is one click, with a plain before/after comparison and the old data kept.
+- Upgrading to 0.7.9 is one click, with a plain before/after comparison and the old data kept.
 - About 73 test files that hand-build old schemas are replaced by a few conversion tests on real 0.7.x stores built from `SampleBooks/`, under the replaced-tests rule of [#1075](https://github.com/zhouy1017/ai7-harness/issues/1075).
 - Ordinary CI stays provider-free. This ADR authorizes no live call, no release and no promotion to `main`.

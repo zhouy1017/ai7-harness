@@ -1,4 +1,7 @@
+import { chooseImportTarget } from './import-page.mjs';
+import { pressReachable } from './task-card-reach.mjs';
 import { commentsLayouts, commentsOrdinaryForEditor } from './comments-pane.mjs';
+import { reachable } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -352,7 +355,7 @@ async function attachRendererTarget(browser, launchScenario) {
 async function waitFor(renderer, expression, location, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`)) return;
+    if ((await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`)) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-02', location);
@@ -917,7 +920,7 @@ async function importAndOpen(renderer, dataRoot) {
   await clickButton(renderer, '导入稿件', 'stage-click');
   await waitForStagedTarget(renderer, dataRoot);
   await assertRenderer(renderer, `document.querySelector('.import-file-card')?.textContent.includes('${BLOCK_COUNT} 个段落')`, 'exact-block-count');
-  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');
@@ -1038,6 +1041,8 @@ async function milestoneGeometry(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
+    // Issue #1682: 导入新版本… and 导出… stand whole inside the window, each the topmost thing at its own centre, before the form opens.
+    await assertRenderer(renderer, `${reachable('.editor-save-menu [data-import-new-version="manuscript"]')} && ${reachable('.editor-save-menu .editor-save-menu-body > button:last-of-type')}`, 'milestone-geometry-actions-in-window');
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
     // The click must have opened the form inside the still-open save menu, not landed on whatever lies under a moved panel.
     await assertRenderer(renderer, `document.querySelector('details.editor-save-menu')?.open === true && document.querySelector('.milestone-section')?.open === true`, 'milestone-geometry-form-opened');
@@ -2271,6 +2276,7 @@ async function main() {
       // A long error on the manuscript, with the drawer open and then closed: the bar wraps (a long one scrolls inside it), stays
       // clear of every control, the sidebar and the drawer, the manuscript keeps its height, and the last line can be scrolled
       // clear of it. The fault is armed apart from the press: the next 发起全书任务… has its reading rejected (one-shot hook).
+      await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-panel-launch > summary', 'status-bar-launch-menu');
       const LONG_FAILURE = '任务撰写没有打开：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在稿件页里自行折行，既不超出窗口，也不压住稿件的控件、侧栏或任务栏。'.repeat(5);
       await waitFor(renderer, `document.querySelector('#task-drawer .task-panel [data-task-compose-action="compose"]')?.disabled === false`, 'status-bar-compose-ready');
       await assertRenderer(renderer, `(() => {
@@ -2283,7 +2289,7 @@ async function main() {
         document.addEventListener('click', arm, true);
         return true;
       })()`, 'status-bar-long-arm');
-      await clickVisibleControl(renderer, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'status-bar-long-press');
+      await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'status-bar-long-press');
       await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith('任务撰写没有打开') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'status-bar-long-shown');
       for (const form of ['drawer', 'page']) {
         if (form === 'page') {

@@ -17,7 +17,7 @@ const apiOf = (start = vi.fn(async () => ({ results: [] }))): Options['api'] => 
 }) as unknown as Options['api'];
 const everything = { has: () => true, currentBookId: () => null, bookPage: () => true };
 const make = (over: Partial<Options> = {}) => createCommandPalette({ api: apiOf(), screen: everything, beforeStart: async () => true,
-  execute: vi.fn(), openBook: vi.fn(), openResult: vi.fn(), openStart: vi.fn(), openHelp: vi.fn(), status: vi.fn(), ...over });
+  execute: vi.fn(), openBook: vi.fn(), openResult: vi.fn(), openStart: vi.fn(), status: vi.fn(), ...over });
 const rows = (): MiniElement[] => miniDocument.body.querySelectorAll('button.command-palette-entry');
 const labels = (): string[] => rows().map((node) => node.textContent ?? '');
 const search = (): MiniElement => miniDocument.body.querySelector('input')!;
@@ -32,8 +32,8 @@ it('settles visible editing before a palette task starts, and respects a refused
   let release!: (allowed: boolean) => void;
   const settle = vi.fn(() => new Promise<boolean>((resolve) => { release = resolve; }));
   try {
-    const help = vi.fn();
-    const palette = make({ api: apiOf(start), beforeStart: settle, openHelp: help });
+    const execute = vi.fn();
+    const palette = make({ api: apiOf(start), beforeStart: settle, execute });
     const choose = (): void => { miniDocument.body.querySelectorAll('button').find((node) => node.textContent === '发起任务 · sample1 · 基线分析')!.click(); };
     await palette.open(); choose();
     expect(settle).toHaveBeenCalledOnce(); expect(start).not.toHaveBeenCalled();
@@ -42,8 +42,9 @@ it('settles visible editing before a palette task starts, and respects a refused
     await palette.open(); choose(); release(true);
     await vi.waitFor(() => expect(start).toHaveBeenCalledWith({ tasks: [{ bookId: 'book-one', procedureId: 'baseline-analysis' }] }));
     await palette.open();
-    miniDocument.body.querySelectorAll('button').find((node) => node.textContent === '设置 · 帮助')!.click();
-    expect(help).toHaveBeenCalledOnce();
+    // 帮助 is a registry command (F1), listed with its chord like the others.
+    miniDocument.body.querySelectorAll('button').find((node) => node.textContent?.startsWith('帮助 · '))!.click();
+    expect(execute).toHaveBeenCalledWith('help.open');
   } finally { restore(); }
 });
 

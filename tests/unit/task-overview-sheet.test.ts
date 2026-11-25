@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { mountTaskOverview } from '../../src/renderer/tasks-overview.js';
@@ -118,28 +119,38 @@ describe('任务 page', () => {
     expect(six.querySelectorAll('.task-overview-filter-row select')).toHaveLength(0);
     expect(six.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(7);
   });
+  it('marks the pressed filter with a rule the quiet button does not clear', async () => {
+    const six = await mount([running('a')], named(6));
+    // A filter is a quiet button, and `.btn.quiet` clears a background later in the sheet: the pressed rule names `.btn` to outrank it.
+    expect(six.querySelector('.task-overview-filter[aria-pressed="true"]')!.className.split(' ')).toEqual(expect.arrayContaining(['btn', 'quiet']));
+    const css = readFileSync('src/renderer/styles.css', 'utf8');
+    expect(css).toMatch(/^\.btn\.task-overview-filter\[aria-pressed="true"\] \{[^}]*background: var\(--status-progress-surface\)/mu);
+    expect(css).not.toMatch(/^\.task-overview-filter\[aria-pressed="true"\]/mu);
+  });
+  it.each([3, 7])('filters restart-queued tasks from every ledger kind by Book with %i Books (#1656)', async count => {
+    const books = named(count), source = books[0]!, empty = books[1]!;
+    const items: GlobalAttentionItemProjection[] = (['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).map(kind => ({
+      ...running(kind, source), group: 'exceptions', state: 'analysis-blocked', blocked: true,
+      object: { kind: 'task', taskKind: kind }, facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: 'shutdown' },
+      target: { kind: 'task-plan', bookId: source.bookId, taskKind: kind, ref: kind },
+    }));
+    for (const id of ['baseline', 'custom']) items.push({ ...running(id, source), group: 'exceptions', state: 'analysis-blocked', blocked: true,
+      facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: 'shutdown' } });
+    const root = await mount(items, books);
+    expect(root.querySelectorAll('[data-task-group="pending"] .task-overview-card')).toHaveLength(6);
+    const choose = (book: typeof source): void => {
+      const select = root.querySelector('.task-overview-filter-row select');
+      if (select) { select.value = book.bookId; select.dispatchEvent({ type: 'change', bubbles: true }); }
+      else root.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button').find(button => button.textContent === book.title)!.click();
+    };
+    choose(empty); expect(root.querySelectorAll('.task-overview-card')).toHaveLength(0);
+    expect(root.querySelector('.task-overview-none')!.textContent).toBe('没有符合所选筛选的任务。');
+    choose(source); expect(root.querySelectorAll('.task-overview-card')).toHaveLength(6);
+  });
+
   it('offers a list above six Books', async () => {
     const lots = await mount([running('a')], named(7));
     expect(lots.querySelector('.task-overview-filter-row select')).not.toBeNull();
     expect(lots.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(0);
-  });
-
-  it('names the Book and the task in the cancel confirmation, and hands focus back to the card on 继续保留 and Escape', async () => {
-    const root = await mount([running('a')]);
-    const card = root.querySelector('[data-task-item="a"]')!;
-    root.querySelector('[data-task-action="cancel"]')!.click();
-    const confirm = root.querySelector('.task-overview-confirm')!;
-    expect(confirm.hidden).toBe(false);
-    expect(confirm.textContent).toContain('《甲》');
-    expect(confirm.textContent).toContain(card.querySelector('strong')!.textContent);
-    confirm.querySelectorAll('button').find((node) => node.textContent === '继续保留')!.click();
-    expect(confirm.hidden).toBe(true);
-    expect(miniDocument.activeElement).toBe(card);
-    miniDocument.body.append(document.createElement('input') as never);
-    (miniDocument.body.querySelector('input') as MiniElement).focus();
-    root.querySelector('[data-task-action="cancel"]')!.click();
-    root.dispatchEvent({ type: 'keydown', key: 'Escape', target: confirm.querySelector('button')!, bubbles: true, preventDefault() {} } as never);
-    expect(confirm.hidden).toBe(true);
-    expect(miniDocument.activeElement).toBe(card);
   });
 });

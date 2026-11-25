@@ -258,7 +258,8 @@ describe('the harness', () => {
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
         cases: 3, concerns: 11, matched: 6, missed: 4, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
-      // #1074: the 2026-11 pass, replayed from the 38 convertible captures; the tool-using units are unmeasured gaps (#1598).
+      // #1074: the 2026-11 pass, replayed from its 72 captures. Since #1623 changed what `retrieve` returns, the 24 recorded continuations
+      // no longer match the carried tool exchange (#1598), so the 10 tool-using units are gaps until R5's developer-live session re-records them.
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass-2026-11')).toMatchObject({
         cases: 3, concerns: 11, matched: 9, missed: 1, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });

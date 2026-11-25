@@ -1,4 +1,11 @@
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { chooseImportTarget } from './import-page.mjs';
+import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
+import { chooseDispatch, pointerClick, EFFORT_WORDS, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
+import { chooseEffort, effortKey, effortListFacts, openEffortList, pressEffortRow, reachPress, wheelClear } from './effort-list.mjs';
+import { assertReachable, pressReachable as wheelPress } from './task-card-reach.mjs';
+import { pressEscape } from './ordinary-pages.mjs';
+import { helpReturnsHere, pressBack } from './return-places.mjs';
+import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -12,6 +19,7 @@ import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersi
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { taskCardFactsExpression } from './task-status-card.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -452,7 +460,11 @@ async function assertOrdinaryModelReachability(renderer) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
     const geometry = await renderer.evaluate(`(async () => {
-      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','input[aria-label="主编辑思考强度"]', 'input[aria-label="快速交互思考强度"]','[data-favorite-model]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
+      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','select[aria-label="思考强度"]', 'select[aria-label="较轻模型的思考强度"]','[data-favorite-model]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-action="clear-flash-model"]','select[data-flash-model]','[data-model-summary]'];
+      if(document.querySelector('[data-action="test-fast-flow-connection"]'))selectors.push('[data-action="test-fast-flow-connection"]');
+      const heading=document.querySelector('[data-flow-step="credential"] h4').getBoundingClientRect();
+      const form=document.querySelector('.model-credential-form').getBoundingClientRect();
+      if(heading.bottom>form.top+1)return {ok:false,width:innerWidth,height:innerHeight,overlap:true};
       const controls=[];
       for (const [index,selector] of selectors.entries()) {
         const native=document.querySelector(selector);
@@ -469,10 +481,20 @@ async function assertOrdinaryModelReachability(renderer) {
         controls.push({index,top:Math.round(box.top),bottom:Math.round(box.bottom),left:Math.round(box.left),right:Math.round(box.right),disabled:Number(Boolean(node.disabled)),visible:Number(visible),focused:Number(focused)});
         if(!visible||!focused)return {ok:false,width:innerWidth,height:innerHeight,controls};
       }
-      return {ok:document.documentElement.scrollWidth<=innerWidth+1,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,controls};
+      return {ok:document.documentElement.scrollWidth<=innerWidth+1,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,credentialHeading:{top:heading.top,bottom:heading.bottom},credentialForm:{top:form.top,bottom:form.bottom},controls};
     })()`);
     if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-reachability ${JSON.stringify(geometry)}`);
     requireJourney(geometry.ok, 'ordinary-model-controls-reachable', geometry);
+    // 0.8.0 stage one: at every supported size the list opens on the chosen model's own levels, 模型默认 first; no typed value exists.
+    if ((await renderer.evaluate(`document.querySelector(${JSON.stringify(MAIN_EFFORT)})?.disabled===false`)) === true) {
+      const list = await openEffortList(renderer, waitFor, requireJourney, MAIN_EFFORT, 'model-effort-list');
+      requireJourney(list.rows.length === list.values.length && list.rows.every((row, index) => row.inside && row.value === list.values[index]) &&
+        list.rows[0].value === 'off' && list.rows[0].words === EFFORT_WORDS.off && list.rows.filter(row => row.chosen).length === 1 && !list.typed &&
+        list.rows.every(row => Object.values(EFFORT_WORDS).includes(row.words)), 'model-effort-list-own-levels', list);
+      await effortKey(renderer, 'Escape');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.open===false`, 'model-effort-list-closed');
+    }
+
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
@@ -483,36 +505,103 @@ async function dispatchTab(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
 }
 
-/** #1453: role defaults are saved by the visible action, then survive leaving and reopening settings. */
+const MAIN_EFFORT = 'select[data-reasoning-effort="main"]', FAST_EFFORT = 'select[data-reasoning-effort="fast"]', LIGHT_MODEL = 'select[data-flash-model]';
+
+/**
+ * #1453 and 0.8.0 stage one, at both window sizes and by real pointer and key: a role's 思考强度 lists what its model supports
+ * and nothing else (deepseek-flash: its documented levels; the hand-typed lighter model: 模型默认 alone, with the sentence and
+ * the refresh action); another model re-reads the list and takes no level along; each role's default is saved by its own
+ * visible action, leaves the other role's alone, and is there again after 设置 is left and reopened.
+ */
 async function assertModelEffortDefaults(renderer) {
-  const original = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(settings.roles.filter(role => ['main-editorial','fast-interaction'].includes(role.roleId)).map(role => [role.roleId,role.binding?.reasoningEffort ?? 'off'])))`);
-  const save = async (role, effort) => {
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('input[data-reasoning-effort="${role}"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.focus(); input.value=${JSON.stringify(effort === 'off' ? '' : effort)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'model-effort-enter');
-    const point = await renderer.evaluate(`(async () => { const button=document.querySelector('[data-action="select-${role}-role-model"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return null; button.scrollIntoView({block:'center',behavior:'instant'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); if(!button.isConnected)return null; const box=button.getBoundingClientRect(); const x=box.left+box.width/2,y=box.top+box.height/2; return {x,y,visible:box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom && box.bottom<=innerHeight && document.elementFromPoint(x,y)===button}; })()`);
-    requireJourney(point?.visible === true, 'model-effort-save-visible');
-    await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-    const roleId = role === 'main' ? 'main-editorial' : 'fast-interaction';
-    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => (settings.roles.find(role => role.roleId===${JSON.stringify(roleId)})?.binding?.reasoningEffort ?? 'off')===${JSON.stringify(effort)})`, 'model-effort-saved');
-    await waitFor(renderer, `document.querySelector('[data-model-role="${roleId}"]')?.textContent.includes(${JSON.stringify(effort === 'off' ? '服务默认' : '@' + effort)})`, 'model-effort-role-label');
+  const bindings = () => renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(['foreground-pro','foreground-flash'].map(id => { const binding=settings.modelRoles.find(role=>role.roleId===id)?.binding; return [id, binding==null ? null : {route:binding.providerId,modelId:binding.modelId,effort:binding.reasoningEffort ?? 'off'}]; })))`);
+  const original = await bindings();
+  requireJourney(original['foreground-pro']?.modelId === 'deepseek-flash' && original['foreground-flash'] != null && original['foreground-flash'].modelId !== 'deepseek-flash', 'model-effort-starting-models', original);
+  const typedModel = original['foreground-flash'].modelId;
+  const levels = ['off', 'low', 'high', 'max'];
+  const rowsOf = (list) => JSON.stringify(list.rows.map(row => [row.value, row.words]));
+  const ownLevels = JSON.stringify(levels.map(level => [level, EFFORT_WORDS[level]]));
+  const closed = async (select, condition, name) => {
+    await waitFor(renderer, `(() => { const list=${effortListFacts(select)}; return list!==null && !list.open && (${condition}); })()`, name);
+    return renderer.evaluate(effortListFacts(select));
   };
+  // 设置 opens on 模型服务, which this page already is: the old page is marked so the wait is for the page painted afresh.
+  const reenter = async (name) => {
+    await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, `${name}-mark-old-page`);
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, name, { scroll: false });
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, `${name}-ready`);
+    await assertRenderer(renderer, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-heading-inside-window');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(MAIN_EFFORT + ' + .ui-select-trigger')}) && document.querySelector(${JSON.stringify(FAST_EFFORT + ' + .ui-select-trigger')})`, `${name}-lists-ready`);
+  };
+  const saved = (roleId, modelId, effort) => `window.ai7.getModelServiceSettings().then(settings => { const binding=settings.modelRoles.find(role=>role.roleId===${JSON.stringify(roleId)})?.binding; return binding?.modelId===${JSON.stringify(modelId)} && (binding.reasoningEffort ?? 'off')===${JSON.stringify(effort)}; })`;
   try {
     for (const [width, height] of [[1280,800],[1008,681]]) {
       if (width === 1280) at('model-effort-defaults-wide');
       else at('model-effort-defaults-gate');
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, 'model-effort-viewport');
-      await save('main', 'high');
-      await save('fast', 'low');
-      // 设置 opens on 模型服务, which this page already is: the old page is marked so the wait is for the page painted afresh.
-      await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, 'model-effort-mark-old-page');
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-effort-leave');
-      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, 'model-effort-settings-ready');
-      await waitFor(renderer, `document.querySelector('input[aria-label="主编辑思考强度"]')?.value==='high' && document.querySelector('input[aria-label="快速交互思考强度"]')?.value==='low' && document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('@high') && document.querySelector('[data-model-role="fast-interaction"]')?.textContent.includes('@low')`, 'model-effort-reopened-defaults');
-      await save('fast', 'low');
-      await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
-      await save('main', original['main-editorial']);
-      await save('fast', original['fast-interaction']);
+      await reenter('model-effort-enter');
+
+      // The main model has levels on record: exactly those are listed, in the editor's words, and 高 is saved by 使用这个模型.
+      const main = await openEffortList(renderer, waitFor, requireJourney, MAIN_EFFORT, 'model-effort-main');
+      requireJourney(rowsOf(main) === ownLevels && main.rows.every(row => row.inside) && !main.typed && main.selected === original['foreground-pro'].effort && main.note === '' && main.noteDisplay === 'none', 'model-effort-main-own-levels', main);
+      await pressEffortRow(renderer, waitFor, requireJourney, MAIN_EFFORT, 'high', 'model-effort-main-high');
+      requireJourney((await closed(MAIN_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.high)}`, 'model-effort-main-shown')).selected === 'high', 'model-effort-main-shown');
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="use-model-for-both-roles"]', 'model-effort-main-save');
+      await waitFor(renderer, saved('foreground-pro', 'deepseek-flash', 'high'), 'model-effort-saved');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS.high)} && (${effortListFacts(FAST_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS.off)}`, 'model-effort-role-label');
+
+      // Nothing is on record for the hand-typed lighter model: 模型默认 alone, the sentence in view, the refresh action usable.
+      const unknown = await openEffortList(renderer, waitFor, requireJourney, FAST_EFFORT, 'model-effort-unknown');
+      requireJourney(rowsOf(unknown) === JSON.stringify([['off', EFFORT_WORDS.off]]) && unknown.rows[0].inside && unknown.state === 'unknown' && unknown.note === EFFORT_UNKNOWN_SENTENCE && unknown.noteDisplay !== 'none' && !unknown.typed, 'model-effort-unknown-default-only', unknown);
+      await effortKey(renderer, 'Escape');
+      await closed(FAST_EFFORT, 'true', 'model-effort-unknown-closed');
+      await wheelClear(renderer, waitFor, '.model-service-optional [data-effort-note="reason"]', 'model-effort-unknown-sentence');
+      const sentence = await assertReachable(renderer, waitFor, requireJourney, '.model-service-optional [data-effort-note="reason"]', 'model-effort-unknown-sentence');
+      requireJourney(sentence.inWindow && (await renderer.evaluate(`document.querySelector('[data-action="retry-model-list"]')?.disabled===false`)) === true, 'model-effort-unknown-sentence-and-refresh', sentence);
+
+      // Another lighter model: its own list is read and 模型默认 is shown; the keyboard then takes its first level.
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, 'deepseek-flash', 'model-effort-switch');
+      let fast = await closed(FAST_EFFORT, `JSON.stringify(list.values)===${JSON.stringify(JSON.stringify(levels))}`, 'model-effort-switch-rereads');
+      requireJourney(fast.selected === 'off' && fast.shown === EFFORT_WORDS.off && fast.note === '' && !fast.typed, 'model-effort-switch-rereads', fast);
+      await effortKey(renderer, 'Tab');
+      await waitFor(renderer, `(${effortListFacts(FAST_EFFORT)})?.focused===true`, 'model-effort-keyboard-focus');
+      await wheelClear(renderer, waitFor, `${FAST_EFFORT} + .ui-select-trigger`, 'model-effort-keyboard-focus');
+      await assertReachable(renderer, waitFor, requireJourney, `${FAST_EFFORT} + .ui-select-trigger`, 'model-effort-keyboard-focus');
+      await effortKey(renderer, 'ArrowDown');
+      await waitFor(renderer, `(${effortListFacts(FAST_EFFORT)})?.open===true`, 'model-effort-keyboard-open');
+      const keyed = await renderer.evaluate(effortListFacts(FAST_EFFORT));
+      requireJourney(rowsOf(keyed) === ownLevels && keyed.rows.every(row => row.inside), 'model-effort-keyboard-list', keyed);
+      await effortKey(renderer, 'ArrowDown');
+      await effortKey(renderer, 'Enter');
+      fast = await closed(FAST_EFFORT, `list.selected==='low'`, 'model-effort-keyboard-chosen');
+      requireJourney(fast.shown === EFFORT_WORDS.low && fast.focused, 'model-effort-keyboard-chosen', fast);
+
+      // Back on the hand-typed model the level is not there; it is shown again with the model it was chosen for.
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, typedModel, 'model-effort-switch-back');
+      fast = await closed(FAST_EFFORT, `list.values.length===1`, 'model-effort-not-carried');
+      requireJourney(fast.selected === 'off' && fast.shown === EFFORT_WORDS.off && fast.note === EFFORT_UNKNOWN_SENTENCE, 'model-effort-not-carried', fast);
+      await chooseEffort(renderer, waitFor, requireJourney, LIGHT_MODEL, 'deepseek-flash', 'model-effort-switch-again');
+      fast = await closed(FAST_EFFORT, `list.values.length===${levels.length}`, 'model-effort-own-choice-returns');
+      requireJourney(fast.selected === 'low' && fast.shown === EFFORT_WORDS.low, 'model-effort-own-choice-returns', fast);
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="select-fast-role-model"]', 'model-effort-fast-save');
+      await waitFor(renderer, saved('foreground-flash', 'deepseek-flash', 'low'), 'model-effort-fast-saved');
+      requireJourney((await bindings())['foreground-pro'].effort === 'high', 'model-effort-other-role-kept');
+
+      // Leaving 设置 and opening it again keeps both defaults.
+      await reenter('model-effort-leave');
+      const reopened = [await closed(MAIN_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.high)}`, 'model-effort-reopened-defaults'), await closed(FAST_EFFORT, `list.shown===${JSON.stringify(EFFORT_WORDS.low)}`, 'model-effort-reopened-defaults')];
+      requireJourney(reopened[0].selected === 'high' && reopened[1].selected === 'low' && reopened.every(list => list.note === '' && !list.typed), 'model-effort-reopened-defaults', reopened);
+
+      // The main default goes back through its own list and action. The next stage needs the hand-typed lighter model, which left
+      // the list when no role used it: it is set again as the earlier stages set it, and the page is awaited until it shows it.
+      await chooseEffort(renderer, waitFor, requireJourney, MAIN_EFFORT, original['foreground-pro'].effort, 'model-effort-restore-main');
+      await reachPress(renderer, waitFor, requireJourney, '[data-action="use-model-for-both-roles"]', 'model-effort-restore-main-save');
+      await waitFor(renderer, saved('foreground-pro', 'deepseek-flash', original['foreground-pro'].effort), 'model-effort-restored-main');
+      await waitFor(renderer, `(${effortListFacts(MAIN_EFFORT)})?.shown===${JSON.stringify(EFFORT_WORDS[original['foreground-pro'].effort])}`, 'model-effort-restored-main-shown');
+      requireJourney(await renderer.evaluate(`window.ai7.selectFlashModel(${JSON.stringify({ route: original['foreground-flash'].route, modelId: typedModel, reasoningEffort: original['foreground-flash'].effort })}).then(()=>true)`), 'model-effort-restore-lighter');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(LIGHT_MODEL)})?.value===${JSON.stringify(typedModel)} && (${effortListFacts(FAST_EFFORT)})?.values.length===1`, 'model-effort-restore-lighter-shown');
+      requireJourney(JSON.stringify(await bindings()) === JSON.stringify(original), 'model-effort-restored', { original });
     }
   } finally {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -544,11 +633,37 @@ async function assertFirstRunGeometry(renderer, reviewExpected) {
   })()`) === true, 'first-run-card-geometry');
 }
 
-async function firstRunClick(renderer, selector, label = null) {
-  const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
+/** F1 as a real key press: 帮助 opens from any screen (#1548). */
+async function pressF1(renderer) {
+  const key = { key: 'F1', code: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+}
+
+/** A real pointer press on a control; `block: 'nearest'` leaves a control that is already in view where it is. Answers the page's scroll offset at the press. */
+async function firstRunClick(renderer, selector, label = null, block = 'center') {
+  const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:${JSON.stringify(block)}}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2,scroll:document.scrollingElement.scrollTop}; })()`);
   requireJourney(point !== null, 'first-run-pointer-target');
-  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', ...point, button:'left', clickCount:1 });
-  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', ...point, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', x:point.x, y:point.y, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', x:point.x, y:point.y, button:'left', clickCount:1 });
+  return point.scroll;
+}
+
+/**
+ * A settings page opens at its top, whatever the screen before it left scrolled (#1548 rework): the screen is scrolled down first
+ * (帮助 arrives scrolled to 第一次审稿 from the first-run card and at the top from F1), the control is pressed with the real
+ * pointer, and the page it opens has its heading inside the window and the document at offset 0 — measured by the engine.
+ */
+async function pressIntoSettingsPage(renderer, selector, pageSelector, headingSelector, name, block = 'center') {
+  await renderer.evaluate(`(async () => { const root=document.scrollingElement; root.scrollTop=Math.max(root.scrollTop,240); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); })()`);
+  requireJourney((await firstRunClick(renderer, selector, null, block)) > 0, `${name}-scrolled-before`);
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(pageSelector)})`, name);
+  await assertRenderer(renderer, `(() => { const box=document.querySelector(${JSON.stringify(headingSelector)})?.getBoundingClientRect(); return !!box && box.top>=-1 && box.bottom<=innerHeight+1 && document.scrollingElement.scrollTop===0; })()`, `${name}-at-top`);
+}
+
+/** The sentence of one 第一次审稿 step as 帮助 shows it, read before the press that leaves 帮助. */
+function helpStepSentence(renderer, key) {
+  return renderer.evaluate(`document.querySelector('[data-help-step="${key}"] .help-paragraph')?.textContent ?? null`);
 }
 
 async function click(renderer, label, name) {
@@ -580,7 +695,7 @@ async function createEmptyBook(renderer, title) {
 async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)})??document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -621,29 +736,36 @@ async function saveEdit(renderer, suffix) {
 async function saveMilestone(renderer) {
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, 'milestone-scope');
-  // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
-  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
-  await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
-  await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
-  // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
-  await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
-  // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
-  await assertRenderer(renderer, `(() => {
-    const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
-    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
-    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
-    section.open=false; outer.focus();
-    const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('ArrowDown');if(document.activeElement!==exportAction)return false;
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('End');if(document.activeElement!==exportAction)return false;
-    key('Home');if(document.activeElement!==summary)return false;
-    key('ArrowUp');if(document.activeElement!==exportAction)return false;
-    key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
-  })()`, 'milestone-collapsed-menu-keyboard');
-  await click(renderer, '保存里程碑版本', 'milestone-save');
+  const io = { renderer, waitFor, assertRenderer };
+  const outer = '[data-save-menu="manuscript"] > summary', section = '.milestone-section > summary';
+  const navigation = '[data-edge-entry="navigation"]';
+  if (!await renderer.evaluate(`document.querySelector('${navigation}')?.getAttribute('aria-expanded') === 'true'`)) {
+    await pressReachable(io, navigation, 'milestone-navigation');
+  }
+  await pressReachable(io, outer, 'milestone-open-menu');
+  await pressReachable(io, section, 'milestone-open-form');
+  await tabTo(io, '#milestone-label', 'milestone-label');
+  await renderer.send('Input.insertText', { text: 'J12 后续修订版' });
+  const purpose = '.milestone-section input[name="milestone-purpose"][value="stage-archive"]';
+  await tabTo(io, purpose, 'milestone-purpose');
+  await pressReachable(io, purpose, 'milestone-purpose');
+  await tabTo(io, '#milestone-note', 'milestone-note');
+  await renderer.send('Input.insertText', { text: '本地且离线。' });
+  await tabTo(io, section, 'milestone-return-to-summary', undefined, true);
+  await pressReachable(io, section, 'milestone-collapse-form');
+  await assertRenderer(renderer, saveMenuActionsInOrder(), 'milestone-menu-order');
+  await assertRenderer(renderer, reachable(outer), 'milestone-summary-in-window');
+  await renderer.evaluate(`document.querySelector('${outer}').focus({preventScroll:true})`);
+  const entry = '[data-import-new-version="manuscript"]', last = '.editor-save-menu-body > button:last-of-type';
+  for (const [key, selector] of [['ArrowDown',section],['ArrowDown',entry],['ArrowDown',last],['ArrowDown',section],['End',last],['Home',section],['ArrowUp',last],['Home',section]]) {
+    await pressKey(renderer, key);
+    await assertRenderer(renderer, `document.activeElement === document.querySelector('${selector}') && ${reachable(selector)}`, 'milestone-collapsed-menu-keyboard');
+  }
+  await pressKey(renderer, 'Enter');
+  await waitFor(renderer, `document.querySelector('.milestone-section')?.open && !document.querySelector('.milestone-section button')?.disabled`, 'milestone-form-reopened');
+  const save = '.milestone-section button[aria-label="保存里程碑版本"]';
+  await tabTo(io, save, 'milestone-save');
+  await pressReachable(io, save, 'milestone-save');
   await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
   // #1483: persistence can precede the editor/outline reconciliation that releases the write guard.
@@ -945,6 +1067,139 @@ async function main() {
     launchForCleanup = launch;
     const close = closeOwnedBrowser;
 
+    const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
+    if (process.platform === 'win32') {
+      at('upgrade-release-library');
+      const { createUpgradeSample1 } = await import('../tests/support/upgrade-sample1.ts');
+      const { pressUpgradeDialog } = await import('./upgrade-dialog.mjs');
+      const { cp } = await import('node:fs/promises');
+      const baseline = resolve(runRoot,'release-072');
+      const legacy = await createUpgradeSample1(baseline,checkout);
+      const seed = await legacy.openLegacy(baseline);
+      const oldPackage = resolve(runRoot,'released-library.ai7db');
+      try {
+        const preparation = await seed.prepareDatabaseExport(oldPackage,true);
+        await seed.approveDatabaseExport(preparation.preparationId,true);
+      } finally { seed.markCleanShutdown(); seed.close(); }
+      const exitProduct = async (action) => {
+        const disconnected = once(browser,'disconnected');
+        await action();
+        await awaitWithinDeadline(disconnected, Date.now() + 60_000, {timeoutError:BROWSER_CLOSE_TIMEOUT});
+        browser = undefined;
+        browserAcquisition = undefined;
+        managerForCleanup = undefined;
+      };
+      const settings = async page => {
+        await waitFor(page,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-landing');
+        await assertRenderer(page,sidebarNavigate(SIDEBAR.settings),'upgrade-settings');
+        await waitFor(page,`document.querySelector('.settings-navigation')`,'upgrade-settings-hub');
+        await click(page,'数据与存储','upgrade-settings-storage');
+        await waitFor(page,`document.querySelector('.database-import')`,'upgrade-settings-ready');
+      };
+      const pressRollback = (page, name) => reachPress(page, waitFor, requireJourney,
+        '.data-storage-summary > .source-card:first-of-type > button.secondary', name);
+      const marker = async root => JSON.parse(await readFile(join(root,'store','ai7-data-version.json'),'utf8')).dataVersion;
+      at('upgrade-failure');
+      const unreadable = resolve(runRoot,'upgrade-version-mismatch');
+      await cp(baseline,unreadable,{recursive:true});
+      const markerPath = join(unreadable, 'store', 'ai7-data-version.json');
+      const mismatched = JSON.parse(await readFile(markerPath, 'utf8'));
+      await writeFile(markerPath, JSON.stringify({ ...mismatched, schemaRevision: 115 }));
+      await launch(undefined,undefined,unreadable);
+      await exitProduct(() => pressUpgradeDialog(executable,unreadable,'书库升级','关闭',
+        '升级前的书库会安全保留。|如果备份已完成|请先用 0.7.3 打开。',true));
+      requireJourney(await marker(unreadable) === 1,'upgrade-failure-keeps-library');
+
+      const root = resolve(runRoot,'upgrade-library');
+      await cp(baseline,root,{recursive:true});
+      at('upgrade-decline');
+      await launch(undefined,undefined,root);
+      await exitProduct(() => pressUpgradeDialog(executable,root,'升级书库','关闭'));
+      requireJourney(await marker(root) === 1 && !existsSync(join(root,'shell','storage-upgrade.json')),'upgrade-declined');
+      for (const fallback of [false,true]) {
+        at('upgrade-consent');
+        const manager = await launch(undefined,undefined,root);
+        const disclosure = fallback ? '升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。' : '待升级：2 本书';
+        await pressUpgradeDialog(executable,root,'升级书库','升级',disclosure,true);
+        const progress = await findRenderer(manager, 'document.title === "正在整理书库"', 'upgrade-progress-opened');
+        await waitFor(progress, `(() => {
+          const list = [...document.querySelectorAll('ol li')];
+          return list.map(step => step.textContent).join(' → ') === '备份 → 转换 → 核对 → 切换'
+            && list.at(-1).matches('[aria-current="step"]')
+            && list.every(step => {
+              const box = step.getBoundingClientRect();
+              return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0
+                && box.right <= innerWidth && box.bottom <= innerHeight;
+            });
+        })()`, 'upgrade-progress-stages-visible');
+        await pressUpgradeDialog(executable,root,'书库升级','关闭');
+        const page = await findRenderer(manager,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-ready');
+        if (!fallback) {
+          at('upgrade-card');
+          await page.evaluate(`window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(legacy.bookId)}})`);
+          const reversed = await page.evaluate(`(async () => {
+            const binding=${JSON.stringify(legacy.binding)};
+            const view=await window.ai7.getManuscriptWindow({...binding,cursor:null});
+            const scope={...binding,bookId:view.bookId};
+            const versions=await window.ai7.listBookVersions({...scope,offset:0});
+            const saved=versions.rows.find(row=>row.label.startsWith('升级时的稿件'));
+            if(!saved) return false;
+            const reversed=await window.ai7.reverseAppliedChangeSuggestion({...binding,markId:${JSON.stringify(legacy.markId)},windowStartBlockId:view.blocks[0].blockId,clientEffectId:crypto.randomUUID()});
+            const result=await window.ai7.restoreBookVersion({...scope,revisionId:saved.revisionId,expectedBase:reversed.window.revisionId,expectedDigest:reversed.window.workingDigest});
+            return Boolean(result.stepId);
+          })()`);
+          requireJourney(reversed,'upgrade-card-and-version');
+          await close();
+          const unavailable = resolve(runRoot,'upgrade-without-sources');
+          await cp(root,unavailable,{recursive:true});
+          const keptPrefix = `store-before-${packageVersion}-`;
+          const kept = (await readdir(unavailable)).filter(name =>
+            name.startsWith(keptPrefix) && /^\d{13}-[a-f0-9-]{36}$/.test(name.slice(keptPrefix.length)));
+          requireJourney(kept.length === 1,'upgrade-retained-library');
+          await rm(join(unavailable,kept[0]),{recursive:true});
+          const recovery = await launch(undefined,undefined,unavailable);
+          const [healthy] = await waitForRendererCount(recovery,1,'upgrade-no-source-opened');
+          await settings(healthy);
+          requireJourney(await healthy.evaluate(`window.ai7.inspectDataVersion().then(v=>!v.canRollbackUpgrade && v.dataVersion===2)`),'upgrade-no-source-healthy');
+          requireJourney(await healthy.evaluate(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`),'upgrade-no-source-no-button');
+          requireJourney(!existsSync(join(unavailable,'shell','storage-upgrade.json')),'upgrade-no-source-no-restart');
+          await close();
+          at('upgrade-retained-rollback');
+          const back = await launch(undefined,undefined,root);
+          const [home] = await waitForRendererCount(back,1,'upgrade-library-reopened');
+          await settings(home);
+          await waitFor(home,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-rollback-available');
+          await pressRollback(home,'upgrade-rollback-button');
+        } else {
+          await settings(page);
+          at('upgrade-backup-rollback');
+          requireJourney(await marker(root) === 2,'upgrade-recorded');
+          await waitFor(page,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-backup-rollback-available');
+          await rm(join(root,'objects'),{recursive:true});
+          await pressRollback(page,'upgrade-backup-rollback-button');
+        }
+        await pressUpgradeDialog(executable,root,'回到升级前的数据','回到升级前的数据');
+        await exitProduct(() => pressUpgradeDialog(executable,root,'书库升级','关闭'));
+        requireJourney(await marker(root) === 1,'upgrade-rollback-installed');
+      }
+      at('upgrade-package');
+      const imported = await createCanonicalExternalDataRoot(resolve(runRoot,'release-package-import'),checkout);
+      const manager = await launch(oldPackage,undefined,imported);
+      const [page] = await waitForRendererCount(manager,1,'upgrade-import-window');
+      await settings(page);
+      await click(page,'导入数据库…','upgrade-import-select');
+      await waitFor(page,`document.querySelector('.database-import-preview')?.textContent.includes('可在导入时升级')`,'upgrade-import-old-preview');
+      await assertRenderer(page,`(() => { const choice=document.querySelector('input[name="database-import-choice"][value="replace"]'); if (!choice) return false; choice.click(); return choice.checked; })()`,'upgrade-import-replace');
+      await click(page,'按所选方式导入','upgrade-import-prepare');
+      await waitFor(page,`document.querySelector('.database-import')?.dataset.pending === 'true'`,'upgrade-import-pending');
+      await close();
+      const reopened = await launch(undefined,undefined,imported);
+      const [installed] = await waitForRendererCount(reopened,1,'upgrade-import-opened');
+      await waitFor(installed,`document.querySelector('[data-screen="landing"]')`,'upgrade-import-landing');
+      requireJourney(await installed.evaluate(`window.ai7.listBooks({after:null}).then(page=>page.items.length===2)`),'upgrade-import-books');
+      await close();
+    }
+
     at('first-run-card');
     const onboardingRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'onboarding-data'), checkout);
     let onboardingManager = await launch(syntheticDocx, undefined, onboardingRoot);
@@ -967,6 +1222,36 @@ async function main() {
     await waitFor(onboardingPage, `document.querySelector('[data-import-target-choices]')`, 'first-run-import-step-opened');
     await firstRunClick(onboardingPage, 'button', '取消导入');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-import-step-returned');
+    // #1548: the card's 帮助 opens 帮助 on 第一次审稿 with its heading focused and in view at both Gate window sizes; with no Book open
+    // the steps that act inside one say so; the model and import steps lead to their own pages.
+    at('first-run-help');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      await waitFor(onboardingPage, `innerWidth===${width} && innerHeight===${height}`, `first-run-help-size-${width}`);
+      await firstRunClick(onboardingPage, '[data-onboarding-help]');
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
+      await assertRenderer(onboardingPage, `document.activeElement===document.querySelector('[data-help-section="first-review"] h4')`, `first-run-help-heading-focused-${width}`);
+      // scrollIntoView lands on a rounded offset: a fraction of a pixel either side still counts as in view.
+      await assertRenderer(onboardingPage, `(() => { const box=document.querySelector('[data-help-section="first-review"] h4').getBoundingClientRect(); return box.top>=-1 && box.bottom<=innerHeight+1; })()`, `first-run-help-heading-in-view-${width}`);
+      await assertRenderer(onboardingPage, `(() => { const steps=Array.from(document.querySelectorAll('[data-help-step]')); return steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }); })()`, `first-run-help-steps-inside-${width}`);
+      await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, `first-run-help-no-book-steps-${width}`);
+      await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+      await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, `first-run-help-returned-${width}`);
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await pressIntoSettingsPage(onboardingPage, '[data-help-step-go="model"]', '[data-screen="model-service"]', '[data-screen="model-service"] h2', 'first-run-help-model-step');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-help-model-returned');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-import-step');
+    // #1548 rework: a switch through the settings navigation opens its page at the top as well.
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] .settings-navigation')`, 'first-run-help-nav-opened');
+    await pressIntoSettingsPage(onboardingPage, '.settings-navigation [data-settings-nav="data-storage"]', '[data-screen="data-storage"]', '[data-screen="data-storage"] h2', 'first-run-help-nav-data-storage', 'nearest');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-nav-returned');
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'first-run-settings-ready');
@@ -1008,6 +1293,58 @@ async function main() {
     await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-book-review-reopened-manuscript');
+    // #1548: F1 on the manuscript opens 帮助; with the Book open every step has its button and each lands on its destination.
+    at('first-review-help-book');
+    const helpFromManuscript = async (name) => {
+      await pressF1(onboardingPage);
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, name);
+    };
+    // A real pointer press inside the manuscript puts the caret there; only then is F1 pressed.
+    await firstRunClick(onboardingPage, '[data-testid="manuscript-editor"]');
+    await assertRenderer(onboardingPage, `document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement)===true`, 'first-review-help-focus-manuscript');
+    await helpFromManuscript('first-review-help-f1');
+    await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===5 && !document.querySelector('[data-help-step-needs-book]')`, 'first-review-help-book-steps');
+    await firstRunClick(onboardingPage, '[data-help-step-go="review"]');
+    await waitFor(onboardingPage, `document.querySelector('dialog.review-sheet')?.open===true`, 'first-review-help-review');
+    await firstRunClick(onboardingPage, '[data-review-action="close-sheet"]');
+    await helpFromManuscript('first-review-help-f1-again');
+    await firstRunClick(onboardingPage, '[data-help-step-go="process"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-findings"]')`, 'first-review-help-process');
+    await helpFromManuscript('first-review-help-f1-findings');
+    const exportSentence = await helpStepSentence(onboardingPage, 'export');
+    await firstRunClick(onboardingPage, '[data-help-step-go="export"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-deliverables"]')`, 'first-review-help-export');
+    // The sentence names the control as 交付物 shows it (#1548 rework: it said 导出… where the page has 导出 ▾).
+    await waitFor(onboardingPage, `Array.from(document.querySelectorAll('[data-screen="book-deliverables"] .export-menu > summary')).some((node)=>${JSON.stringify(exportSentence)}.includes('「'+node.textContent+'」'))`, 'first-review-help-export-label');
+    await helpFromManuscript('first-review-help-f1-deliverables');
+    const importSentence = await helpStepSentence(onboardingPage, 'import');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-import');
+    await waitFor(onboardingPage, `Array.from(document.querySelectorAll('[data-screen="landing"] button')).some((node)=>${JSON.stringify(importSentence)}.includes('「'+node.textContent+'」'))`, 'first-review-help-import-label');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-reopened-manuscript');
+    await helpFromManuscript('first-review-help-f1-model');
+    await pressIntoSettingsPage(onboardingPage, '[data-help-step-go="model"]', '[data-screen="model-service"]', '[data-screen="model-service"] h2', 'first-review-help-model');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-model-library');
+    // 0.7.9, the library since #1733: a Book's card is one control for as long as the page lists the Book. The list is refreshed
+    // around it — by the pending counts that arrive after the page, by a filter and by the filter's answer — and each refresh used
+    // to put new cards in place of the old, so a press that was down on a card just then opened nothing (this stage's
+    // intermittent failure). The card is remembered, the list is filtered and cleared by real typing and pointer, and the same
+    // card must still be the one in the page before it is wheeled into view, asserted reachable and pressed, and the Book opens.
+    const libraryNotice = `(document.querySelector('[data-toast]')?.textContent ?? '')`;
+    const bookCard = `[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]`;
+    const titleStart = await onboardingPage.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(bookCard)}); window.__j12BookCard=card; return card.querySelector('.book-card-title').textContent.slice(0,2); })()`);
+    await reachPress(onboardingPage, waitFor, requireJourney, '#book-filter-text', 'first-review-help-library-filter');
+    await onboardingPage.send('Input.insertText', { text: titleStart });
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter==='all'`, 'first-review-help-library-typed');
+    await reachPress(onboardingPage, waitFor, requireJourney, '[data-book-filter-action="find"]', 'first-review-help-library-find');
+    await waitFor(onboardingPage, `${libraryNotice}==='已列出找到的图书' && document.activeElement===document.querySelector('#book-filter-text')`, 'first-review-help-library-found');
+    await reachPress(onboardingPage, waitFor, requireJourney, '[data-book-filter-action="clear"]', 'first-review-help-library-clear');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter==='none' && ${libraryNotice}==='已显示全部图书' && !Array.from(document.querySelectorAll('.book-card-facts')).some(node=>node.textContent.includes('正在读取待处理数'))`, 'first-review-help-library-cleared');
+    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector(${JSON.stringify(bookCard)}); return card!==null && card===window.__j12BookCard && card.isConnected && document.querySelectorAll(${JSON.stringify(bookCard)}).length===1; })()`, 'first-review-help-library-card-kept');
+    await reachPress(onboardingPage, waitFor, requireJourney, bookCard, 'first-review-help-library-card');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-returned-manuscript');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-overview"]')`, 'first-book-review-returned-overview');
     at('guided-strip');
@@ -1067,7 +1404,32 @@ async function main() {
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-model-settings-ready');
-    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="use-model-for-both-roles"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('[data-model-summary]') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    // Stage-2 rework (#1547): on the first opening, with no key saved, the one highlighted sentence names only what the editor can do now.
+    // Step 2's key field is the next thing: it is inside the window and its scroller's visible box, and the point at its centre is the field itself, with no scripted scroll before.
+    requireJourney(await primary.evaluate(`(async () => {
+      const settings = await window.ai7.getModelServiceSettings();
+      const pro = settings.modelRoles.find((role) => role.roleId === 'foreground-pro');
+      const flow = document.querySelector('[data-model-service-flow]');
+      const channel = settings.channels.find((entry) => entry.channelId === flow.dataset.flowChannel);
+      const keySaved = settings.routeChoice.routes.find((route) => route.route === channel.route)?.connection?.credentialOperationState === 'ready';
+      const sentence = document.querySelector('[data-model-summary]');
+      const field = document.querySelector('.model-credential-form input[type="password"]');
+      if (pro.binding !== null || keySaved || !(field instanceof HTMLInputElement)) return false;
+      const box = field.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const header = document.querySelector('#context-header').getBoundingClientRect(), sidebar = document.querySelector('#app-sidebar').getBoundingClientRect();
+      let inScroller = true;
+      for (let parent = field.parentElement; parent !== null; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (/auto|scroll/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight) { const visible = parent.getBoundingClientRect(); inScroller = inScroller && box.top >= visible.top && box.bottom <= visible.bottom; }
+      }
+      return sentence.textContent === '尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。' &&
+        document.querySelector('[data-flow-step="credential"] h4').textContent.startsWith('2. 填写密钥并获取模型') &&
+        !field.disabled && box.width > 0 && box.height > 0 && box.top >= header.bottom && box.bottom <= innerHeight && box.left >= sidebar.right && box.right <= innerWidth && inScroller &&
+        (hit === field || field.contains(hit)) &&
+        document.querySelector('[data-action="save-channel-credential"]').textContent === '保存并获取模型' &&
+        document.querySelector('[data-action="use-model-for-both-roles"]').disabled === true;
+    })()`) === true, 'ordinary-first-run-sentence-names-the-next-step');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
     // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.
@@ -1077,13 +1439,35 @@ async function main() {
         search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
     })()`, 'ordinary-search-proxy-visible');
     await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
+    // Stage-2 rework (#1547): ordinary mode says 检索服务 on the engine's own text, never 后端, and never points the editor at the page it is on.
+    await assertRenderer(primary, `(() => {
+      const search=document.querySelector('[data-search-backends="true"]'); const text=search.textContent;
+      const always=search.querySelector('[data-action="always-use-selected-search-backend"]')?.parentElement?.textContent;
+      const source=text.slice(text.indexOf('当前生效来源：'));
+      return !text.includes('后端') && !text.includes('设置 › 联网检索') && always==='总是使用选定的检索服务' &&
+        (!source.startsWith('当前生效来源：暂不可用') || source.includes('请在下面的检索服务里，为其中一个保存密钥'));
+    })()`, 'ordinary-search-says-search-service');
     // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
     await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
     // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
-    await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
+    // #1547 retires candidate disclosure paragraphs in ordinary mode; the current source and short fallback rule stay visible.
+    requireJourney((await primary.evaluate(`(async () => {
+      const section=document.querySelector('[data-search-backends]');
+      const note=section?.querySelector(':scope > .field-note');
+      if(!(note instanceof HTMLElement))return false;
+      note.scrollIntoView({block:'center',behavior:'instant'});
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const box=note.getBoundingClientRect();
+      return box.width>0&&box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&box.bottom<=innerHeight&&box.left>=0&&box.right<=innerWidth&&
+        note.textContent.includes('当前生效来源：暂不可用')&&note.textContent.includes('当前模型渠道不自带联网搜索')&&note.textContent.includes('可设一个备用来源，出错时自动切换。')&&
+        section.querySelectorAll('[data-search-backend]').length===5&&['openai-native-search-v1','anthropic-native-search-v1'].every(id=>{
+          const card=section.querySelector('[data-search-candidate="'+id+'"]');
+          return card?.textContent.includes('未实测')&&!card.textContent.includes('自动用于随渠道检索');
+        });
+    })()`)) === true, 'ordinary-native-source-disclosure');
 
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');
@@ -1103,9 +1487,9 @@ async function main() {
     // that worked (#1519): its success clears that error, so the following page exposes its own ordinary status.
     await waitFor(primary, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('代理不可达')`, 'ordinary-proxy-probe-error-cleared');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===5 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库、本社词表'`, 'ordinary-knowledge-five-categories');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===6 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、字表与词表、审阅偏好、范例、资料库、本社词表'`, 'ordinary-knowledge-six-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
-    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
+    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录|学习回溯' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-three-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
@@ -1168,6 +1552,23 @@ async function main() {
       return Boolean(category&&scope&&text&&save)&&category.value==='style-and-format'&&category.disabled&&scope.value===''&&scope.disabled&&
         text.value===${JSON.stringify(preferenceText)}&&!save.disabled&&form.parentElement.children.length===1;
     })()`, 'ordinary-preference-edit-fields');
+    // 0.7.9 review BUG-19: an edit has a way out. 取消 (real pointer, asserted in the window before the press) and Escape (real
+    // key, from the sentence the editor is writing) each put the rule's controls back with 编辑偏好 in focus, and save nothing.
+    const preferenceCss = `[data-screen="quality-learning"] [data-editorial-memory] [data-review-preference="${createdRule.itemId}"]`;
+    const preferenceLeft = `(() => { const row=${preferenceRow(createdRule.itemId)}; const names=Array.from(row?.querySelectorAll('.preference-actions > button')??[], node=>node.textContent);
+      return Boolean(row)&&!row.querySelector('form')&&names.join(',')==='停用,编辑偏好'&&document.activeElement===row.querySelector('[data-preference-edit]')&&row.querySelector('p')?.textContent===${JSON.stringify(preferenceText)}; })()`;
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-cancel]`, 'ordinary-preference-edit-cancel');
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-cancelled');
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-reopen');
+    await waitFor(primary, `document.activeElement===${preferenceRow(createdRule.itemId)}?.querySelector('form.preference-editor textarea')`, 'ordinary-preference-edit-sentence-focus');
+    await primary.send('Input.insertText', { text: '（写到一半）' });
+    await assertRenderer(primary, `${preferenceRow(createdRule.itemId)}.querySelector('form.preference-editor textarea').value===${JSON.stringify(`${preferenceText}（写到一半）`)}`, 'ordinary-preference-edit-typed');
+    await pressEscape(primary);
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-escaped');
+    const untouchedPreference = await primary.evaluate(preferenceState(preferenceText));
+    requireJourney(untouchedPreference.items.length === 1 && untouchedPreference.directives === createdPreference.directives, 'ordinary-preference-edit-left-unsaved', untouchedPreference);
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-open-again');
+    await waitFor(primary, `${preferenceRow(createdRule.itemId)}?.querySelector('[data-preference-editor="${createdRule.itemId}"] textarea')?.value===${JSON.stringify(preferenceText)}`, 'ordinary-preference-edit-open-clean');
     await assertRenderer(primary, `(() => {
       const form=${preferenceRow(createdRule.itemId)}.querySelector('[data-preference-editor="${createdRule.itemId}"]');
       const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
@@ -1181,14 +1582,74 @@ async function main() {
     requireJourney(editedPreference.items.length === 1 && editedPreference.items[0].itemId === createdRule.itemId && editedPreference.items[0].state === 'active' &&
       editedPreference.items[0].bookId === null && editedPreference.items[0].categoryId === 'style-and-format' &&
       replacedPreference.items.every((item) => item.state !== 'active') && editedPreference.directives === directivesBeforePreference + 2, 'ordinary-preference-edited-same-rule');
-    await assertRenderer(primary, `(() => { const stop=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='停用'); if(!stop||stop.disabled)return false; stop.click(); return true; })()`, 'ordinary-preference-stop');
-    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return !row||(row.querySelectorAll('p')[1]?.textContent.endsWith('已停用')&&!Array.from(row.querySelectorAll('.preference-actions > button')).some(node=>node.textContent==='停用'||node.textContent==='编辑偏好')); })()`, 'ordinary-preference-stopped-row');
+    // Lifecycle stage proves the existing stop with real input as well.
+    at('review-preference-lifecycle');
+    const initialStop = `[data-review-preference="${createdRule.itemId}"] .preference-actions > button`;
+    await inWindowPress(primary, waitFor)(initialStop, 'lifecycle-initial-stop');
+    await waitFor(primary, `(() => { const row=document.querySelector('[data-disabled-preferences] [data-review-preference="${createdRule.itemId}"]'); return Boolean(row)&&!Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用'||button.textContent==='编辑偏好'); })()`, 'ordinary-preference-stopped-row');
     const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
     requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
-    const directivesAfterPreference = stoppedPreference.directives;
+    await reviewPreferenceLifecycle(primary, waitFor, requireJourney, createdRule.itemId);
+    const directivesAfterPreference = (await primary.evaluate(preferenceState(editedPreferenceText))).directives;
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    // #1553: ordinary mode keeps the conversation, its history and one fold of what a question may consult. The pills, the
+    // governance form, the directives, the sending preview and the habits summary are developer-only; 学习回溯 is offered because
+    // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
+    // "nothing to include"; the live choice is proved on J-16's accepted preference above.
+    // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
+    await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.textContent.includes('还没有可加入提问的审阅偏好。')===true`, 'ordinary-agent-fold-ready');
+    const ordinaryAgentSurface = `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const fold=root?.querySelector('[data-global-agent-fold="references"]');
+      return root instanceof HTMLElement && fold instanceof HTMLDetailsElement && fold.open === false &&
+        fold.querySelector(':scope > summary')?.textContent === '参考哪些书和偏好 · 已选 0 本书、0 条偏好' &&
+        fold.textContent.includes('还没有可加入提问的审阅偏好。') &&
+        fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0 &&
+        root.querySelectorAll('.global-agent-pill').length === 0 &&
+        root.querySelector('[data-global-agent-governance]') === null &&
+        root.querySelector('[data-global-agent-question-form] button[type="submit"]')?.textContent === '发送问题' &&
+        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结') &&
+        Array.from(root.querySelectorAll('button'), (node) => node.textContent).includes('学习回溯 · 停止今后使用') &&
+        !/治理|监督/u.test(root.textContent);
+    })()`;
+    await assertRenderer(primary, ordinaryAgentSurface, 'ordinary-agent-one-fold');
+    // A real pointer opens and closes the fold at both window sizes; its empty state is what the editor reads, not a dead row.
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await waitFor(primary, `innerWidth===${width} && innerHeight===${height}`, 'ordinary-agent-fold-viewport');
+      for (const open of [true, false]) {
+        const point = await primary.evaluate(`(async () => {
+          const summary=document.querySelector('[data-global-agent-fold="references"] > summary');
+          if(!(summary instanceof HTMLElement))return null;
+          summary.scrollIntoView({block:'center',behavior:'instant'});
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const box=summary.getBoundingClientRect();
+          const x=box.left+box.width/2, y=box.top+box.height/2;
+          return {x,y,visible:box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom && box.bottom<=innerHeight &&
+            box.left>=0 && box.right<=innerWidth && document.elementFromPoint(x,y)?.closest('summary')===summary};
+        })()`);
+        requireJourney(point?.visible === true, 'ordinary-agent-fold-summary-visible');
+        await primary.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await primary.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.open === ${open}`, 'ordinary-agent-fold-toggle');
+        if (open) {
+          await assertRenderer(primary, `(() => {
+            const fold=document.querySelector('[data-global-agent-fold="references"]');
+            const note=Array.from(fold?.querySelectorAll('p')??[]).find((node)=>node.textContent==='还没有可加入提问的审阅偏好。');
+            const box=note?.getBoundingClientRect();
+            return fold instanceof HTMLDetailsElement && note instanceof HTMLElement && box.width>0 && box.height>0 && box.top>=0 && box.bottom<=innerHeight &&
+              fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0;
+          })()`, 'ordinary-agent-fold-empty-readable');
+        }
+      }
+    }
+    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await primary.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
+    // #1549: the 学习回溯 button this page offers in ordinary mode opens that page, by a real pointer.
+    await pointerClick(primary, waitFor, '[data-global-agent-action="audit"]', 'ordinary-agent-audit-button');
+    await waitFor(primary, `document.querySelector('#quality-tab-audit')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-screen="quality-learning"] .learning-audit[data-learning-audit-view="list"]') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-agent-audit-opens');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
@@ -1201,6 +1662,17 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
+    // #1553: the developer layer keeps the three pills, the governance form, the directives, the sending preview and the
+    // 学习回溯 button, which is offered exactly because that page can be opened here.
+    await assertRenderer(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const buttons=Array.from(root?.querySelectorAll('button')??[], (node) => node.textContent);
+      return root instanceof HTMLElement && root.querySelector('[data-global-agent-fold]') === null &&
+        JSON.stringify(Array.from(root.querySelectorAll('.global-agent-pill'), (pill) => pill.dataset.globalAgentPill)) === JSON.stringify(['scope','governance','directives']) &&
+        root.querySelector('[data-global-agent-governance]') instanceof HTMLFormElement &&
+        root.querySelector('.global-agent-directives') instanceof HTMLElement &&
+        buttons.includes('查看将发送的内容') && buttons.includes('生成审阅习惯总结') && buttons.includes('学习回溯 · 停止今后使用');
+    })()`, 'developer-agent-pills-and-pages');
     await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === 'AI 助手'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='AI 助手' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
@@ -1706,11 +2178,11 @@ async function main() {
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
     await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
-    await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
+    await chooseImportTarget(primary, waitFor, `existing-book:${bookA}`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     // Issue #1410 item 32B: the same-Book match is chosen to begin with.
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse && (reuse instanceof HTMLInputElement ? reuse.checked : reuse.textContent.includes('沿用')); })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     // #1519: from the instant the bar appears, a press on 导入来源材料到所选图书 reaches that button — never the bar's ×. Hit-tested
@@ -1826,7 +2298,20 @@ async function main() {
       const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
-    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
+    // Stage re-check (0.7.9): while that notice is on show, right after the manuscript opens, 改稿方式 stays the control a press reaches.
+    // No scripted scroll: its rectangle is inside the window and the topmost element at its centre is the control itself; the notice,
+    // still on show and still the topmost element at its own centre (it can be hovered to keep it), lies clear of the control's box.
+    await assertRenderer(primary, `(() => {
+      const toast=document.querySelector('[data-toast]:not([hidden])'), control=document.querySelector('[data-editor-input-mode-toggle="true"]');
+      if(!(toast instanceof HTMLElement)||!(control instanceof HTMLElement))return false;
+      const c=control.getBoundingClientRect(), t=toast.getBoundingClientRect();
+      const inside=c.width>0&&c.height>0&&c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight;
+      const clear=t.width>0&&t.height>0&&t.top>=0&&t.left>=0&&t.right<=innerWidth&&(t.bottom<=c.top||t.top>=c.bottom||t.right<=c.left||t.left>=c.right);
+      const hit=document.elementFromPoint(c.left+c.width/2,c.top+c.height/2), own=document.elementFromPoint(t.left+t.width/2,t.top+t.height/2);
+      return inside && clear && control.contains(hit) && toast.contains(own);
+    })()`, 'restart-entry-notice-leaves-edit-mode-reachable');
+    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode — the level in the
+    // list's word (0.7.9): the record holds gpt-6-luna@high, the cards say gpt-6-luna@高.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-author-settings-ready');
     await click(primary, '帮助', 'model-author-help');
@@ -1837,9 +2322,9 @@ async function main() {
     await clickBook(primary, bookA, 'model-author-book');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]')`, 'model-author-anchor');
     await assertRenderer(primary, `(() => { document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`, 'model-author-comments');
-    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent==='gpt-6-luna@high'`, 'model-author-comments-label');
+    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent===${JSON.stringify(`gpt-6-luna@${EFFORT_WORDS.high}`)}`, 'model-author-comments-label');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
-    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
+    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith(${JSON.stringify(`gpt-6-luna@${EFFORT_WORDS.high} · `)}) && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
     await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
     // #1401: the first factual review offers ranges before any whole-book result; no review is started here. This launch has
     // no model adapter, route or search source, so whether 事实核查 can start is the service's own verdict: it is read and
@@ -1979,6 +2464,16 @@ async function main() {
       await click(primary, label, `return-${state}-open`);
       await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${state}-ready`);
     }
+    // 返回 from 设置 (0.7.9 review, BUG-18): its pages were visited back and forth above, and two presses still reach 审阅 — the
+    // page before the last, then the Book page 设置 was opened from. 帮助 by F1 goes back to the page it was pressed on: 审阅,
+    // and the manuscript — never 书库 or 工作概览.
+    await pressBack(primary);
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'return-settings-previous-page');
+    await pressBack(primary);
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, 'return-settings-source');
+    await helpReturnsHere(primary, waitFor, `document.querySelector('[data-screen="book-review"]') !== null`, 'return-help-review');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('manuscript')), 'return-help-manuscript-open');
+    await helpReturnsHere(primary, waitFor, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookA)}] [data-testid="manuscript-editor"]') !== null`, 'return-help-manuscript');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'return-library-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
@@ -1988,18 +2483,17 @@ async function main() {
     await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('密钥与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
     // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart. The same software reopened the data
     // after the restart, so the store keeps its one version record and has seen no software update.
-    const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
-    await waitFor(primary, `document.querySelector('.data-version')?.dataset.dataVersion === '1'`, 'data-version-read');
+    await waitFor(primary, `document.querySelector('.data-version')?.dataset.dataVersion === '2'`, 'data-version-read');
     const versionSection = await primary.evaluate(`(() => { const section = document.querySelector('.data-version'); const text = (selector) => section?.querySelector(selector)?.textContent ?? null; return [text('.data-version-software'), text('.data-version-data'), text('.data-version-state'), text('.data-version-update'), text('.data-version-history > summary'), section?.dataset.frozen ?? null]; })()`);
-    // Synchronized delta with Issue #967: Data Version 1 is frozen at the 1.0.0 development milestone boundary, and the data
-    // root carries the version marker this open wrote (ADR 0023), never a path.
-    requireJourney(JSON.stringify(versionSection) === JSON.stringify([packageVersion, '1', '数据版本 1 已冻结。',
+    // Synchronized delta with Issue #967 and #1634: the folded baseline is Data Version 2 (ADR 0105 §4), frozen as Data Version 1
+    // was, and the data root carries the version marker this open wrote (ADR 0023), never a path.
+    requireJourney(JSON.stringify(versionSection) === JSON.stringify([packageVersion, '2', '数据版本 2 已冻结。',
       '这份数据还没有经历过软件更新。', '版本记录（1）', 'true']), 'data-version-words', versionSection);
     const versionMarker = await primary.evaluate(`window.ai7.inspectDataVersion().then((version) => version.marker)`);
     requireJourney(versionMarker?.present === true && versionMarker.softwareVersion === packageVersion && typeof versionMarker.writtenAt === 'string' &&
       !JSON.stringify(versionMarker).includes(JSON.stringify(dataRoot).slice(1, -1)), 'data-version-marker', versionMarker);
     const markerFile = JSON.parse(await readFile(resolve(dataRoot, 'store', 'ai7-data-version.json'), 'utf8'));
-    requireJourney(markerFile.dataVersion === 1 && markerFile.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && markerFile.softwareVersion === packageVersion &&
+    requireJourney(markerFile.dataVersion === 2 && markerFile.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && markerFile.softwareVersion === packageVersion &&
       Object.keys(markerFile).sort().join(',') === 'dataVersion,schemaRevision,softwareVersion,writtenAt', 'data-version-marker-file', markerFile);
     await primary.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
     await primary.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
@@ -2029,8 +2523,8 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 205 &&
+    // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 2, the schema revision the store's own.
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 2 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 206 &&
       diagnosticsSummary.policySetVersion === 'no-policy-lock' && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -2053,7 +2547,7 @@ async function main() {
       const screen=document.querySelector('.model-service-settings');
       const roles=Array.from(screen.querySelectorAll('[data-model-role]'));
       const technical=screen.querySelector('.model-service-technical');
-      return roles.length===2 && roles.every(node=>['main-editorial','fast-interaction'].includes(node.dataset.modelRole)) &&
+      return roles.length===4 && roles.every(node=>['main-editorial','fast-interaction','underlying-pro','underlying-flash'].includes(node.dataset.modelRole)) &&
         !screen.querySelector('.model-role-grid') && screen.querySelectorAll('[data-model-route]').length===1 &&
         technical instanceof HTMLDetailsElement && (!technical.open || technical.hidden) && ['查看技术详情','记录信息'].includes(technical.querySelector('summary')?.textContent) &&
         technical.querySelector('[data-policy-integrity-state="verified"]') && screen.dataset.providerTransmissionCount==='0';
@@ -2158,15 +2652,42 @@ async function main() {
         !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
       let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
       const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
-      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
+      // #1620: the first key chose no Flash model, so the Flash roles follow the Pro model the editor just chose.
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-main')return false;
       settings=await window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-fast'});
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`), 'independent-role-models-without-test');
+    // #1620: the Pro / Flash requests beside the 0.7.3 ones; the four roles say where their model comes from, and Flash follows Pro once cleared.
+    requireJourney(await primary.evaluate(`(async () => {
+      let settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'j12-tier-flash'});
+      const role=(id)=>settings.modelRoles.find(item=>item.roleId===id);
+      if(settings.modelRoles.map(item=>item.roleId).join(',')!=='foreground-pro,foreground-flash,underlying-pro,underlying-flash')return false;
+      if(role('foreground-flash')?.binding?.modelId!=='j12-tier-flash'||role('foreground-pro')?.binding?.modelId!=='deepseek-flash')return false;
+      if(role('underlying-flash')?.source!=='channel-recommended-flash'||role('underlying-flash').binding?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.selectUnderlyingModel({roleId:'underlying-flash',route:'deepseek-open-platform',modelId:'j12-underlying-flash'});
+      if(role('underlying-flash')?.binding?.modelId!=='j12-underlying-flash'||role('foreground-flash')?.binding?.modelId!=='j12-tier-flash')return false;
+      settings=await window.ai7.selectUnderlyingModel({roleId:'underlying-flash',inherit:true});
+      if(role('underlying-flash')?.source!=='channel-recommended-flash')return false;
+      settings=await window.ai7.clearFlashModel();
+      if(role('foreground-flash')?.source!=='follows-foreground-pro'||role('foreground-flash').sourceLabel!=='跟随前台 Pro'||role('foreground-flash').binding?.modelId!=='deepseek-flash')return false;
+      await window.ai7.selectProModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      return role('foreground-flash')?.source==='flash-tier'&&settings.roles.find(item=>item.roleId==='fast-interaction')?.binding?.modelId==='deepseek-flash';
+    })()`) === true, 'tier-model-requests');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(!(refresh instanceof HTMLButtonElement)||refresh.disabled||refresh.textContent!=='刷新模型列表')return false; refresh.click(); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
+    // The provider-free catalogue has only its offline default until the editor adds a custom choice.
+    // Seed a distinct choice through the existing developer field, so ordinary-mode selection has two real entries.
+    await pointerClick(primary, waitFor, '[data-custom-flash-model-id]', 'model-choice-seed-field');
+    await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+    await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+    await primary.send('Input.insertText', {text:'j12-choice-alternative'});
+    await primary.evaluate(`document.querySelector('.model-service-settings').dataset.choiceSeedOld='true'`);
+    await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-seed-save');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-flash').binding.modelId==='j12-choice-alternative'&&document.querySelector('.model-service-settings:not([data-choice-seed-old]) select[data-flash-model]')?.value==='j12-choice-alternative';})()`, 'model-choice-seed-saved');
     // #1372: ordinary-mode configuration uses the same role, refresh, filter and persisted favourite operations.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-catalogue-settings-ready');
@@ -2175,17 +2696,17 @@ async function main() {
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-catalogue-mode-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-return-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-catalogue-return-ready');
-    await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelectorAll('[data-model-role]').length===2`, 'ordinary-catalogue-roles');
+    await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelector('[data-model-summary]')`, 'ordinary-catalogue-roles');
     await assertProgressiveSelect(primary);
-    await primary.evaluate(`globalThis.__j12PollOriginalRole=document.querySelector('[data-model-role="main-editorial"]').textContent`);
+    await primary.evaluate(`globalThis.__j12PollOriginalRole=document.querySelector('[data-model-summary]').textContent`);
     for (let cycle=0;cycle<2;cycle++) {
-      await assertRenderer(primary, `(() => {const heading=document.querySelector('[data-search-backends] h3');heading.focus();globalThis.__j12PollSettings=document.querySelector('.model-service-settings');globalThis.__j12PollRole=document.querySelector('[data-model-role="main-editorial"]').textContent;return document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'ordinary-poll-catalogue-focus');
+      await assertRenderer(primary, `(() => {const heading=document.querySelector('[data-search-backends] h3');heading.focus();globalThis.__j12PollSettings=document.querySelector('.model-service-settings');globalThis.__j12PollRole=document.querySelector('[data-model-summary]').textContent;return document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'ordinary-poll-catalogue-focus');
       await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-poll-main-'+cycle)}})`);
       await new Promise(resolve=>setTimeout(resolve,2200));
-      await waitFor(primary, `document.querySelector('.model-service-settings')!==globalThis.__j12PollSettings && document.querySelector('[data-model-role="main-editorial"]')?.textContent!==globalThis.__j12PollRole && document.activeElement===document.querySelector('[data-search-backends] h3')`, 'ordinary-poll-catalogue-changed-paint');
+      await waitFor(primary, `document.querySelector('.model-service-settings')!==globalThis.__j12PollSettings && document.querySelector('[data-model-summary]')?.textContent!==globalThis.__j12PollRole && document.activeElement===document.querySelector('[data-search-backends] h3')`, 'ordinary-poll-catalogue-changed-paint');
     }
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-poll-catalogue-restored');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-poll-catalogue-restored');
     // #1376 review F2: use the real model control, augmenting only its options with public synthetic labels.
     requireJourney(await primary.evaluate(`(async()=>{
       const owner=document.querySelector('.model-service-settings'),select=owner?.querySelector('select[aria-label="AI7 使用的模型"]');
@@ -2204,10 +2725,10 @@ async function main() {
       await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;return s.owner===document.querySelector('.model-service-settings')&&s.select.isConnected&&!s.popup.hidden&&s.trigger.getAttribute('aria-expanded')==='true'&&s.filter.value==='公开'&&document.activeElement===s.filter&&s.filter.selectionStart===0&&s.filter.selectionEnd===1&&s.list.scrollTop===128&&s.select.value===s.value;})()`, 'ordinary-select-filter-caret-scroll-poll-survival');
     }
     await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;s.filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return s.popup.hidden&&document.activeElement===s.trigger;})()`, 'ordinary-select-escape-trigger-focus');
-    await waitFor(primary, `(()=>{const s=globalThis.__j12OpenSelect,owner=document.querySelector('.model-service-settings'),native=owner?.querySelector('select[aria-label="AI7 使用的模型"]'),trigger=native?.nextElementSibling;return owner!==s.owner&&native?.value===s.value&&trigger?.matches('.ui-select-trigger')&&document.activeElement===trigger&&trigger.getAttribute('aria-expanded')==='false'&&document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('J12 Popup Poll 1');})()`, 'ordinary-select-latest-projection-trigger-focus');
+    await waitFor(primary, `(()=>{const s=globalThis.__j12OpenSelect,owner=document.querySelector('.model-service-settings'),native=owner?.querySelector('select[aria-label="AI7 使用的模型"]'),trigger=native?.nextElementSibling;return owner!==s.owner&&native?.value===s.value&&trigger?.matches('.ui-select-trigger')&&document.activeElement===trigger&&trigger.getAttribute('aria-expanded')==='false'&&document.querySelector('[data-model-summary]')?.textContent.includes('J12 Popup Poll 1');})()`, 'ordinary-select-latest-projection-trigger-focus');
     await primary.evaluate(`globalThis.__j12AfterCloseOwner=document.querySelector('.model-service-settings')`);
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
-    await waitFor(primary, `(()=>{const native=document.querySelector('select[aria-label="AI7 使用的模型"]');return document.querySelector('.model-service-settings')!==globalThis.__j12AfterCloseOwner&&document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole&&native?.value===globalThis.__j12OpenSelect.value&&document.activeElement===native?.nextElementSibling;})()`, 'ordinary-select-poll-role-restored');
+    await waitFor(primary, `(()=>{const native=document.querySelector('select[aria-label="AI7 使用的模型"]');return document.querySelector('.model-service-settings')!==globalThis.__j12AfterCloseOwner&&document.querySelector('[data-model-summary]')?.textContent===globalThis.__j12PollOriginalRole&&native?.value===globalThis.__j12OpenSelect.value&&document.activeElement===native?.nextElementSibling;})()`, 'ordinary-select-poll-role-restored');
     await primary.evaluate(`delete globalThis.__j12OpenSelect;delete globalThis.__j12AfterCloseOwner`);
     await assertRenderer(primary, `(() => {const mode=document.querySelector('select[aria-label="网络代理方式"]');mode.value='proxy';mode.dispatchEvent(new Event('change',{bubbles:true}));const input=document.querySelector('input[aria-label="代理 URL"]');input.value='http://127.0.0.1:1';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(7,12,'backward');globalThis.__j12PollDraft=input;return true;})()`, 'ordinary-poll-draft-focus');
     for (let cycle=0;cycle<2;cycle++) {
@@ -2222,6 +2743,65 @@ async function main() {
     await waitFor(primary, `document.querySelector('select[aria-label="网络代理方式"]')?.value==='direct' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash'`, 'ordinary-poll-draft-cleared');
     await assertOrdinaryModelReachability(primary);
     await assertModelEffortDefaults(primary);
+    at('model-one-model-setup');
+    await primary.evaluate(`document.querySelector('.model-service-settings').dataset.choiceEntryOld='true'`);
+    await pointerClick(primary, waitFor, SIDEBAR.settings, 'model-choice-entry');
+    await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelector('.model-service-settings:not([data-choice-entry-old])')`, 'model-choice-entry-ready');
+    await assertRenderer(primary, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-choice-heading-visible');
+    await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-clear');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型') && !document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-one-sentence');
+    const chooseModel = async (id, lighter = false) => {
+      const selector = lighter ? 'select[data-flash-model]' : 'select[aria-label="AI7 使用的模型"]';
+      const index = await primary.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex(option=>option.value===${JSON.stringify(id)})`);
+      requireJourney(index>=0, 'model-choice-offered');
+      await pointerClick(primary, waitFor, selector + ' + .ui-select-trigger', 'model-choice-open');
+      if (!lighter) requireJourney((await primary.evaluate(`(() => {
+        const expected=Array.from(document.querySelector('select[aria-label="AI7 使用的模型"]').querySelectorAll('optgroup')).map(group=>group.label);
+        const groups=Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) [role="group"]'));
+        return expected.length>0&&JSON.stringify(groups.map(group=>group.getAttribute('aria-label')))===JSON.stringify(expected)&&groups.every(group=>{
+          const heading=group.querySelector('.field-note'),box=heading.getBoundingClientRect();
+          return heading.textContent===group.getAttribute('aria-label')&&box.width>0&&box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&box.bottom<=innerHeight;
+        });
+      })()`)) === true, 'model-choice-recommendation-visible');
+      // Small catalogues have no search field. Arrow keys navigate the actual popup in either form.
+      for (const key of ['ArrowDown', 'ArrowUp']) {
+        await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key});
+        await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key});
+      }
+      await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
+    };
+    if (localDebugEnabled()) recordDebugDetail('J-12', `model-choice-catalogue ${JSON.stringify(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.map(model=>({modelId:model.modelId,main:model.main,fast:model.fast})))`))}`);
+    const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash')?.modelId ?? null)`);
+    requireJourney(typeof alternative==='string', 'model-choice-alternative-offered');
+    const flashBefore = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`);
+    await chooseModel(alternative);
+    await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'model-choice-use');
+    await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId===${JSON.stringify(alternative)})`, 'model-choice-primary-saved');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`))===flashBefore, 'model-choice-primary-keeps-light');
+    await chooseModel('deepseek-flash', true);
+    await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：') && document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-two-sentence');
+    // BUG-11: the lighter model has its own test control and its own result line beside it, apart from the main model's. A
+    // provider-free run refuses a connection test before anything is sent, so there is no result to show: the stage proves the
+    // control is reachable and pressed for real, that the refusal is said, and that neither result line took the other's place.
+    const TEST_PLACES = `(() => { const light=document.querySelector('[data-action="test-fast-flow-connection"]'), main=document.querySelector('[data-action="test-flow-connection"]');
+      const lightLine=document.querySelector('.model-service-optional [data-flash-connection-test]'), mainLine=document.querySelector('.model-service-flow-test .model-service-flow-feedback');
+      return light instanceof HTMLButtonElement && main instanceof HTMLButtonElement && !light.disabled && !main.disabled && lightLine instanceof HTMLElement && mainLine instanceof HTMLElement &&
+        light.nextElementSibling===lightLine && !mainLine.contains(lightLine) && lightLine.textContent==='' && document.querySelector('[data-connection-test-outcome]')===null; })()`;
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places');
+    await reachPress(primary, waitFor, requireJourney, '[data-action="test-fast-flow-connection"]', 'model-choice-light-test');
+    await waitFor(primary, `(() => { const bar=document.querySelector('#persistence-status'); return bar?.dataset.tone==='error' && !bar.hidden && bar.textContent!=='' && !bar.textContent.includes('正在测试连接'); })()`, 'model-choice-light-test-refused');
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places-kept');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.every(route=>(route.connection?.connectionTests??[]).length===0))`)) === true, 'model-choice-no-test-recorded');
+    await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
+    await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');
+    await chooseModel('deepseek-flash');
+    await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'model-choice-restore-primary');
+    await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId==='deepseek-flash')`, 'model-choice-primary-restored');
+    await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-restore-light');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-flash').source==='flash-tier' && document.querySelector('[data-action="clear-flash-model"]')?.disabled===false;})()`, 'model-choice-light-restored');
+
     await assertRenderer(primary, `(() => {
       const select=document.querySelector('select[aria-label="AI7 使用的模型"]');
       const filter=document.querySelector('input[aria-label="筛选模型"]');
@@ -2251,15 +2831,17 @@ async function main() {
     // A manual model ID per role is the developer layer's (#1431 item 97): the role assignments run here, in developer mode.
     await fill(primary, '[data-custom-model-id]', 'j12-ordinary-main', 'ordinary-custom-model');
     await assertRenderer(primary, `(() => { const button=document.querySelector('[data-action="select-main-role-model"]'); if(button.disabled)return false; button.click(); return true; })()`, 'ordinary-main-role');
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent.match(/J12 Ordinary Main|j12-ordinary-main/u)`, 'ordinary-main-visible');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.match(/J12 Ordinary Main|j12-ordinary-main/u)`, 'ordinary-main-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j12-ordinary-main' && settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='deepseek-flash')`), 'ordinary-main-independent');
-    await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'ordinary-fast-model');
+    await fill(primary, '[data-custom-flash-model-id]', 'j12-ordinary-fast', 'ordinary-fast-model');
     await assertRenderer(primary, `(() => { document.querySelector('[data-action="select-fast-role-model"]').click(); return true; })()`, 'ordinary-fast-role');
-    await waitFor(primary, `document.querySelector('[data-model-role="fast-interaction"]')?.textContent.match(/J12 Ordinary Fast|j12-ordinary-fast/u)`, 'ordinary-fast-visible');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.match(/J12 Ordinary Fast|j12-ordinary-fast/u)`, 'ordinary-fast-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j12-ordinary-main' && settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`), 'ordinary-fast-independent');
     await fill(primary, '[data-custom-model-id]', 'deepseek-flash', 'ordinary-shared-model');
-    await assertRenderer(primary, `(() => { document.querySelector('[data-action="use-model-for-both-roles"]').click(); return true; })()`, 'ordinary-shared-role');
-    await waitFor(primary, `document.querySelector('.model-service-current-roles') && !document.querySelector('.model-service-current-roles').textContent.match(/J12 Ordinary|j12-ordinary/u)`, 'ordinary-shared-role-visible');
+    await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'ordinary-shared-role');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId==='deepseek-flash' && document.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true;})()`, 'ordinary-shared-primary-saved');
+    await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'ordinary-shared-clear-second');
+    await waitFor(primary, `document.querySelector('[data-model-summary]') && !document.querySelector('[data-model-summary]').textContent.match(/J12 Ordinary|j12-ordinary/u)`, 'ordinary-shared-role-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.filter(role=>['main-editorial','fast-interaction'].includes(role.roleId)).every(role=>role.binding?.modelId==='deepseek-flash'))`), 'ordinary-shared-role-saved');
     await assertProgressiveSelect(primary);
     at('model-service-search-backends');
@@ -2302,7 +2884,7 @@ async function main() {
     requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
     await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
       const card=document.querySelector('[data-search-candidate="'+id+'"]');
-      return card?.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+      return card?.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.textContent.includes('自动用于随渠道检索') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
     })`, 'search-native-candidates-disclosed');
     await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
     requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
@@ -2486,7 +3068,7 @@ async function main() {
     const packaged = unzipSync(await readFile(databaseExportPath));
     const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
     requireJourney(
-      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION &&
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 2 && manifest.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION &&
         manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
@@ -2551,7 +3133,7 @@ async function main() {
     requireJourney(
       Array.isArray(previewRows) && JSON.stringify(previewRows.map((row) => row[0])) === JSON.stringify(['文件', '来源', '版本', '内容', '完整性']) &&
         previewRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && previewRows[1][1].startsWith('导出数据库 · ') &&
-        /^数据版本 1 · 与本机相同 · 软件 \d+\.\d+\.\d+/u.test(previewRows[2][1]) && previewRows[3][1].startsWith(`${booksShown} 本图书 · `) &&
+        /^数据版本 2 · 与本机相同 · 软件 \d+\.\d+\.\d+/u.test(previewRows[2][1]) && previewRows[3][1].startsWith(`${booksShown} 本图书 · `) &&
         /^已逐项核对 \d+ 个文件，完整$/u.test(previewRows[4][1]),
       'database-import-preview-words',
       previewRows,
@@ -2776,7 +3358,7 @@ async function main() {
         credentialMutationReached = true; productCredentialCleanupSucceeded = false;
         await click(primary, '保存并获取模型', 'dispatch-credential-save');
         await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-credential-ready');
-        await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
+        await fill(primary, '[data-custom-flash-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
         await assertRenderer(primary, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-alternative-save');
         await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`, 'dispatch-alternative-ready');
         const defaults = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
@@ -2799,9 +3381,16 @@ async function main() {
         requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
         const beforeChoice = await primary.evaluate(`document.querySelector('[data-task-launch-kind] .dispatch-chooser summary').textContent`);
         if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
-        const picked = await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer',
-          width === 1008 ? { model: 'next' } : { model: 'j12-ordinary-fast' });
-        requireJourney(picked.includes('@') && (width===1008 || picked.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        // 0.8.0 stage one: the hand-typed model offers 模型默认 alone, with the sentence in view; the model with levels on record lists its
+        // own, 模型默认 is what it shows after the change (no level moves with the model), and the chosen level is the Task's alone.
+        const flashLabel = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.modelId==='deepseek-flash').modelLabel)`);
+        let unknownSeen = null, levelSeen = null;
+        const unknownLabel = await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-unknown-pointer', { model: 'j12-ordinary-fast', seen: (facts) => { unknownSeen = facts; } });
+        requireJourney(unknownLabel.includes('j12-ordinary-fast') && !unknownLabel.includes('@') && JSON.stringify(unknownSeen.values) === '["off"]' && unknownSeen.selected === 'off' &&
+          unknownSeen.shown === EFFORT_WORDS.off && unknownSeen.note === EFFORT_UNKNOWN_SENTENCE && unknownSeen.noteInside === true, 'dispatch-unknown-model-default-only', unknownSeen);
+        const picked = width === 1008 ? unknownLabel : await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-pointer', { model: flashLabel, effort: 'high', seen: (facts) => { levelSeen = facts; } });
+        if (width === 1280) requireJourney(picked.includes(`${flashLabel}@${EFFORT_WORDS.high}`) && !picked.includes('@high') && JSON.stringify(levelSeen.values) === '["off","low","high","max"]' && JSON.stringify(levelSeen.labels) === JSON.stringify(['off', 'low', 'high', 'max'].map(level => EFFORT_WORDS[level])) &&
+          levelSeen.selected === 'high' && levelSeen.shown === EFFORT_WORDS.high && levelSeen.note === '' && levelSeen.noteDisplay === 'none', 'dispatch-chosen-model-and-level', levelSeen);
         const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '[data-task-launch-kind] .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
         if (width === 1280) rememberedLabel = chosen.label;
         await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });
@@ -2812,6 +3401,10 @@ async function main() {
         if (width === 1008) requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(preferences.values['model.dispatchChoices']['baseline-analysis'])==='{}')`), 'dispatch-restores-default');
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-tasks');
         await waitFor(primary, `Array.from(document.querySelectorAll('.task-overview-model')).some(node=>node.textContent===${JSON.stringify(label)})`, 'dispatch-frozen-task-row');
+        // The card names that model after the word 模型, apart from the time and the working time before it (stage-4/5 R3).
+        const frozenFacts = await primary.evaluate(taskCardFactsExpression(`Array.from(document.querySelectorAll('.task-overview-model')).find(node=>node.textContent===${JSON.stringify(label)})?.closest('.task-overview-card')`, label));
+        console.log(`TASK_CARD_FACTS/${width}/${JSON.stringify(frozenFacts)}`);
+        requireJourney(frozenFacts !== null && frozenFacts.apart === true && frozenFacts.sentence === true && frozenFacts.model === true && frozenFacts.inCard === true, 'dispatch-frozen-task-row-facts', frozenFacts);
       }
     } finally { await primary.send('Emulation.clearDeviceMetricsOverride'); }
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');

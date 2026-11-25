@@ -1,4 +1,3 @@
-import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * The chapter-level Reimport Comparison's relations (Issue #412, plan slice S63; V2-UX-IMP-041 to IMP-043, IMP-057).
@@ -8,11 +7,12 @@ import type { DatabaseSync } from 'node:sqlite';
  *   comparison without one was prepared before this revision; its review is prepared again, never guessed at.
  * - `manuscript_reimport_groups` and `manuscript_reimport_group_members`: each run of changed blocks between two exact
  *   ones, with the mappings on each side — written once, when the comparison is prepared.
- * - `manuscript_reimport_group_resolutions`: the one verb the editor chose for a group, recorded with the identities it
+ * - `manuscript_reimport_group_resolutions`: the current verb the editor chose for a group, recorded with the identities it
  *   wrote into `manuscript_reimport_mapping_resolutions`, which the commit reads as before.
  * - `manuscript_reimport_mark_outcomes`: for a changed reimport, each editorial mark of a changed group — followed to
  *   its words in the new paragraphs, or listed as unable to follow — beside the Manuscript Reimport Record.
  *
+ * Until commit, a re-choice atomically replaces only its group and mapping resolution work; it records no decision history.
  * A review that is invalidated takes its comparison with it, so the first four cascade from the comparison; an
  * outcome stays with the record it belongs to.
  */
@@ -68,50 +68,9 @@ export const REIMPORT_GROUP_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-/** The foreign keys of the five relations, in the exact-schema validator's own spelling. */
-export const REIMPORT_GROUP_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  manuscript_reimport_group_sets: ['comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE'],
-  manuscript_reimport_groups: ['comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE'],
-  manuscript_reimport_group_members: [
-    'group_id>manuscript_reimport_groups.group_id:NO ACTION/CASCADE/NONE',
-    'mapping_id>manuscript_reimport_mappings.mapping_id:NO ACTION/CASCADE/NONE',
-  ],
-  manuscript_reimport_group_resolutions: [
-    'group_id>manuscript_reimport_groups.group_id:NO ACTION/CASCADE/NONE',
-    'comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE',
-  ],
-  manuscript_reimport_mark_outcomes: [
-    'reimport_record_id>manuscript_reimport_records.reimport_record_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
 export class ReimportGroupSchemaError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'ReimportGroupSchemaError';
-  }
-}
-
-/**
- * Revision 36's relations, created once and never rebuilt: a store that predates them gains five empty relations and
- * nothing existing moves. A comparison it already holds has no group set, so its review is prepared again when it is
- * next read. Shape-detected, and run before the version is stamped in `task-authorization.ts`.
- */
-export function initializeReimportGroupSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_reimport_group_sets'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(REIMPORT_GROUP_SCHEMA_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Reimport group schema rollback failed.');
-    }
-    throw error;
-  }
-  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
-    throw new ReimportGroupSchemaError('SCHEMA_INVALID', '重新导入章节对应的关系与已有记录不一致。');
   }
 }

@@ -108,26 +108,32 @@ describe('润色这段 across paragraphs', () => {
     expect(groupOf(polish.markIds[2]!)).toBeNull();
   }, 300_000);
 
-  it('applies the group as one Effect across its paragraphs, which 撤销 steps over and the governed reversal takes back whole', async () => {
+  it('applies the group as one Effect across its paragraphs, which Ctrl+Z and the governed reversal each take back whole (#1654)', async () => {
     const { blocks, selection } = acrossThree();
     const [a, b, c] = blocks;
     const requests = polishOn([{ original: `${tail(a.text, 2)}\n${head(b.text, 2)}`, replacement: '〔甲〕\n〔乙〕', reason: '跨段' }], spanRequestDigest(blocks, selection));
     const [first, second] = (await settled(requests, requests.polish(book.bookId, { selection }))).markIds as [string, string];
     expect(() => store.applyChangeSuggestion({ ...binding(), markId: first, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null }))
       .toThrow(expect.objectContaining({ code: 'PROPOSAL_ATOMIC_SCOPE' }));
-    // An edit of another paragraph before the Apply, so 撤销 has something of its own to take back.
+    // An edit of another paragraph before the Apply: Ctrl+Z takes back the Apply first, the typing only after it (#1654).
     const later = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.find((block) => block.kind === 'paragraph' && block.position > c.position)!;
     typeInto(store, book, later.blockId, 0, 0, '〔前〕');
     const applied = store.applyChangeSuggestionBatch({ ...binding(), markIds: [first, second], clientEffectId: randomUUID() });
     expect(applied.application).toMatchObject({ kind: 'apply', changeCount: 2 });
     expect(applied.application.after.journalSequence).toBe(applied.application.before.journalSequence + 1);
     expect([textOf(a.blockId).endsWith('〔甲〕'), textOf(b.blockId).startsWith('〔乙〕'), textOf(c.blockId) === c.text]).toEqual([true, true, true]);
-    store.undoManuscript(book.manuscriptId, book.branchId, store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest);
-    expect(textOf(later.blockId)).toBe(later.text);
+    const digest = (): string => store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+    store.undoManuscript(book.manuscriptId, book.branchId, digest());
+    expect([textOf(a.blockId), textOf(b.blockId)]).toEqual([a.text, b.text]);
+    expect(textOf(later.blockId).startsWith('〔前〕')).toBe(true);
+    // Redo applies the group again, as one new Effect; the card's governed reversal then takes that one back whole.
+    store.redoManuscript(book.manuscriptId, book.branchId, digest());
     expect([textOf(a.blockId).endsWith('〔甲〕'), textOf(b.blockId).startsWith('〔乙〕')]).toEqual([true, true]);
     const reversed = store.reverseAppliedChangeSuggestion({ ...binding(), markId: second, clientEffectId: randomUUID() });
-    expect(reversed.application).toMatchObject({ kind: 'reverse-apply', changeCount: 2, reversesEffectId: applied.application.effectId });
+    expect(reversed.application).toMatchObject({ kind: 'reverse-apply', changeCount: 2 });
+    expect(reversed.application.reversesEffectId).not.toBe(applied.application.effectId);
     expect([textOf(a.blockId), textOf(b.blockId)]).toEqual([a.text, b.text]);
+    expect(textOf(later.blockId).startsWith('〔前〕')).toBe(true);
   }, 300_000);
 
   it('refuses a span whose interior paragraph was edited since, by its place, before anything is sent', async () => {

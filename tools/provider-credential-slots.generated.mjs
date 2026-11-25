@@ -4,8 +4,7 @@
 
 /**
  * [slot, development Credential Reference], one per configured provider whose document fixes one (ADR 0073 §4). A slot
- * here is a place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067), and
- * every other slot waits for a record that names it (ADR 0073 §5 authorizes no credential; ADR 0080 §5 「先支持后添加key」).
+ * here is a place for a key. Enrollment requires separate authorization, as in ADR 0067 and ADR 0108.
  */
 export const DEVELOPMENT_CREDENTIAL_SLOTS = Object.freeze([
   Object.freeze(['alibaba-model-studio', '41bfff73-4c97-44b2-a88c-ef51b208d589']),

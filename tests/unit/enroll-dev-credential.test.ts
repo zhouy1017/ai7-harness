@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -33,7 +35,7 @@ type Helper = {
   resolveCheckReading: (credentialReference: string, deps?: CheckDependencies) => Promise<'present' | 'absent' | 'unavailable'>;
   storeEnrollment: (argv: string[], deps: {
     env: NodeJS.ProcessEnv; platform: NodeJS.Platform; architecture: string;
-    readSecret: (path: string) => Promise<string>;
+    readSecret?: (path: string) => Promise<string>;
     spawn?: (...args: unknown[]) => unknown;
     readStdinSecret?: () => Promise<string>;
     importKeyring: () => Promise<{ AsyncEntry: new (service: string, account: string) => { setPassword: (value: string) => Promise<void> } }>;
@@ -197,6 +199,9 @@ describe('parseEnrollmentArguments', () => {
       ['--slot', 'opencode-go', '--slot', 'opencode-go', '--from-file', ABSOLUTE],
       ['--slot', 'opencode-go', '--from-file'],
       ['--slot', 'opencode-go', '--from-file', ABSOLUTE, '--secret', 'x'],
+      ['--slot', 'opencode-go', '--check', '--label', 'opencodego'],
+      ['--slot', 'opencode-go', '--credential-reference', randomUUID(), '--from-stdin', '--label', 'opencodego'],
+      ['--slot', 'opencode-go', '--credential-reference', randomUUID(), '--delete', '--label', 'opencodego'],
       ['--from-file', ABSOLUTE],
     ]) {
       expect(() => helper.parseEnrollmentArguments(argv), argv.join(' ')).toThrowError(/AI7_ENROLLMENT_INVALID/u);
@@ -209,6 +214,61 @@ describe('parseEnrollmentArguments', () => {
     expect(helper.continuousIntegrationPresent({ GITHUB_ACTIONS: 'true' })).toBe(true);
     expect(helper.continuousIntegrationPresent({ AI7_E2E_JOURNEY: 'J-04' })).toBe(true);
   });
+});
+
+describe('labelled credential files', () => {
+  it.each([
+    ['google-gemini', 'gemini', '='],
+    ['opencode-go', 'opencodego', ':'],
+    ['openai-platform', 'openai', '='],
+    ['anthropic-claude', 'claude', ':'],
+  ])('selects one labelled line for either %s reference form', async (slot, label, separator) => {
+    const directory = await mkdtemp(join(tmpdir(), 'ai7-enrollment-'));
+    try {
+      const input = join(directory, 'synthetic-input.txt');
+      await writeFile(input, `other: wrong-value\r\n \t${label} \t${separator} synthetic:value=tail \t\r\n`);
+      const setPassword = vi.fn(async (_value: string) => undefined);
+      const args = ['--slot', slot, '--from-file', input, '--label', label];
+      const deps = { env: {}, ...SUPPORTED_HOST, importKeyring: async () => ({ AsyncEntry: class {
+        setPassword = setPassword;
+      } }) };
+      await expect(helper.storeEnrollment(args, deps)).resolves.toBeUndefined();
+      await expect(helper.storeEnrollment([...args, '--credential-reference', randomUUID()], deps)).resolves.toBeUndefined();
+      expect(setPassword.mock.calls).toEqual([['synthetic:value=tail'], ['synthetic:value=tail']]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['other: synthetic\n', 'gemini=synthetic\n gemini : repeated\n'])(
+    'silently refuses a missing or duplicate label', async (contents) => {
+      const directory = await mkdtemp(join(tmpdir(), 'ai7-enrollment-'));
+      try {
+        const input = join(directory, 'synthetic-input.txt');
+        await writeFile(input, contents);
+        const script = `
+          const { storeEnrollment } = await import(${JSON.stringify(new URL('../../tools/enroll-dev-credential.mjs', import.meta.url).href)});
+          try {
+            await storeEnrollment(process.argv.slice(1), {
+              env: {}, platform: 'win32', architecture: 'x64',
+              importKeyring: async () => ({ AsyncEntry: class {
+                async setPassword() { process.exitCode = 2; }
+              } }),
+            });
+          } catch (error) {
+            process.exitCode = error.message === 'AI7_ENROLLMENT_INVALID' ? 1 : 3;
+          }
+        `;
+        const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, '--',
+          '--slot', 'google-gemini', '--from-file', input, '--label', 'gemini'], { encoding: 'utf8', timeout: 10_000 });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toBe('');
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('named production enrollment refusals', () => {

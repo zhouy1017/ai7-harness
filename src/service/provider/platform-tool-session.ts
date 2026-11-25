@@ -426,7 +426,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (rule?.targetedRetrieval.allowed !== true || this.#retrieval === null) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (this.#base.currentBindingDigest() !== this.#binding.bindingDigest || call.signal.aborted) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (this.#unitLocalCalls > rule.targetedRetrieval.callsPerUnit) return refuse('检索未完成：本单元的检索调用次数已用完，请使用已有结果。');
-    if (!ruleNamedToolSchemas(false, rule).some((schema) => schema.name === call.tool)) return refuse('本次尝试未准许该工具。');
+    const toolSchemaVersion = this.#binding.toolSchemaVersion;
+    if (!ruleNamedToolSchemas(false, rule, toolSchemaVersion).some((schema) => schema.name === call.tool)) return refuse('本次尝试未准许该工具。');
     if (this.#base.ceilingState?.() === 'reached') return refuse('已达到运行预算上限。');
     if (this.#inFlight || this.#localInFlight >= localToolParallelBound(rule) || this.#executedCallIds.has(call.callId)) return refuse('检索工具超出并行上限，或重复使用调用标识。');
     this.#executedCallIds.add(call.callId);
@@ -436,7 +437,9 @@ export class PlatformToolSession implements PlatformToolOwner {
     try {
       let value: unknown;
       switch (args.tool) {
-        case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds); break;
+        // v1 already tolerated variants under a rule with explicit tool declarations.
+        case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds,
+          toolSchemaVersion === 2 || rule.declarations !== undefined ? args.queries : undefined); break;
         case 'exact_fetch': value = this.#retrieval.exactFetch(args.candidateId); break;
         case 'read_blocks': value = this.#retrieval.readBlocks(args.blockId, args.radius); break;
         case 'search_manuscript': value = this.#retrieval.searchManuscript(args.query, args.mode); break;

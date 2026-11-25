@@ -12,6 +12,9 @@ import {
   type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
+  type TaskOverviewCall,
+  type TaskOverviewCallResult,
+  type ServiceWireOutput,
   type RendererCallResult,
   type WireServiceOperationMap as ServiceOperationMap,
 } from '../shared/protocol.js';
@@ -217,6 +220,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),
   stageDroppedManuscript: (file: File) => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript, { droppedPath: webUtils.getPathForFile(file) }),
+  returnImportToEditing: (input: ServiceOperationMap['returnImportToEditing']['input']) => invoke<ServiceOperationMap['returnImportToEditing']['output']>(IPC_CHANNELS.returnImportToEditing, input),
   continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
@@ -261,7 +265,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   getBaselineAnalysisRangePlan: (input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>) => invoke<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>(IPC_CHANNELS.getBaselineAnalysisRangePlan, input),
   inspectBaselineAnalysis: (input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectBaselineAnalysis']['output']>(IPC_CHANNELS.inspectBaselineAnalysis, input ?? { revisionId: null }),
-  inspectBookFindings: (input?: { offset: number }) =>
+  inspectBookFindings: (input?: Parameters<RendererApi['inspectBookFindings']>[0]) =>
     invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
   inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
@@ -329,6 +333,22 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.revokeBackgroundAnalysisEnrollment, input),
   holdBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.holdBackgroundAnalysisEnrollment, input),
+  inspectStandardTables: (input: Parameters<RendererApi['inspectStandardTables']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['inspectStandardTables']>>>(IPC_CHANNELS.inspectStandardTables, input),
+  inspectStandardTable: (input: Parameters<RendererApi['inspectStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['inspectStandardTable']>>>(IPC_CHANNELS.inspectStandardTable, input),
+  previewStandardTableImport: (input: Parameters<RendererApi['previewStandardTableImport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['previewStandardTableImport']>>>(IPC_CHANNELS.previewStandardTableImport, input),
+  commitStandardTableImport: (input: Parameters<RendererApi['commitStandardTableImport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['commitStandardTableImport']>>>(IPC_CHANNELS.commitStandardTableImport, input),
+  saveStandardTable: (input: Parameters<RendererApi['saveStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveStandardTable']>>>(IPC_CHANNELS.saveStandardTable, input),
+  setStandardTableEnabled: (input: Parameters<RendererApi['setStandardTableEnabled']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['setStandardTableEnabled']>>>(IPC_CHANNELS.setStandardTableEnabled, input),
+  deleteStandardTable: (input: Parameters<RendererApi['deleteStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['deleteStandardTable']>>>(IPC_CHANNELS.deleteStandardTable, input),
+  restorePreinstalledStandardTables: (input: Parameters<RendererApi['restorePreinstalledStandardTables']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['restorePreinstalledStandardTables']>>>(IPC_CHANNELS.restorePreinstalledStandardTables, input),
   inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
   previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>
@@ -407,8 +427,6 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectLibraryMaterialSegments']['output']>(IPC_CHANNELS.inspectLibraryMaterialSegments, input),
   searchReferableMaterials: (input: ServiceOperationMap['searchReferableMaterials']['input']) =>
     invoke<ServiceOperationMap['searchReferableMaterials']['output']>(IPC_CHANNELS.searchReferableMaterials, input),
-  buildMaterialVectors: (input: ServiceOperationMap['buildMaterialVectors']['input']) =>
-    invoke<ServiceOperationMap['buildMaterialVectors']['output']>(IPC_CHANNELS.buildMaterialVectors, input),
   queryMaterialVectors: (input: ServiceOperationMap['queryMaterialVectors']['input']) =>
     invoke<ServiceOperationMap['queryMaterialVectors']['output']>(IPC_CHANNELS.queryMaterialVectors, input),
   requestMaterialTranslation: (input: ServiceOperationMap['requestMaterialTranslation']['input']) =>
@@ -425,6 +443,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectFactualVerification']['output']>(IPC_CHANNELS.inspectFactualVerification, input),
   inspectEvidenceWorkspace: (input: Parameters<RendererApi['inspectEvidenceWorkspace']>[0]) =>
     invoke<ServiceOperationMap['inspectEvidenceWorkspace']['output']>(IPC_CHANNELS.inspectEvidenceWorkspace, input),
+  openSourceInBrowser: (input: Parameters<RendererApi['openSourceInBrowser']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['openSourceInBrowser']>>>(IPC_CHANNELS.openSourceInBrowser, input),
   recordVerificationReviewDecision: (input: Parameters<RendererApi['recordVerificationReviewDecision']>[0]) =>
     invoke<ServiceOperationMap['recordVerificationReviewDecision']['output']>(IPC_CHANNELS.recordVerificationReviewDecision, input),
   prepareCorrectionProposal: (input: Parameters<RendererApi['prepareCorrectionProposal']>[0]) =>
@@ -545,6 +565,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
   acceptEditorialMemory: (input: ServiceOperationMap['acceptEditorialMemory']['input']) => invoke<ServiceOperationMap['acceptEditorialMemory']['output']>(IPC_CHANNELS.acceptEditorialMemory, input),
   deactivateEditorialMemory: (input: ServiceOperationMap['deactivateEditorialMemory']['input']) => invoke<ServiceOperationMap['deactivateEditorialMemory']['output']>(IPC_CHANNELS.deactivateEditorialMemory, input),
+  reenableReviewPreference: (input: ServiceOperationMap['reenableReviewPreference']['input']) => invoke<ServiceOperationMap['reenableReviewPreference']['output']>(IPC_CHANNELS.reenableReviewPreference, input),
+  deleteReviewPreference: (input: ServiceOperationMap['deleteReviewPreference']['input']) => invoke<ServiceOperationMap['deleteReviewPreference']['output']>(IPC_CHANNELS.deleteReviewPreference, input),
   inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
   rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
   inspectEditQualitySignals: (input: ServiceOperationMap['inspectEditQualitySignals']['input']) => invoke<ServiceOperationMap['inspectEditQualitySignals']['output']>(IPC_CHANNELS.inspectEditQualitySignals, input),
@@ -613,7 +635,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['rollBackDatabaseReplacement']['output']>(IPC_CHANNELS.rollBackDatabaseReplacement, input),
   prepareDatabaseMerge: (input: Parameters<RendererApi['prepareDatabaseMerge']>[0]) =>
     invoke<ServiceOperationMap['prepareDatabaseMerge']['output']>(IPC_CHANNELS.prepareDatabaseMerge, input),
-  quitApplication: () => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, {}),
+  quitApplication: (action?: 'rollback-upgrade') => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, action === 'rollback-upgrade' ? { rollbackUpgrade:true } : {}),
   cancelDatabaseExport: (input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['cancelDatabaseExport']['output']>(IPC_CHANNELS.cancelDatabaseExport, input),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
@@ -666,6 +688,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['regenerateProposalConflictUnit']['output']>(IPC_CHANNELS.regenerateProposalConflictUnit, input),
   getManuscriptRail: (input: ServiceOperationMap['getManuscriptRail']['input']) =>
     invoke<ServiceOperationMap['getManuscriptRail']['output']>(IPC_CHANNELS.getManuscriptRail, input),
+  findPendingMark: (input: ServiceOperationMap['findPendingMark']['input']) =>
+    invoke<ServiceOperationMap['findPendingMark']['output']>(IPC_CHANNELS.findPendingMark, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
     invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>
@@ -699,6 +723,9 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['saveMilestone']['output']>(IPC_CHANNELS.saveMilestone, input),
   inspectDeliverables: () =>
     invoke<ServiceOperationMap['inspectDeliverables']['output']>(IPC_CHANNELS.inspectDeliverables),
+  listBookVersions: (input: ServiceOperationMap['listBookVersions']['input']) => invoke<ServiceOperationMap['listBookVersions']['output']>(IPC_CHANNELS.listBookVersions, input),
+  viewBookVersion: (input: ServiceOperationMap['viewBookVersion']['input']) => invoke<ServiceOperationMap['viewBookVersion']['output']>(IPC_CHANNELS.viewBookVersion, input),
+  restoreBookVersion: (input: ServiceOperationMap['restoreBookVersion']['input']) => invoke<ServiceOperationMap['restoreBookVersion']['output']>(IPC_CHANNELS.restoreBookVersion, input),
   designatePublicationVersion: (input: Omit<ServiceOperationMap['designatePublicationVersion']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
   inspectProductionDocuments: () =>
@@ -805,7 +832,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
-  taskOverviewCall: (input: Parameters<RendererApi['taskOverviewCall']>[0]) => invoke<Awaited<ReturnType<RendererApi['taskOverviewCall']>>>(IPC_CHANNELS.taskOverviewCall, input),
+  taskOverviewCall: <C extends TaskOverviewCall>(input: C) => invoke<ServiceWireOutput<TaskOverviewCallResult<C>>>(IPC_CHANNELS.taskOverviewCall, input),
   controlAllTasks: (input: { action: 'pause' | 'resume' }) => invoke<ServiceOperationMap['controlAllTasks']['output']>(IPC_CHANNELS.controlAllTasks, input),
   inspectTaskOverview: () =>
     invoke<ServiceOperationMap['inspectTaskOverview']['output']>(IPC_CHANNELS.inspectTaskOverview, {}),
@@ -825,6 +852,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
     invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
+  inspectEditorHistory: (input: ServiceOperationMap['inspectEditorHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectEditorHistory']['output']>(IPC_CHANNELS.inspectEditorHistory, input),
   openBookWorkbench: (input: Parameters<RendererApi['openBookWorkbench']>[0]) => {
     isNonActivatingBookOpen(input);
     return invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input);
@@ -869,6 +898,10 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   selectBothRoleModels: (input: Parameters<RendererApi['selectBothRoleModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectBothRoleModels']>>>(IPC_CHANNELS.selectBothRoleModels, input),
   refreshModelServiceModels: (input: Parameters<RendererApi['refreshModelServiceModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['refreshModelServiceModels']>>>(IPC_CHANNELS.refreshModelServiceModels, input),
   selectFastRoleModel: (input: Parameters<RendererApi['selectFastRoleModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFastRoleModel']>>>(IPC_CHANNELS.selectFastRoleModel, input),
+  selectUnderlyingModel: (input: Parameters<RendererApi['selectUnderlyingModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectUnderlyingModel']>>>(IPC_CHANNELS.selectUnderlyingModel, input),
+  selectProModel: (input: Parameters<RendererApi['selectProModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectProModel']>>>(IPC_CHANNELS.selectProModel, input),
+  selectFlashModel: (input: Parameters<RendererApi['selectFlashModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFlashModel']>>>(IPC_CHANNELS.selectFlashModel, input),
+  clearFlashModel: () => invoke<Awaited<ReturnType<RendererApi['clearFlashModel']>>>(IPC_CHANNELS.clearFlashModel, {}),
   testModelServiceConnection: (input: Parameters<RendererApi['testModelServiceConnection']>[0]) => invoke<Awaited<ReturnType<RendererApi['testModelServiceConnection']>>>(IPC_CHANNELS.testModelServiceConnection, input),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),

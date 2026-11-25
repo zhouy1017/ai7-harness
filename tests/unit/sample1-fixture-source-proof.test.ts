@@ -26,12 +26,15 @@ import { withModelClarification, withAmbiguousClarificationValidation, buildClar
 import { WritingTasks } from '../../src/service/writing-tasks.js';
 import { buildWritingUnitMessage, buildWritingSynthesisMessage, writingContract, writingContractDigest, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
+import { appendTaskBaselineSynopses, freezeTaskBaselineSynopses } from '../../src/service/analysis/baseline-synopsis.js';
+import { RUN_SYNTHESIS_ENTRY, runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
+import { RUN_SYNTHESIS_PROMPT_DIGEST } from '../../src/service/review/run-synthesis-contract.js';
 
 // Source admission regression (#387): public sample1 plus an external temporary synthetic product
 // record. No protected cache, ledger, credential or actual business store is read by this test.
 // @ts-expect-error Plain ESM tool has no declarations.
 const tool = await import('../../tools/generate-model-fixture.mjs') as {
-  parseCachedRequest(body: string, contract: string): unknown;
+  parseCachedRequest(body: string, contract: string, structuredStageContract?: string): unknown;
   verifySample1Capture(request: unknown, selection: unknown, parsed: unknown): Promise<boolean>;
   redactUnitResultText(text: string, own: string[], carried: string[], verified?: boolean): string;
   parseGenerationArguments(args: string[]): unknown;
@@ -195,6 +198,39 @@ describe('exact sample1 fixture exemption source proof', () => {
     await expect(tool.verifySample1Capture(request, reviewSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
   });
 
+  it('proves a structured review run-synthesis capture from its saved input, and refuses another input (#1583)', async () => {
+    const key = randomUUID();
+    const definition = runSynthesisKind(database, key, undefined);
+    database.exec('CREATE TABLE analysis_task_intents (task_intent_id TEXT, kind TEXT, contract_version TEXT)');
+    database.prepare('INSERT INTO analysis_task_intents VALUES (?,?,?)').run(request.sample1Task, definition.kind, 'ai7.editorial-review/2');
+    const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
+    const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
+    const envelope = canonicalJson({ promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST });
+    database.prepare("UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component='plan-envelope'").run(envelope, sha256Hex(envelope));
+    const revision = canonicalJson({ coverageManifestDigest: manifest.digest, adapterPin: { model: selection.model, route: selection.captured.route }, bindingPin: { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST } });
+    database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+    const reviewRunId = randomUUID();
+    const snapshot = canonicalJson({ reviewRunId, bookId: manifest.manuscript.bookId, categories: [{ executor: 'review-category-contract',
+      entry: { ...RUN_SYNTHESIS_ENTRY, synthesisKey: key }, task: { taskIntentId: request.sample1Task, kind: definition.kind, planEnvelopeDigest: sha256Hex(envelope) } }] });
+    database.exec(`CREATE TABLE review_runs (canonical_json TEXT, sha256 TEXT);
+      CREATE TABLE review_run_synthesis (review_run_id TEXT, synthesis_key TEXT, input_json TEXT, input_digest TEXT, prior_input_tokens INTEGER, prior_output_tokens INTEGER)`);
+    database.prepare('INSERT INTO review_runs VALUES (?,?)').run(snapshot, sha256Hex(snapshot));
+    const saveInput = (summary: string) => {
+      const input = canonicalJson({ schema: 'ai7.review.run-synthesis-input/1', missingCategories: [], clusters: [], evidence: [], baseline: null,
+        findings: [{ ref: 'finding-1', categoryId: 'typos-and-usage', clauseId: 'typos/1', severity: 'medium', summary, evidenceRefs: [] }],
+        omitted: { findings: 0, clusters: 0, synopses: 0 } });
+      database.exec('DELETE FROM review_run_synthesis');
+      database.prepare('INSERT INTO review_run_synthesis VALUES (?,?,?,?,0,0)').run(reviewRunId, key, input, sha256Hex(input));
+    };
+    saveInput('合成的发现摘要。');
+    const synthesis = tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: definition.systemPrompt },
+      { role: 'user', content: definition.crossUnit!.step!.buildMessage([], manifest.units.length) }] }), RUN_SYNTHESIS_PROMPT_DIGEST, RUN_SYNTHESIS_PROMPT_DIGEST);
+    const chosen = { ...selection, taskPromptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST };
+    expect(await tool.verifySample1Capture(request, chosen, synthesis)).toBe(true);
+    saveInput('另一条发现摘要。');
+    await expect(tool.verifySample1Capture(request, chosen, synthesis)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
   describe('evaluation captures against the input their Task froze (#429)', () => {
     const profile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
     const reportInput = { template: 'author' as const, record: { profile: { title: '合成方案', version: '1' },
@@ -291,6 +327,45 @@ describe('exact sample1 fixture exemption source proof', () => {
       const altered = definition.crossUnit!.step!.buildMessage([{ ...closed[0]!, result: { ...closed[0]!.result as object, observations: [] } }] as never, manifest.units.length);
       await expect(tool.verifySample1Capture(request, chosen, capture(definition.systemPrompt, altered, digest))).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
     });
+
+    it('proves an evaluation synthesis carrying its frozen chapter synopses, and refuses an altered chain or a later baseline (#1583)', async () => {
+      const { definition, frozen } = kinds.evaluation;
+      const { manifest, digest, revisionId } = await freeze('evaluation', definition, frozen);
+      const observations = [{ itemId: profile.items[0]!.itemId, note: '合成依据。', blockOrdinals: [1] }];
+      const record = canonicalJson({ state: 'closed', unitOrdinal: 1, requestDigest: 'a'.repeat(64), responseDigest: 'b'.repeat(64), usage: null, observations });
+      database.prepare("INSERT INTO analysis_unit_results VALUES (?,1,'closed',?,?)").run(revisionId, record, sha256Hex(record));
+      // The book's completed baseline on the pinned manuscript revision, with one chapter synopsis.
+      database.exec(`ALTER TABLE analysis_result_set_revisions ADD COLUMN revision_id TEXT; ALTER TABLE analysis_result_set_revisions ADD COLUMN result_set_id TEXT;
+        ALTER TABLE analysis_result_set_revisions ADD COLUMN manuscript_revision_id TEXT; ALTER TABLE analysis_result_set_revisions ADD COLUMN manuscript_revision_digest TEXT;
+        CREATE TABLE analysis_result_sets (result_set_id TEXT, book_id TEXT, kind TEXT)`);
+      const baseline = (ordinal: number) => {
+        const id = randomUUID();
+        database.prepare("INSERT INTO analysis_result_set_revisions VALUES ('baseline', ?, '{}', ?, ?, 'baseline-set', ?, ?)")
+          .run(ordinal, sha256Hex('{}'), id, manifest.manuscript.revisionId, manifest.manuscript.revisionDigest);
+        const unit = canonicalJson({ unitOrdinal: 1, synopsis: '合成的分章概述。' });
+        database.prepare("INSERT INTO analysis_unit_results VALUES (?,1,'closed',?,?)").run(id, unit, sha256Hex(unit));
+      };
+      database.prepare("INSERT INTO analysis_result_sets VALUES ('baseline-set', ?, 'baseline-manuscript-analysis')").run(manifest.manuscript.bookId);
+      baseline(1);
+      const context = freezeTaskBaselineSynopses(database, 'evaluation', manifest.manuscript.bookId, manifest.manuscript.revisionId, manifest.manuscript.revisionDigest, null).baselineSynopsisContext!;
+      const executionPlan = (value: unknown) => {
+        const json = canonicalJson(value);
+        database.prepare("UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component='execution-plan'").run(json, sha256Hex(json));
+      };
+      executionPlan({ baselineSynopsisContext: context });
+      const closed = [{ unitOrdinal: 1, result: definition.unitResultOfRecord(JSON.parse(record) as Record<string, unknown>, 1) }];
+      const message = appendTaskBaselineSynopses(definition.crossUnit!.step!.buildMessage(closed as never, manifest.units.length), context);
+      const chosen = { ...selection, taskPromptContractDigest: digest, promptContractDigest: digest };
+      const synthesis = capture(definition.systemPrompt, message, digest);
+      expect(await tool.verifySample1Capture(request, chosen, synthesis)).toBe(true);
+      // A chain the store no longer rebuilds proves nothing.
+      executionPlan({ baselineSynopsisContext: { ...context, synopses: [{ unitOrdinal: 1, synopsis: '另一段概述。' }] } });
+      await expect(tool.verifySample1Capture(request, chosen, synthesis)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+      // A baseline analysed again after the Task froze refuses with its own reason.
+      executionPlan({ baselineSynopsisContext: context });
+      baseline(2);
+      await expect(tool.verifySample1Capture(request, chosen, synthesis)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved', message: expect.stringContaining('synopsis-revision') });
+    });
   });
 
   it('refuses carried foreign turns even when the final unit message matches sample1', async () => {
@@ -300,6 +375,30 @@ describe('exact sample1 fixture exemption source proof', () => {
       { role: 'user', content: message },
     ] }), BASELINE_PROMPT_CONTRACT_DIGEST);
     await expect(tool.verifySample1Capture(request, selection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
+  it('keeps the exemption for a carried tool exchange only when every passage in it is sample1\'s (#1598)', async () => {
+    const continuation = (result: string): unknown => tool.parseCachedRequest(JSON.stringify({ messages: [
+      { role: 'system', content: BASELINE_PROMPT_CONTRACT.systemPrompt },
+      { role: 'user', content: message },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'retrieve', arguments: '{"query":"甲"}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: result },
+    ] }), BASELINE_PROMPT_CONTRACT_DIGEST);
+    const passage = own.reduce((longest, text) => (text.length > longest.length ? text : longest)).slice(0, 40);
+    const candidate = (preview: string): string => JSON.stringify([{ sourceKind: 'manuscript', sourceId: randomUUID(), revisionOrIndexDigest: 'd'.repeat(64), candidateId: 'c'.repeat(64), anchor: { blockId: `blk_${'1'.repeat(24)}`, start: 0, end: 40 }, score: 0.5, preview }]);
+    const foreign = '来自另一份合成稿件的一段较长的文字，不在样书里。';
+    // The unit message is proved either way; its results are exempt only as sample1's own passages, identities and refusals.
+    expect(await tool.verifySample1Capture(request, selection, continuation(candidate(passage)))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation('RETRIEVAL_SOURCE_NOT_AUTHORIZED'))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation(candidate(foreign)))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(foreign))).toBe(false);
+    // A refusal is the product's own only as a whole, and only a field name of its results is exempt as a key: nothing else rides in after a
+    // refusal's first words, in a code's shape, or as an object key at any depth.
+    expect(await tool.verifySample1Capture(request, selection, continuation('检索未完成：本单元的检索调用次数已用完，请使用已有结果。'))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation(`检索未完成：${foreign}`))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation('FOREIGN_UPPERCASE_PASSAGE_TOKEN'))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(JSON.stringify({ [foreign]: 1 })))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(JSON.stringify([{ anchor: { [foreign]: 0 }, score: 0.5 }])))).toBe(false);
   });
 
   it.each(['unit', 'synthesis'] as const)('proves writing %s from the frozen writing row and refuses altered inputs or source records (#810)', async (stage) => {

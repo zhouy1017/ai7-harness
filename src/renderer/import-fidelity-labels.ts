@@ -17,7 +17,7 @@ import type {
 
 /** #1287: frozen import reports retain their exact bytes; the editor reads natural paragraph wording. */
 export function fidelityDetailText(detail: string): string {
-  const words = detail.replaceAll('内容块', '段落');
+  const words = detail.replace('DOCX 导出将在后续提供。届时从原文件恢复', '导出 DOCX 时从原文件恢复').replaceAll('内容块', '段落');
   return technicalWords(words, words.replaceAll('来源版本', '原文件'));
 }
 
@@ -125,6 +125,8 @@ function fidelityClassFound(category: FidelityCategoryProjection): boolean {
  */
 export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProjection>, textBoxes: TextBoxDisposition | null = null): string {
   const rows = fidelityRows(fidelity);
+  const losses = rows.filter((category) => category.count > 0 && (category.status === 'degraded' || category.status === 'unsupported'));
+  if (losses.length > 0) return `${losses.length} 类内容无法完整保留：${losses.map((category) => `${category.label} ${category.count} 项`).join('、')}；${textBoxes === 'merge' ? '文本框并入正文，其余完整保留' : '其余完整保留'}。`;
   const found = rows.filter(fidelityClassFound);
   const absent = rows.length - found.length;
   if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，${noDecisionWords()}。`;

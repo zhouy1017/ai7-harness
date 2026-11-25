@@ -1,4 +1,4 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { installPreinstalledStandardTables, preinstalledTableId, standardTableDigest } from '../../src/service/standard-tables.js';
 import { randomUUID } from 'node:crypto';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor, type ModelRequestPermit, type ModelRequestProducer } from '../../src/service/analysis/execution.js';
 import { join } from 'node:path';
@@ -12,8 +12,6 @@ import { readLocalStageArtifacts } from '../../src/service/review/review-runs.js
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import * as checker from '../../src/service/review/deterministic/checker.js';
-import { PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import * as adapter from '../../src/service/provider/deepseek-adapter.js';
 import * as broker from '../../src/service/provider/credential-broker.js';
 import * as harness from '../../src/service/harness/primary-agent-harness.js';
@@ -38,20 +36,22 @@ function noModel(): ReviewRunExecutionOwner {
     whenPlaceFree() { throw new Error('local stage requested model permit'); }, whenDone() { throw new Error('local stage awaited a model'); } };
 }
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
-function replaceFirst(book: Book, text: string): string {
+function replaceFirst(book: Book, text: string, nth = 0): string {
   const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-  const block = window.blocks.find((block) => block.kind === 'paragraph')!;
+  const block = window.blocks.filter((block) => block.kind === 'paragraph')[nth]!;
   store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
     blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
     fromGrapheme: 0, toGrapheme: graphemeCount(block.text), insertText: text });
   return block.blockId;
 }
-function prepare(book: Book, policy: LaunchPolicyProjection, options = OPTIONS) {
-  let work = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], WHOLE, policy, null, [], null, null, null, options);
+function prepare(book: Book, policy: LaunchPolicyProjection, options = OPTIONS, scope: ReviewRunScopeRequest = WHOLE) {
+  let work = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], scope, policy, null, [], null, null, null, options);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const run = work.projection!.run!;
   const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
   expect(plan.start.needsModelConnection).toBe(false);
+  // A local-only review makes no request and has no Run (#1670): no 用时, and its estimate says so.
+  expect([plan.work, plan.estimate?.sentence]).toEqual([null, '只在本机检查，不调用模型。']);
   expect(plan.start.categoryDigests).toEqual([{ categoryId: 'local-text-check', planEnvelopeDigest: run.localCheck!.planDigest }]);
   return { run, plan };
 }
@@ -97,6 +97,145 @@ describe('provider-free local ReviewRun', () => {
     expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
     expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
   });
+  it('keeps common-word findings advisory, excludes disabled tables and preserves deleted evidence (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书词表核查');
+    const options: LocalCheckOptions = { ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] } };
+    const target = replaceFirst(book, '苹裹。按纳。苹果。');
+    const scope = { kind: 'selection', fromChapterBlockId: target, toChapterBlockId: target } as const;
+    const db = database();
+    try {
+      // A later edition of the pre-installed table. Restore below can only reinstall edition one.
+      const tableId = preinstalledTableId('cycb-2');
+      const edition = randomUUID();
+      const digest = standardTableDigest('common-words', [['苹果', [], 1, null, null, 'dictionary', 'applied', null, null]]);
+      db.exec('BEGIN');
+      db.prepare(`INSERT INTO standard_table_versions
+        SELECT ?, table_id, 2, '合成第二版', source_description, ?, digest, 1, NULL, NULL, NULL, recorded_at
+        FROM standard_table_versions WHERE table_id = ? AND ordinal = 1`).run(edition, digest, tableId);
+      db.prepare("INSERT INTO standard_table_entries VALUES (?, 1, '苹果', '[]', 1, NULL, NULL, 'dictionary', 'applied', NULL, NULL)").run(edition);
+      db.prepare('UPDATE standard_tables SET current_version_id = ? WHERE table_id = ?').run(edition, tableId);
+      db.exec('COMMIT');
+      const prepared = prepare(book,policy,options,scope);
+      store.standardTables.setStandardTableEnabled({ tableId, enabled: false });
+      authorize(book,prepared);
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+      await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+      const findings = () => store.inspectReviewWorkspace(book.bookId,prepared.run.reviewRunId).run!.findings;
+      const advisory = findings().find(f => f.quote === '苹裹');
+      expect(advisory).toMatchObject({ output: 'annotation', replacement: null, note: expect.stringContaining('可能是不常用的写法，请核对') });
+      expect(advisory?.note).toContain('辞书推荐（建议改）');
+      expect(findings().find(f => f.quote === '按纳')).toMatchObject({ output: 'change-suggestion', replacement: '按捺', note: expect.stringContaining('国家规范（应改）') });
+      const disabled = prepare(book,policy,options,scope);
+      authorize(book,disabled);
+      const second = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+      await second.drive(disabled.run.reviewRunId); await second.dispose();
+      expect(store.inspectReviewWorkspace(book.bookId,disabled.run.reviewRunId).run!.findings.some(f => f.quote === '苹裹')).toBe(false);
+      store.standardTables.setStandardTableEnabled({ tableId, enabled: true });
+      const deleted = prepare(book,policy,options,scope);
+      expect(store.standardTables.inspectStandardTables().tables.find(t => t.tableId === tableId)?.recentChecksCount).toBe(2);
+      await store.standardTables.deleteStandardTable({ tableId });
+      expect(() => authorize(book,deleted)).toThrow(/字表已删除/);
+      expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
+      expect(findings().find(f => f.quote === '按纳')?.note).not.toContain('已删除');
+      store.standardTables.restorePreinstalledStandardTables({ keys: ['cycb-2'] });
+      expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
+    } finally { db.close(); }
+  });
+  it('reports the frozen rule versions in the export and technical results (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书版本核查');
+    const block = replaceFirst(book, '按纳。');
+    const scope = { kind: 'selection', fromChapterBlockId: block, toChapterBlockId: block } as const;
+    const options = { ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] } };
+    const prepared = prepare(book, await resolveSourceCheckoutLaunchPolicy(roots.codeRoot), options, scope);
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel());
+    await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!;
+    const line = run.report!.record.categorySummaries.entries[0]!.stateLine;
+    for (const [id, version] of [['C01',2], ['C02',2], ['V01',2], ['T01',1], ['P02',1]] as const) {
+      expect(line).toContain(`${id}/v${version}：`);
+      expect(run.localCheck!.counts![id]).toMatchObject({ version });
+    }
+  });
+  it('counts advisory notes on the unedited admitted sample1 (#1717)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '公开样书词表核查');
+    const prepared = prepare(book, await resolveSourceCheckoutLaunchPolicy(roots.codeRoot), {
+      ...OPTIONS, tables: { characters: true, variantWords: true, houseWordList: null, bookTerms: [] },
+    });
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
+    await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const db = database();
+    try {
+      const count = db.prepare("SELECT count(*) n FROM review_findings WHERE review_run_id = ? AND output = 'annotation' AND note LIKE '%可能是不常用的写法，请核对%'").get(prepared.run.reviewRunId);
+      expect(count?.n).toBe(47);
+    } finally { db.close(); }
+  });
+  it('names every Run whose findings cover the whole batch, newest first by Run ordinal, whichever finished first (#1654)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '再审同一批公开样书');
+    const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
+    const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: null,
+      bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
+    const drive = async (reviewRunId: string): Promise<void> => {
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(reviewRunId); await driver.dispose();
+    };
+    const mechanical = (reviewRunId: string) => store.inspectReviewWorkspace(book.bookId, reviewRunId).run!.findings
+      .filter((finding) => finding.blockId === target && finding.output === 'change-suggestion' && finding.markId !== null);
+    // R1 and R2 over the whole book, prepared in that order; R2 finishes first. Both name the same two marks.
+    const r1 = prepare(book, policy, options); authorize(book, r1);
+    const r2 = prepare(book, policy, options); authorize(book, r2);
+    await drive(r2.run.reviewRunId);
+    await drive(r1.run.reviewRunId);
+    const batch = mechanical(r1.run.reviewRunId).map((finding) => finding.markId!);
+    expect(batch).toHaveLength(2);
+    expect(mechanical(r2.run.reviewRunId).map((finding) => finding.markId)).toEqual(batch);
+    // R3, the newest Run, over the same paragraph, holds only one of the two marks: a table plan's findings of another scope
+    // are other records, so its one shared finding is written here as a Run that found part of the batch would hold it.
+    const r3 = prepare(book, policy, options, { kind: 'selection', fromChapterBlockId: target, toChapterBlockId: target }); authorize(book, r3);
+    await drive(r3.run.reviewRunId);
+    store.markCleanShutdown(); store.close();
+    const db = database();
+    db.prepare(`INSERT INTO review_findings(review_run_id, finding_id, category_id, ordinal, kind_ref, severity, output, risk_point, block_id, from_grapheme,
+        to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256)
+      SELECT ?, 'rvf_' || substr(hex(randomblob(12)), 1, 24), category_id, 9999, kind_ref, severity, output, risk_point, block_id, from_grapheme,
+        to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256
+      FROM review_findings WHERE review_run_id = ? AND mark_id = ?`).run(r3.run.reviewRunId, r1.run.reviewRunId, batch[0]!);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
+    store.applyChangeSuggestionBatch({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+      markIds: batch, clientEffectId: randomUUID() });
+    // R3 is not listed (its page offers no 撤销本批应用); R2 before R1 by Run ordinal, though R1's findings were written last.
+    expect(store.inspectEditorHistory(book.manuscriptId, book.branchId).undo?.batch)
+      .toEqual({ reviewRunIds: [r2.run.reviewRunId, r1.run.reviewRunId], categoryId: mechanical(r1.run.reviewRunId)[0]!.categoryId });
+  });
+  it('reads each finding at its mark’s paragraph and offsets after 分段 moved the mark (Issue #1654, loss 5)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '段落移动公开样书');
+    const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
+    const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: null,
+      bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
+    const prepared = prepare(book, policy, options);
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const before = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.findings.filter((finding) => finding.blockId === target && finding.markId !== null);
+    expect(before.length).toBeGreaterThan(0);
+    // Enter at the paragraph's very start: every mark goes with its words into the new paragraph.
+    const created = `blk_${randomUUID().replaceAll('-', '').slice(0, 24)}`;
+    const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
+    store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+      blockId: target, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: window.blocks.find((block) => block.blockId === target)!.digest,
+      expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '', structure: { kind: 'split', newBlockId: created } });
+    const moved = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.findings.filter((finding) => before.some((item) => item.findingId === finding.findingId));
+    const cards = moved.map((finding) => store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!));
+    expect(cards.every((card) => card.blockId === created)).toBe(true);
+    expect(moved.map((finding) => [finding.blockId, finding.fromGrapheme, finding.toGrapheme])).toEqual(cards.map((card) => [card.blockId, card.fromGrapheme, card.toGrapheme]));
+  });
   it.each(['complete-and-reopen', 'cancel'] as const)('keeps local %s independent of four occupied real model permits (#1131)', async (mode) => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0]; const connection = store.saveModelServiceConnection('本地检查旁的正式连接', null, 'ready', route.route);
@@ -130,6 +269,7 @@ describe('provider-free local ReviewRun', () => {
         await steps.local!(prepared.run.reviewRunId, () => { const db = database(); try { return db.prepare('SELECT state FROM review_local_stage_artifacts ORDER BY sequence DESC LIMIT 1').get()?.state === 'completed'; } finally { db.close(); } });
         steps.end(prepared.run.reviewRunId);
         expect(store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.localCheck!.state).toBe('completed');
+        expect(store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items).map((entry) => entry.work)).toEqual([null]);
         expect(rules).toHaveBeenCalledTimes(1); expect(acquire).not.toHaveBeenCalled(); expect(register).not.toHaveBeenCalled();
         await execution.dispose(); await release(); store.markCleanShutdown(); store.close();
         store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.baselineAnalysisLedger.bindLaunch(launch);
@@ -310,23 +450,16 @@ describe('provider-free local ReviewRun', () => {
     expect(refusal).toBeInstanceOf(StoreError); expect(refusal).toMatchObject({ code: 'LOCAL_PLAN_INVALID', message: '本地检查计划或输入无效；请重新准备。' });
   });
 
-  it('migrates genuine schema89 additively, tolerates a committed pre-stamp table and rejects corrupted artifact chains', async () => {
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地迁移样书');
-    store.markCleanShutdown(); store.close(); let db = database(); const prior = db.prepare('SELECT * FROM books').all();
-    db.exec('DROP TABLE review_local_stage_artifacts; DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete;');
-    execPre74Fixture(db, "DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
-    db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!); db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!); db.close();
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.markCleanShutdown(); store.close(); db = database();
-    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-    execPre74Fixture(db, 'PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  it('refuses at the next open a local-stage artifact chain tampered behind its triggers', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地工件链样书');
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();
-    db = database(); const record = readLocalStageArtifacts(db, prepared.run.reviewRunId).at(-1)!.record;
+    const db = database(); const record = readLocalStageArtifacts(db, prepared.run.reviewRunId).at(-1)!.record;
     expect(() => db.exec('UPDATE review_local_stage_artifacts SET sequence = sequence')).toThrow();
     const tampered = canonicalRecord({ ...record, previousDigest: '0'.repeat(64) }); db.exec('DROP TRIGGER review_local_stage_artifacts_no_update');
     db.prepare('UPDATE review_local_stage_artifacts SET canonical_json = ?, sha256 = ? WHERE review_run_id = ? AND sequence = 3').run(tampered.json, tampered.digest, prepared.run.reviewRunId);
     db.exec("CREATE TRIGGER review_local_stage_artifacts_no_update BEFORE UPDATE ON review_local_stage_artifacts BEGIN SELECT RAISE(ABORT, 'REVIEW_LOCAL_STAGE_IMMUTABLE'); END"); db.close();
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow(expect.objectContaining({ code: expect.stringMatching(/LOCAL_STAGE|RECORD_INVALID/u) }));
   });
 
   it('rolls back marks and findings at a materialization crash and continues from completion without checking again', async () => {

@@ -1,3 +1,4 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { randomUUID } from 'node:crypto';
 import { cp } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -17,7 +18,6 @@ import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
-import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { renderReportExport } from '../../src/service/report-export.js';
 import { strFromU8, unzipSync } from 'fflate';
 
@@ -97,6 +97,7 @@ it('sends the stage’s own request once under the model chosen now, keeps every
     expect(before.synthesis?.canGenerate).toBe(true);
     expect(before.findings.length).toBeGreaterThan(0);
     const command = randomUUID();
+    seedModelEfforts(session.store, 'opencode-go', { 'synthesis-only-model': ['high'] });
     const launched = generate(session, book.bookId, runId, { clientCommandId: command, executionConfig: { modelId: 'synthesis-only-model', reasoningEffort: 'high' } });
     expect(launched.repeated).toBe(false);
     await session.driver.drive(runId);
@@ -147,6 +148,11 @@ it('counts every summary request in the Run’s usage: the stage’s and each �
     const book = await importBook(session, 'sample1 统合用量');
     const runId = await settledReview(session, book);
     const stage = run(session, book.bookId, runId).usage!.requests;
+    // 预计 of a whole-book review (#1670): one request per part (this category has no cross-chapter step); the synthesis, sent only
+    // when the findings span two parts, may add one, so 「至少」 holds.
+    const estimate = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: runId }).estimate!;
+    expect([estimate.fewestRequests, estimate.more]).toEqual([estimate.parts, ['retry', 'sampling', 'synthesis', 'reflection']]);
+    expect(stage).toBeGreaterThanOrEqual(estimate.fewestRequests);
     generate(session, book.bookId, runId);
     await session.driver.drive(runId);
     const first = run(session, book.bookId, runId);
@@ -158,6 +164,11 @@ it('counts every summary request in the Run’s usage: the stage’s and each �
     expect(second.synthesis?.state).toBe('completed');
     expect(second.usage!.requests).toBe(stage + 2);
     expect(synthesisRequests(session)).toHaveLength(3);
+    // The 任务 rows and the plan count the page's requests, every summary included (#1670).
+    const row = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
+      .find((entry) => (entry.item.target.kind === 'review' || entry.item.target.kind === 'review-plan') && entry.item.target.reviewRunId === runId)!;
+    expect(row.work?.finished?.requests).toBe(second.usage!.requests);
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: runId }).work).toEqual(row.work);
   } finally { await closeSession(session); }
 });
 
@@ -175,6 +186,10 @@ it('refuses 生成统合总结 for a one-range chapter review and for a selectio
     expect(oneRange.findings.length).toBeGreaterThan(0);
     expect(oneRange.synthesis).toBeUndefined();
     expect(refusal(() => generate(session, book.bookId, oneRange.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
+    // The summary it never sent was never counted among the fewest requests (#1670).
+    const oneEstimate = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: oneRange.reviewRunId }).estimate!;
+    expect(oneEstimate.fewestRequests).toBe(oneEstimate.parts);
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: oneRange.reviewRunId }).work!.finished!.requests).toBeGreaterThanOrEqual(oneEstimate.fewestRequests);
     const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
       scope: { kind: 'selection', fromChapterBlockId: blocks[0]!.blockId, toChapterBlockId: blocks[Math.min(blocks.length, 40) - 1]!.blockId } }, launchPolicy));
@@ -182,6 +197,7 @@ it('refuses 生成统合总结 for a one-range chapter review and for a selectio
     expect(selection.reviewRunId).not.toBe(oneRange.reviewRunId);
     expect(selection.scope.kind).toBe('selection');
     expect(selection.synthesis).toBeUndefined();
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: selection.reviewRunId }).estimate!.more).not.toContain('synthesis');
     expect(refusal(() => generate(session, book.bookId, selection.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
     expect(synthesisRequests(session)).toHaveLength(0);
   } finally { await closeSession(session); }
@@ -256,6 +272,7 @@ it('waits offline, starts once on reconnect under the chosen model, and a waitin
   try {
     const book = await importBook(session, 'sample1 联网后统合');
     const runId = await settledReview(session, book);
+    seedModelEfforts(session.store, 'opencode-go', { 'offline-synthesis-model': ['high'] });
     const command = { clientCommandId: randomUUID(), executionConfig: { modelId: 'offline-synthesis-model', reasoningEffort: 'high' } };
     const launched = generate(session, book.bookId, runId, command, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');
@@ -314,51 +331,5 @@ it('leaves 暂缺 when AI7 quits while the request is in flight, and sends nothi
     await second.driver.drive(runId);
     expect(second.capture.requests).toHaveLength(0);
   } finally { await closeSession(second); }
-});
-
-it('gives an eligible 0.7.1 run its summary from its stored findings, and the summary travels through export and merge (#1506)', async () => {
-  const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
-  let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  const session = await openSession(null);
-  const destination = join(roots.inputRoot, 'synthesis-only.ai7db');
-  let bookId!: string, runId!: string, written: unknown;
-  try {
-    const archived = session.store.listBooks(null).items.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
-    bookId = archived.bookId;
-    const before = session.store.inspectReviewWorkspace(bookId, null).run!;
-    runId = before.reviewRunId;
-    const archivedReport = before.report!;
-    expect(before.synthesis?.state).toBe('missing');
-    expect(before.synthesis?.canGenerate).toBe(true);
-    generate(session, bookId, runId);
-    await session.driver.drive(runId);
-    const after = run(session, bookId, runId);
-    expect(after.synthesis?.state).toBe('completed');
-    expect(after.synthesis?.modelLabel).toBeDefined();
-    expect(after.findings).toEqual(before.findings);
-    expect(after.categories).toEqual(before.categories);
-    // Built from the Run's own findings: one request, its evidence quoting them.
-    const [request] = synthesisRequests(session);
-    expect(synthesisRequests(session)).toHaveLength(1);
-    const input = JSON.parse(request!.messages.findLast(message => message.role === 'user')!.content);
-    expect(input.findings.length).toBeGreaterThan(0);
-    expect(input.evidence.every((entry: { quote: string }) => before.findings.some(finding => finding.quote.startsWith(entry.quote.slice(0, 20))))).toBe(true);
-    // The archived report stays as it was; a new version carries the summary.
-    expect(run(session, bookId, runId).reportVersions.length).toBeGreaterThan(0);
-    expect(reportContentDigest(session.store.inspectReviewWorkspace(bookId, runId).run!.report!.record)).toBe(reportContentDigest(archivedReport.record));
-    expect(session.store.generateReviewReport(bookId, runId).run!.report!.record.synthesis?.summary).toEqual(after.synthesis?.summary);
-    written = after.synthesis;
-    const prepared = await session.store.prepareDatabaseExport(destination, true);
-    expect((await session.store.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
-  } finally { await closeSession(session); }
-  const mergedRoot = join(roots.inputRoot, 'synthesis-only-merge');
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { await target.prepareDatabaseMerge((await target.inspectDatabaseImport(destination)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { expect(target.inspectReviewWorkspace(bookId, runId).run!.synthesis).toEqual(written); }
-  finally { target.markCleanShutdown(); target.close(); }
 });
 

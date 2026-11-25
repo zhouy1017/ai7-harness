@@ -135,6 +135,7 @@ export interface ReviewGuidelineMergedCursor {
 
 /** 导入新版本 before it is confirmed: the clauses the file holds, as the document's next version would read them. */
 export interface ReviewGuidelinePreviewProjection {
+  readonly modelFormatted?: true;
   readonly previewId: string;
   readonly documentId: string;
   readonly title: string;

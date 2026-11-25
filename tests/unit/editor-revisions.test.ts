@@ -11,16 +11,52 @@ import { installMiniDom } from '../support/mini-dom.js';
 // 阅读与修订模式 and the editor's revisions (Issue #1411), and the find panel's highlighted contexts (Issue #1409): the pure parts.
 
 describe('inline editor revisions', () => {
-  it('diffs graphemes and separates disjoint spans, with no card for unchanged text', () => {
+  it('coalesces nearby grapheme edits, keeps distant spans separate and emits nothing for unchanged text', () => {
     expect(computeInlineRevisionDiff('甲👩‍💻乙丙丁', '甲🙂乙新丁')).toEqual([
-      { fromGrapheme: 1, toGrapheme: 2, currentFromGrapheme: 1, beforeText: '👩‍💻', afterText: '🙂' },
-      { fromGrapheme: 3, toGrapheme: 4, currentFromGrapheme: 3, beforeText: '丙', afterText: '新' },
+      { fromGrapheme: 1, toGrapheme: 4, currentFromGrapheme: 1, beforeText: '👩‍💻乙丙', afterText: '🙂乙新' },
     ]);
     expect(computeInlineRevisionDiff('甲乙', '甲乙')).toEqual([]);
     const middle = '甲乙丙丁'.repeat(300);
     expect(computeInlineRevisionDiff('始' + middle + '终', '新' + middle + '尾')).toHaveLength(2);
     expect(computeInlineRevisionDiff('甲乙', '甲')).toMatchObject([{ beforeText: '乙', afterText: '' }]);
     expect(computeInlineRevisionDiff('甲', '甲乙')).toMatchObject([{ beforeText: '', afterText: '乙' }]);
+  });
+
+  it('keeps a half-clause rewrite in one revision despite shared characters (#1539 N.1)', () => {
+    expect(computeInlineRevisionDiff('他昨天在书房里仔细核对了第三章的引文', '他昨晚在案头认真查核了这一章的全部引文')).toEqual([
+      { fromGrapheme: 2, toGrapheme: 16, currentFromGrapheme: 2,
+        beforeText: '天在书房里仔细核对了第三章的', afterText: '晚在案头认真查核了这一章的全部' },
+    ]);
+  });
+
+  it.each(['\r', '\n', '，', '。', '！', '？', '；', '：', '、', ',', '.', ';', ':', '!', '?'])('keeps edits across clause boundary %j separate', (boundary) => {
+    expect(computeInlineRevisionDiff(`甲乙${boundary}丙丁`, `新乙${boundary}尾丁`)).toEqual([
+      { fromGrapheme: 0, toGrapheme: 1, currentFromGrapheme: 0, beforeText: '甲', afterText: '新' },
+      { fromGrapheme: 3, toGrapheme: 4, currentFromGrapheme: 3, beforeText: '丙', afterText: '尾' },
+    ]);
+  });
+
+  it('bounds the unchanged gap by graphemes, including compound emoji', () => {
+    const gap = '👩‍💻'.repeat(6);
+    expect(computeInlineRevisionDiff(`始${gap}终`, `新${gap}尾`)).toEqual([
+      { fromGrapheme: 0, toGrapheme: 8, currentFromGrapheme: 0, beforeText: `始${gap}终`, afterText: `新${gap}尾` },
+    ]);
+    expect(computeInlineRevisionDiff(`始${gap}甲终`, `新${gap}甲尾`)).toHaveLength(2);
+  });
+
+  it('preserves current offsets when insertions and deletions coalesce after another clause', () => {
+    expect(computeInlineRevisionDiff('甲，乙丙丁戊', '甲新，丙改丁戊')).toEqual([
+      { fromGrapheme: 1, toGrapheme: 1, currentFromGrapheme: 1, beforeText: '', afterText: '新' },
+      { fromGrapheme: 2, toGrapheme: 4, currentFromGrapheme: 3, beforeText: '乙丙', afterText: '丙改' },
+    ]);
+  });
+
+  it('also coalesces nearby edits on the long-paragraph diff path', () => {
+    const middle = '甲乙丙丁'.repeat(300);
+    expect(computeInlineRevisionDiff(`始同旧${middle}终`, `新同改${middle}尾`)).toEqual([
+      { fromGrapheme: 0, toGrapheme: 3, currentFromGrapheme: 0, beforeText: '始同旧', afterText: '新同改' },
+      { fromGrapheme: 1203, toGrapheme: 1204, currentFromGrapheme: 1203, beforeText: '终', afterText: '尾' },
+    ]);
   });
   it('defaults to auto apply when preference storage is unavailable', () => {
     expect(getAutoApplyEditorRevisions()).toBe(true);
@@ -62,6 +98,15 @@ describe('✎ 已改 and 🔒 in the text', () => {
   }) as EditorialMarkAnchorProjection;
   const node = schema.node('paragraph', { blockId: 'b1' }, schema.text('甲乙丙丁'));
   const widgets = (decorations: ReturnType<typeof blockMarkDecorations>) => decorations.filter((decoration) => decoration.from === decoration.to);
+
+  it('draws a single draft redline for interleaved edits in one clause', () => {
+    const revised = schema.node('paragraph', { blockId: 'b1' }, schema.text('他昨晚在案头认真查核了这一章的全部引文'));
+    const decorations = blockMarkDecorations(revised, 0, [], undefined, undefined, undefined, false, undefined, '他昨天在书房里仔细核对了第三章的引文');
+    expect(widgets(decorations).map((decoration) => decoration.spec.key)).toEqual([
+      'inline-del:draft:b1:0:天在书房里仔细核对了第三章的:false',
+    ]);
+    expect(decorations.filter((decoration) => decoration.from !== decoration.to).map(({ from, to }) => [from, to])).toEqual([[3, 18], [0, revised.nodeSize]]);
+  });
 
   it('draws the applied badge after the words it wrote and at the point a deletion left, with the revision line', () => {
     const restore = installMiniDom();

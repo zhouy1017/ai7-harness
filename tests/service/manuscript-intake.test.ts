@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, cp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -7,14 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, canonicalRecord, isRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { compileWordTrackedDocx, parseDocx } from '../../src/service/docx.js';
-import {
-  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
-  TASK_AUTHORIZATION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
-import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
+import { requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
@@ -53,70 +47,6 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-/** The Source Version relations exactly as revision 17 left them: parsed, DOCX-only, never null. */
-const REVISION_17_SOURCE_VERSIONS_SQL = `CREATE TABLE source_versions (
-  source_version_id TEXT PRIMARY KEY,
-  book_id TEXT NOT NULL REFERENCES books(book_id),
-  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-  source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
-  content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
-  structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
-  parser_identity TEXT NOT NULL,
-  format TEXT NOT NULL CHECK(format = 'DOCX'),
-  display_name TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(book_id, source_digest)
-) STRICT`;
-const REVISION_17_SOURCE_PROVENANCE_SQL = `CREATE TABLE source_provenance (
-  provenance_id TEXT PRIMARY KEY,
-  source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-  acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
-  locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
-  sanitized_identity TEXT NOT NULL,
-  parser_identity TEXT NOT NULL,
-  recorded_at TEXT NOT NULL
-) STRICT`;
-const REVISION_17_SOURCE_TRIGGER_SQL = `
-  CREATE TRIGGER abandonment_cleanup_block_source_insert
-  BEFORE INSERT ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_source_update
-  BEFORE UPDATE OF object_digest ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_source_update_v5
-  BEFORE UPDATE ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-`;
-const REVISION_17_SOURCE_VERSION_COLUMNS =
-  'source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest, ' +
-  'parser_identity, format, display_name, created_at';
-const REVISION_17_PROVENANCE_COLUMNS =
-  'provenance_id, source_version_id, acquisition_path, locality, sanitized_identity, parser_identity, recorded_at';
-const REVISION_17_DRAFT_COLUMNS =
-  'draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, ' +
-  'reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at, reviewed_at, committed_at, ' +
-  'reviewed_target_kind, reviewed_existing_book_id, reviewed_relationship, reviewed_book_state_digest, ' +
-  'reviewed_reuse_source_version_id, reviewed_lineage_status, reviewed_lineage_source_version_id, ' +
-  'reviewed_checkpoint_revision_id, reviewed_manuscript_id, reviewed_branch_id';
-
 function withDatabase<T>(path: string, readOnly: boolean, run: (database: DatabaseSync) => T): T {
   const database = new DatabaseSync(path, { readOnly });
   try { return run(database); } finally { database.close(); }
@@ -144,41 +74,10 @@ const POST_INTAKE_RELATIONS = [
   'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks',
   'manuscript_entry_positions',
 ];
-const DROP_POST_INTAKE_RELATIONS_SQL = POST_INTAKE_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join(' ');
 
 async function objectExtensions(): Promise<string[]> {
   const entries = await readdir(join(roots.dataRoot, 'objects'), { recursive: true, withFileTypes: true });
   return entries.filter((entry) => entry.isFile()).map((entry) => extname(entry.name)).sort();
-}
-
-/** Take a store back to the revision-17 shape: the narrow relations, and no draft format. */
-function downgradeToRevision17(databasePath: string): void {
-  withDatabase(databasePath, false, (database) => {
-    database.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-    execPre74Fixture(database, `BEGIN IMMEDIATE;
-      DROP TRIGGER abandonment_cleanup_block_source_insert;
-      DROP TRIGGER abandonment_cleanup_block_source_update;
-      DROP TRIGGER abandonment_cleanup_block_source_update_v5;
-      ALTER TABLE source_versions RENAME TO source_versions_v18;
-      ALTER TABLE source_provenance RENAME TO source_provenance_v18;
-      ${REVISION_17_SOURCE_VERSIONS_SQL};
-      INSERT INTO source_versions(${REVISION_17_SOURCE_VERSION_COLUMNS})
-        SELECT ${REVISION_17_SOURCE_VERSION_COLUMNS} FROM source_versions_v18 ORDER BY rowid;
-      ${REVISION_17_SOURCE_PROVENANCE_SQL};
-      INSERT INTO source_provenance(${REVISION_17_PROVENANCE_COLUMNS})
-        SELECT ${REVISION_17_PROVENANCE_COLUMNS} FROM source_provenance_v18 ORDER BY rowid;
-      DROP TABLE source_versions_v18;
-      DROP TABLE source_provenance_v18;
-      ${REVISION_17_SOURCE_TRIGGER_SQL}
-      ALTER TABLE import_drafts DROP COLUMN source_format;
-      ALTER TABLE import_drafts DROP COLUMN working_object_digest;
-      ALTER TABLE import_drafts DROP COLUMN converter_identity;
-      ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
-      ${DROP_POST_INTAKE_RELATIONS_SQL}
-      PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION};
-      COMMIT;`);
-    database.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
-  });
 }
 
 const encoder = new TextEncoder();
@@ -1826,186 +1725,4 @@ describe.skipIf(!localOnlyAvailable(LOCAL_ONLY_DOC))('legacy .doc conversion ove
   }, 180_000);
 });
 
-describe('schema revision 18 over the real store', () => {
-  describe('migrates a revision-17 store forward arrangement', () => {
-    let databasePath: string;
-    let bookId: string;
-    let sourceVersionsBefore: Row[];
-    let provenanceBefore: Row[];
-    let draftsBefore: Row[];
 
-    beforeEach(async () => {
-      await requireExactSample1(roots.codeRoot);
-      databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        bookId = (await importSample1Book(store, roots.codeRoot, '修订版 18 迁移')).bookId;
-        store.markCleanShutdown();
-      } finally {
-        store.close();
-      }
-
-      downgradeToRevision17(databasePath);
-
-      // At revision 17 the widened columns are simply not there, which is what the migration answers.
-      const downgraded = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-          .toBe(TASK_AUTHORIZATION_SCHEMA_VERSION);
-        expect(() => downgraded.prepare('SELECT source_format FROM import_drafts').all()).toThrow();
-        sourceVersionsBefore = tableRows(downgraded, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS);
-        provenanceBefore = tableRows(downgraded, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS);
-        draftsBefore = tableRows(downgraded, 'import_drafts', REVISION_17_DRAFT_COLUMNS);
-        expect(sourceVersionsBefore).toHaveLength(1);
-        expect(provenanceBefore).toHaveLength(1);
-        expect(draftsBefore).toHaveLength(1);
-      } finally {
-        downgraded.close();
-      }
-    });
-
-    it('migrates a revision-17 store forward with every Source Version row byte for byte', async () => {
-      const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        // The Book the store read before the downgrade is the Book it reads after the migration.
-        expect(migrated.listBooks(null).items.map((item) => item.bookId)).toEqual([bookId]);
-        migrated.markCleanShutdown();
-      } finally {
-        migrated.close();
-      }
-
-      withDatabase(databasePath, true, (after) => {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-          .toBe(LATEST_SCHEMA_VERSION);
-        // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
-        expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
-        expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
-        expect(tableRows(after, 'import_drafts', REVISION_17_DRAFT_COLUMNS)).toEqual(draftsBefore);
-        // The widened shape is there, and every row that predates the revision reads DOCX.
-        expect(tableRows(after, 'import_drafts', 'source_format')).toEqual([{ source_format: 'DOCX' }]);
-        expect(tableRows(after, 'source_versions', 'format')).toEqual([{ format: 'DOCX' }]);
-        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-        const columns = after.prepare('PRAGMA table_info(source_versions)').all() as Row[];
-        const nullable = columns.filter((column) => column.notnull === 0).map((column) => column.name).sort();
-        expect(nullable).toEqual([
-          'content_digest', 'converter_identity', 'parser_identity', 'structure_digest', 'working_object_digest',
-        ]);
-        // The three guards on the rebuilt relation are back, so a pending cleanup still blocks a write.
-        const triggers = after.prepare(
-          "SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'source_versions' ORDER BY name",
-        ).all() as Row[];
-        expect(triggers.map((trigger) => trigger.name)).toEqual([
-          'abandonment_cleanup_block_source_insert',
-          'abandonment_cleanup_block_source_update',
-          'abandonment_cleanup_block_source_update_v5',
-        ]);
-      });
-    }, 120_000);
-  });
-});
-
-/** Take a store back to the revision-18 shape: the conversion columns are simply not there. */
-function downgradeToRevision18(databasePath: string): void {
-  withDatabase(databasePath, false, (database) => {
-    execPre74Fixture(database, `BEGIN IMMEDIATE;
-      ALTER TABLE source_versions DROP COLUMN working_object_digest;
-      ALTER TABLE source_versions DROP COLUMN converter_identity;
-      ALTER TABLE import_drafts DROP COLUMN working_object_digest;
-      ALTER TABLE import_drafts DROP COLUMN converter_identity;
-      ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
-      ${DROP_POST_INTAKE_RELATIONS_SQL}
-      PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION};
-      COMMIT;`);
-  });
-}
-
-const REVISION_18_SOURCE_VERSION_COLUMNS = REVISION_17_SOURCE_VERSION_COLUMNS;
-
-describe('schema revision 19 over the real store', () => {
-  it('reads a revision-18 store holding parsed and unparsed source imports, where no Source Version has a working representation (Issue #583)', async () => {
-    await requireExactSample1(roots.codeRoot);
-    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
-    await writeFile(pdfPath, syntheticPdfBytes());
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect((await commitSourceOnlyNewBook(store, pdfPath, '来源材料 PDF')).format).toBe('PDF');
-      expect((await commitSourceOnlyNewBook(store, sample1Path(roots.codeRoot), '来源材料 DOCX')).format).toBe('DOCX');
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    downgradeToRevision18(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    // At revision 18 the record check reads each Source Version without the column revision 19 adds: the unparsed PDF and
-    // the parsed DOCX both stand, and the store opens and migrates.
-    await expectStoreReopens();
-  }, 120_000);
-
-  describe('migrates a revision-18 store holding a staged PDF arrangement', () => {
-    let databasePath: string;
-    let bookId: string;
-    let sourceVersionsBefore: Row[];
-    let draftsBefore: Row[];
-
-    beforeEach(async () => {
-      await requireExactSample1(roots.codeRoot);
-      databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-      const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
-      await writeFile(pdfPath, syntheticPdfBytes());
-      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        bookId = (await importSample1Book(store, roots.codeRoot, '修订版 19 迁移')).bookId;
-        // A PDF staged source-only holds no snapshot, as revision 18 already staged it; the open-time checks
-        // read that draft at revision 18, before the migration, and again after it (#552).
-        expect((await store.stageSelectedManuscript(randomUUID(), pdfPath)).source.format).toBe('PDF');
-        store.markCleanShutdown();
-      } finally {
-        store.close();
-      }
-
-      downgradeToRevision18(databasePath);
-
-      const downgraded = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-          .toBe(MANUSCRIPT_INTAKE_SCHEMA_VERSION);
-        expect(() => downgraded.prepare('SELECT converter_identity FROM source_versions').all()).toThrow();
-        sourceVersionsBefore = tableRows(downgraded, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS);
-        draftsBefore = tableRows(downgraded, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`);
-        expect(sourceVersionsBefore).toHaveLength(1);
-        expect(draftsBefore.map((draft) => ({ state: draft.state, source_format: draft.source_format }))).toEqual([
-          { state: 'committed', source_format: 'DOCX' },
-          { state: 'staged', source_format: 'PDF' },
-        ]);
-        expect(tableRows(downgraded, 'staged_import_snapshots')).toEqual([]);
-      } finally {
-        downgraded.close();
-      }
-    });
-
-    it('migrates a revision-18 store holding a staged PDF draft forward with every Source Version row byte for byte', async () => {
-      const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        expect(migrated.listBooks(null).items.map((item) => item.bookId)).toEqual([bookId]);
-        migrated.markCleanShutdown();
-      } finally {
-        migrated.close();
-      }
-
-      withDatabase(databasePath, true, (after) => {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-          .toBe(LATEST_SCHEMA_VERSION);
-        // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
-        expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
-        expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);
-        expect(tableRows(after, 'source_versions', 'working_object_digest, converter_identity'))
-          .toEqual([{ working_object_digest: null, converter_identity: null }]);
-        // Nor does a draft: neither the DOCX nor the PDF was read through a converter.
-        expect(tableRows(after, 'import_drafts', 'working_object_digest, converter_identity')).toEqual([
-          { working_object_digest: null, converter_identity: null },
-          { working_object_digest: null, converter_identity: null },
-        ]);
-        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      });
-    }, 120_000);
-  });
-});

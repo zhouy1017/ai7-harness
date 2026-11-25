@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, opendir, realpath, rm } from 'node:fs/promises';
@@ -89,25 +90,11 @@ export const SCHEDULED_BACKUP_SCHEMA_SQL = {
 } as const;
 
 /** Every backup relation is a ledger: a row is appended once and never rewritten or removed. */
-export const SCHEDULED_BACKUP_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(SCHEDULED_BACKUP_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SCHEDULED_BACKUP_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SCHEDULED_BACKUP_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const SCHEDULED_BACKUP_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  backup_preferences: ['supersedes_preference_id>backup_preferences.preference_id:NO ACTION/NO ACTION/NONE'],
-  scheduled_backup_removals: ['backup_id>scheduled_backups.backup_id:NO ACTION/NO ACTION/NONE'],
-};
+export const SCHEDULED_BACKUP_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  backup_preferences: 'SCHEDULED_BACKUP_LEDGER_IMMUTABLE',
+  scheduled_backups: 'SCHEDULED_BACKUP_LEDGER_IMMUTABLE',
+  scheduled_backup_removals: 'SCHEDULED_BACKUP_LEDGER_IMMUTABLE',
+});
 
 export class ScheduledBackupError extends Error {
   constructor(readonly code: string, message: string) {
@@ -122,24 +109,7 @@ function requireBackup(condition: unknown, code: string, message: string): asser
 
 type SqlRow = Record<string, SQLOutputValue>;
 
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'backup_preferences'";
 const INVALID = '定期自动备份的记录已损坏。';
-
-/** Revision 56's relations, created once: a store that predates them gains three empty ledgers and nothing existing moves. */
-export function initializeScheduledBackupSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SCHEDULED_BACKUP_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SCHEDULED_BACKUP_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Scheduled backup schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** The fixed backup location beside the Agent Data Root (ADR 0079 §1.4): its sibling `<name>-backups`, never a link. */
 export function backupLocationFor(dataRoot: string): string {

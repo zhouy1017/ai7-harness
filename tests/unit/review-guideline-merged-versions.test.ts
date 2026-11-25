@@ -1,7 +1,8 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../src/service/analysis/canonical.js';
-import { ReviewGuidelineLedger, initializeReviewGuidelineSchema } from '../../src/service/review-guidelines.js';
+import { ReviewGuidelineLedger, REVIEW_GUIDELINE_SCHEMA_SQL } from '../../src/service/review-guidelines.js';
 import { MAX_GUIDELINE_MERGED_VERSIONS_SHOWN, MAX_FRAME_BYTES, type ReviewGuidelineDocumentProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for the guideline versions a merged Book brings (Issue #434 review; ADR 0079 §1.5; V2-UX-KB-002): a Review Run
@@ -16,7 +17,7 @@ const SOURCE = { displayName: '本社文字规范.txt', format: 'text' as const,
 
 function store(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
-  initializeReviewGuidelineSchema(db);
+  createBaselineRelations(db, REVIEW_GUIDELINE_SCHEMA_SQL);
   db.exec(`
     CREATE TABLE books (book_id TEXT PRIMARY KEY, title TEXT NOT NULL);
     CREATE TABLE review_runs (review_run_id TEXT PRIMARY KEY, book_id TEXT NOT NULL, ordinal INTEGER NOT NULL, created_at TEXT NOT NULL, canonical_json TEXT NOT NULL);

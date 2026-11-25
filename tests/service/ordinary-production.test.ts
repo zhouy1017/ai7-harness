@@ -1,8 +1,9 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
+import { evidenceTranslator } from '../../src/service/fast-role/material-translation-contract.js';
+import { STRUCTURED_FLASH_TASKS } from '../../src/service/fast-role/flash-task-contract.js';
 import * as egressGate from '../../src/service/provider/egress-gate.js';
 import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { randomUUID } from 'node:crypto';
@@ -64,6 +65,8 @@ import {
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { sample1Seed } from '../support/sample1-seed.js';
+import { legacySampleService } from '../support/upgrade-sample1.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // One explicit model-request capability per test application.
@@ -107,6 +110,9 @@ afterEach(async () => {
     }
   }
   await roots.dispose();
+  // A seeded Book no case took would be a Book the case never had before the seed.
+  const unused = seededBooks.size; seededBooks.clear();
+  expect(unused).toBe(0);
 });
 
 vi.setConfig({ hookTimeout: 60_000 });
@@ -151,7 +157,14 @@ async function productionLaunch(): Promise<ProductionLaunch> {
   return state;
 }
 
-async function openProductionStore(dataRoot: string = roots.dataRoot): Promise<{ store: EditorialStore; production: ProductionLaunch }> {
+// A store opened with `seed` starts from a copy of one imported sample1 store (#1621); its first `sample1Book` is that Book, and a
+// second Book (or a store opened without `seed`) is imported.
+const seeded = sample1Seed({ title: '合成样书' });
+const seededBooks = new Map<EditorialStore, string>();
+
+async function openProductionStore(dataRoot: string = roots.dataRoot, seed = false): Promise<{ store: EditorialStore; production: ProductionLaunch }> {
+  const seedOfStore = seed ? await seeded() : null;
+  seedOfStore?.place(dataRoot);
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -161,6 +174,7 @@ async function openProductionStore(dataRoot: string = roots.dataRoot): Promise<{
     baselineAnalysisRoute: null,
   });
   opened.push(store);
+  if (seedOfStore !== null) seededBooks.set(store, seedOfStore.book.bookId);
   const production = await productionLaunch();
   store.baselineAnalysisLedger.bindLaunch(production.launch);
   await production.rebind(store);
@@ -201,6 +215,8 @@ function prepare(store: EditorialStore, bookId: string, policy: LaunchPolicyProj
 }
 
 async function sample1Book(store: EditorialStore, title: string): Promise<string> {
+  const placed = seededBooks.get(store);
+  if (placed !== undefined) { seededBooks.delete(store); return placed; }
   const { bookId } = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   return bookId;
@@ -270,6 +286,57 @@ async function run(store: EditorialStore, execution: BaselineAnalysisExecutionOw
   return store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
 }
 
+it.each(['v35', 'v36'] as const)('keeps the authorized %s policy through reopening, command replay and first dispatch', async (version) => {
+  // The integration predecessor runs its own launch command and policy resolver against an empty store.
+  const writer = version === 'v35'
+    ? await (await legacySampleService(roots.dataRoot, roots.codeRoot, '3b18a7512a6010e5f208db8f3396f158d763e71c'))(roots.dataRoot)
+    : await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  opened.push(writer);
+  const launch = await productionLaunch();
+  writer.baselineAnalysisLedger.bindLaunch(launch.launch);
+  await configure(writer, launch, 'opencode-go');
+  const bookId = await sample1Book(writer, '合成样书');
+  const command = { bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null };
+  const first = writer.launchBaselineAnalysis(command, launch.policy);
+  const consent = first.ledger.loadExecutionPlan(first.runRecordId);
+  expect(consent.selectedPolicyIdentity?.providerProcessingVersion).toBe(version);
+  expect(first.ledger.executionBindingOf(first.runRecordId)).toBeNull();
+  writer.markCleanShutdown();
+  writer.close();
+
+  const reopened = await openProductionStore();
+  reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const replay = reopened.store.launchBaselineAnalysis(command, reopened.production.policy);
+  expect(replay).toMatchObject({ repeated: true, runRecordId: first.runRecordId, taskIntentId: first.taskIntentId });
+  const pin = { operationalScope: 'ordinary-production', providerProcessingVersion: version,
+    activePolicySetVersion: consent.selectedPolicyIdentity!.activePolicySetVersion, liveTransmissions: 'bounded-by-run' };
+  const assertConsent = (facts: ReturnType<typeof replay.ledger.loadExecutionPlan>) => {
+    expect(facts).toMatchObject({ retainedPolicyPin: pin, selectedPolicyIdentity: consent.selectedPolicyIdentity,
+      planEnvelopeDigest: consent.planEnvelopeDigest, providerResolutionPlanDigest: consent.providerResolutionPlanDigest,
+      credentialReference: consent.credentialReference, planVersionId: consent.planVersionId });
+  };
+  assertConsent(replay.ledger.loadExecutionPlan(replay.runRecordId));
+  const prepared = reopened.store.inspectBaselineAnalysis(bookId);
+  const calls: StubCall[] = [];
+  const execution = owner(reopened.store, reopened.production, stubTransport(calls, await chainAnswers(prepared)));
+  execution.admitAndDispatch(replay.runRecordId, replay.ledger);
+  await execution.whenIdle();
+  const binding = replay.ledger.executionBindingOf(replay.runRecordId)!;
+  expect(binding.binding.policyPin).toEqual(pin);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(reopened.store.inspectBaselineAnalysis(bookId).resultSetRevision?.policyPin).toEqual(pin);
+  await execution.dispose();
+  reopened.store.markCleanShutdown();
+  reopened.store.close();
+
+  const bound = await openProductionStore();
+  bound.store.reconcileStoppedBaselineAnalysisRuns();
+  const repeated = bound.store.launchBaselineAnalysis(command, bound.production.policy);
+  expect(repeated).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
+  assertConsent(repeated.ledger.loadExecutionPlan(repeated.runRecordId));
+  expect(repeated.ledger.executionBindingOf(repeated.runRecordId)).toEqual(binding);
+}, 120_000);
+
 it('keeps launch fields enumerable across retained-reader fallback without freezing getters or changing their receiver (#1161)', async () => {
   const { store, production } = await openProductionStore();
   const ledger = store.baselineAnalysisLedger;
@@ -319,7 +386,7 @@ it('keeps launch fields enumerable across retained-reader fallback without freez
 });
 
 it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule without inventing a serial receipt or admission history (#1131 rev10)', async (selection) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '合成规则唯一性'); const prepared = prepare(store, bookId, production.policy);
   const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
   const runId = authorized.dispatchRunRecordId!;
@@ -345,7 +412,7 @@ it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule 
 });
 
 it.each(['missing', 'denied', 'different-binding'] as const)('refuses a %s frozen-policy resolver before history or secret access (#1131)', async (resolution) => {
-  const { store, production } = await openProductionStore();
+  const { store, production } = await openProductionStore(undefined, true);
   const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成固定策略准入拒绝'); const prepared = prepare(store, bookId, production.policy);
   const runId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
@@ -368,7 +435,7 @@ it.each(['missing', 'denied', 'different-binding'] as const)('refuses a %s froze
 });
 
 it('starts a queued enrolled background Run on its frozen route after Main becomes missing (#1131)', async () => {
-  const { store, production } = await openProductionStore();
+  const { store, production } = await openProductionStore(undefined, true);
   const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成等待后台固定路线');
   const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
@@ -395,7 +462,7 @@ it('starts a queued enrolled background Run on its frozen route after Main becom
 });
 
 it('reopens a stopped Run on its frozen official route after Main switches to an unready connection (#1131)', async () => {
-  const { store, production } = await openProductionStore(); const reference = await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成重启后固定路线'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; let limited = true;
   const transport = stubTransport(calls, await chainAnswers(prepared), (ordinal) => ordinal === 3 && limited
@@ -437,7 +504,7 @@ it('restores only exact current baseline contract variants without changing the 
 });
 
 it.each(['unrelated', 'retained-v1'] as const)('refuses an unmatched %s baseline contract before continuation effects (#1131 rev14)', async (variant) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成契约失配拒绝'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const reads: string[] = [];
   const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared), () => ({ status: 402, body: { error: { message: 'Insufficient Balance' } } })), reads);
@@ -481,7 +548,7 @@ function snapshotAtBoundary(name: string): string {
 }
 
 it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('reconciles a returned %s response lost before its checkpoint without a paused row or resend (#1131)', async (stage) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的阶段中断'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const transport = stubTransport(calls, await chainAnswers(prepared));
   const reached = deferred(); const release = deferred();
@@ -508,7 +575,7 @@ it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('reconciles a r
 });
 
 it('reuses immediate completed reduction evidence and its exact usage after restart without a preceding pause (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的归纳结算'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const checkpoint = ledger.checkpointStageRequests.bind(ledger); let snapshot: string | undefined;
   vi.spyOn(ledger, 'checkpointStageRequests').mockImplementation((runId, stage, stages, usage) => {
@@ -533,7 +600,7 @@ it('reuses immediate completed reduction evidence and its exact usage after rest
 });
 
 it('settles a fenced unit by its frozen contract after a restart with Main missing, and the store opens again (#1131 review)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '公开样书的冻结契约结算'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const admit = ledger.admitModelRequest.bind(ledger); let snapshot: string | undefined;
   const fence = vi.spyOn(ledger, 'admitModelRequest').mockImplementation((runId, request, claim) => {
@@ -565,7 +632,7 @@ it('settles a fenced unit by its frozen contract after a restart with Main missi
 });
 
 it('keeps an actually selected finite-ceiling production v2 Run serial with free global capacity (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的有限预算'); const initial = prepare(store, bookId, production.policy);
   const prepared = store.editBaselineAnalysisPlan({ bookId, taskIntentId: initial.taskIntent!.taskIntentId, planEnvelopeDigest: initial.planEnvelope!.digest,
     removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
@@ -588,7 +655,7 @@ it('keeps an actually selected finite-ceiling production v2 Run serial with free
 });
 
 it('keeps a historical v2 binding without an execution receipt serial on explicit resume (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的历史绑定'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const begin = ledger.beginRequestAdmissions.bind(ledger); let snapshot: string | undefined;
   vi.spyOn(ledger, 'beginRequestAdmissions').mockImplementation((runId, width, rule) => {
@@ -622,7 +689,7 @@ it('keeps a historical v2 binding without an execution receipt serial on explici
 
 /** An actual pre-receipt attempt, extended exclusively through the retained legacy question/answer/claim writers. */
 async function legacyClaimLaunch() {
-  const application = await openProductionStore(); await configure(application.store, application.production, 'opencode-go');
+  const application = await openProductionStore(undefined, true); await configure(application.store, application.production, 'opencode-go');
   const bookId = await sample1Book(application.store, '合成历史澄清回答'); const prepared = prepare(application.store, bookId, application.production.policy);
   const initialLedger = application.store.baselineAnalysisLedger; const begin = initialLedger.beginRequestAdmissions.bind(initialLedger);
   let snapshot: string | undefined;
@@ -787,7 +854,7 @@ it.each(['runRecordId', 'sequence', 'recordedAt'].flatMap((field) => [false, tru
   });
 
 it.each(['carriedUsage', 'stageContinuation'] as const)('refuses a rehashed inherited %s copy on a later governed row (#1131 review)', async (field) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的阶段证据副本'); const prepared = prepare(store, bookId, production.policy);
   const runId = (await run(store, owner(store, production, stubTransport([], await chainAnswers(prepared))), bookId, prepared)).run!.runRecordId;
   store.markCleanShutdown(); store.close();
@@ -812,7 +879,7 @@ it.each(['carriedUsage', 'stageContinuation'] as const)('refuses a rehashed inhe
 });
 
 it('claims a live clarification answer only with its granted fence and preserves a pause plus queued restart evidence (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的排队澄清'); const prepared = prepare(store, bookId, production.policy);
   const answers = await chainAnswers(prepared); const calls: StubCall[] = []; let asked = false;
   const transport = stubTransport(calls, answers, (ordinal) => {
@@ -853,7 +920,7 @@ it('claims a live clarification answer only with its granted fence and preserves
 });
 
 it.each(['generic', 'AbortError', 'TimeoutError', 'forged-no-send'] as const)('never resends a possibly-sent production %s rejection during settlement, continuation or reopen (#1131)', async (kind) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的未知结果回归');
   const prepared = prepare(store, bookId, production.policy); const calls: StubCall[] = [];
   const normal = stubTransport(calls, await chainAnswers(prepared)); let firstUnitCalls = 0;
@@ -895,7 +962,7 @@ it('preserves the committed production outcome when real harness cleanup subsequ
     }
     return handle;
   });
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的清理回归'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared)));
   const settled = await run(store, execution, bookId, prepared); const runRecordId = settled.run!.runRecordId;
@@ -942,7 +1009,7 @@ it.each(['queued', 'body', 'current-projection'] as const)('orders real-store se
     probe: (selection, execution) => testModelServiceConnection(store, roots.codeRoot, {
       scope: 'ordinary-production', nativeFetch: (async () => { sends += 1; return { status: 200, json: async () => { consuming.resolve(); return body.promise; } }; }) as unknown as typeof fetch,
     }, selection, { resolve: async () => 'public-synthetic-placeholder' }, execution),
-    probeCompleted: async () => { refreshed += 1; await production.rebind(store); finalFastRoute = store.getConfiguredModelRoleBinding('fast-interaction')?.route; },
+    probeCompleted: async () => { refreshed += 1; await production.rebind(store); finalFastRoute = store.getConfiguredModelRoleBinding('foreground-flash')?.route; },
     dispatch: async (request) => {
       if (request.op === 'saveModelServiceConnection') {
         const value = store.saveModelServiceConnection(request.input.connectionName, request.input.credentialReference,
@@ -950,7 +1017,7 @@ it.each(['queued', 'body', 'current-projection'] as const)('orders real-store se
         await production.rebind(store); return { id: request.id, ok: true, op: request.op, result: value };
       }
       if (request.op === 'getModelServiceStoredState') return { id: request.id, ok: true, op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy(), channels: [] } };
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy(), channels: [], modelRoles: store.getModelRoles() } };
       if (request.op === 'selectFastRoleModel') {
         store.selectFastRoleModel(request.input.route, request.input.modelId); await production.rebind(store);
         return { id: request.id, ok: true, op: request.op, result: undefined };
@@ -1026,14 +1093,14 @@ it('starts the selected finite model deadline only after real shared capacity gr
 
 describe('ordinary production over exact sample1 with a stub transport (Issue #811)', { timeout: 120_000 }, () => {
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('dispatches an enrolled background Run under v23 on %s with its mandatory frozen ceiling (#864)', async (route) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, route);
     const reference = await sample1Book(store, 'L2 后台合成回答参照');
     const answers = await chainAnswers(prepare(store, reference, production.policy));
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v35');
+    expect(selected.providerProcessing.version).toBe('v36');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -1080,7 +1147,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('discloses %s transmission and metered usage with no default ceiling before authorization', async (route) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, route);
     const bookId = await sample1Book(store, 'L2 正式使用披露');
     const prepared = prepare(store, bookId, production.policy);
@@ -1094,7 +1161,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(blocked.start.readiness).toBe('needs-connection');
   });
   it('says 模型服务需设置 and prepares nothing until a route is configured', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     expect(production.policy.providerProcessing).toMatchObject({ bindingState: 'setup-required', admittedRules: [], liveTransmissionAllowed: false });
     const bookId = await sample1Book(store, 'L2 需设置');
     let refused: unknown = null;
@@ -1112,9 +1179,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
 
   it.each([{ model: 'deepseek-flash', effort: undefined, label: 'DeepSeek V4.1 Flash' },
     { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' },
-    { model: 'account-custom-model', effort: 'vendor-future-level', label: 'account-custom-model@vendor-future-level' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
+    { model: 'account-custom-model', effort: 'high', label: 'account-custom-model@high' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
     const { store, production } = await openProductionStore();
     const credentialReference = await configure(store, production, 'deepseek-open-platform');
+    if (model === 'account-custom-model') seedModelEfforts(store, 'deepseek-open-platform', { [model]: ['low', 'high'] });
     store.selectMainRoleModel('deepseek-open-platform', model, effort ?? 'off');
     const selected = store.getConfiguredModelRoleBinding('main-editorial')!;
     const configured = { ...OFFICIAL, model, credentialReference,
@@ -1157,7 +1225,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
     // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
     for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' && rule.ruleId !== 'ordinary-production-learning-curation')) {
-      if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
+      if (Object.hasOwn(STRUCTURED_FLASH_TASKS, rule.taskKinds[0]!)) {
+        const kind = rule.taskKinds[0] as keyof typeof STRUCTURED_FLASH_TASKS;
+        expect(rule.outboundDataCategories).toEqual([STRUCTURED_FLASH_TASKS[kind].productionCategory]);
+      } else if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
         expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'book-metadata-and-synopsis']));
         expect(rule.outboundDataCategories).not.toContain('unpublished-full-content');
       } else expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
@@ -1167,7 +1238,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v35' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v36' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -1184,13 +1255,13 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v36' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v36' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
     const cacheRoot = join(dirname(roots.dataRoot), 'ai7-harness-provider-cache');
-    const first = await openProductionStore();
+    const first = await openProductionStore(undefined, true);
     await configure(first.store, first.production, 'opencode-go');
     const bookId = await sample1Book(first.store, 'L2 相同输入');
     const prepared = prepare(first.store, bookId, first.production.policy);
@@ -1246,7 +1317,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it.each(['foreground', 'background'] as const)('keeps a %s Run on its frozen binding when settings switch route', async (origin) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, 'opencode-go');
     const first = await sample1Book(store, 'L2 切换前');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
@@ -1284,7 +1355,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it('stops on the account limit as 模型服务账户限额 with 续行: no retry, no fallback, the same route again', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     const frozenReference = await configure(store, production, 'deepseek-open-platform');
     const bookId = await sample1Book(store, 'L2 账户限额');
     const prepared = prepare(store, bookId, production.policy);
@@ -1324,7 +1395,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it('runs without a ceiling by default and honours the one the editor sets', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, 'opencode-go');
     const bookId = await sample1Book(store, 'L2 预算上限');
     const prepared = prepare(store, bookId, production.policy);
@@ -1420,10 +1491,122 @@ describe('schema 72 (Issue #811)', () => {
 
 
 describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
+  it('allows a confirmed guideline request to wait for its first byte and settles a silent send once', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic guideline', null, 'ready', 'opencode-go');
+    const fast = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, fast);
+    const reading = deferred();
+    let sends = 0;
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: (async (_url: string, init: { signal: AbortSignal }) => {
+        sends++;
+        return { status: 200, json: () => new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+          reading.resolve();
+        }) };
+      }) as unknown as typeof fetch }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    vi.useFakeTimers();
+    const contract = STRUCTURED_FLASH_TASKS['guideline-clause-formatting'];
+    const task = owner.execute(contract, ['合成条款'], 'preview');
+    try {
+      await reading.promise;
+      await vi.advanceTimersByTimeAsync(contract.budget.firstByteSeconds * 1000 - 1);
+      expect(owner.busy).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await task).toMatchObject({ state: 'outcome-unknown', value: null });
+      expect(sends).toBe(1);
+      expect(owner.busy).toBe(false);
+    } finally { owner.dispose(); vi.useRealTimers(); }
+  });
+
+  it('validates object-mode Go output on all four general structured contracts', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'deepseek-v4-flash' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, null, { pro: null, flash: binding });
+    const replies: unknown[][] = [['目录','书目','索引'], ['second'], ['核对图题。'], [{ paragraph: 1, recommended: '甲', discouraged: ['乙'] }]];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        expect(request).toMatchObject({ model: binding.model, response_format: { type: 'json_object' } });
+        expect(request.messages[0].content).toContain('"items"');
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items: replies.shift() }) }, finish_reason: 'stop' }] }));
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    try {
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['retrieval-query-expansion'], '目录', 'expand')).toMatchObject({ state: 'checked' });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['retrieval-rerank'], { query: '目录', candidates: [{ id: 'second', preview: '书目' }] }, 'rank'))
+        .toEqual({ state: 'checked', value: ['second'] });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['guideline-clause-formatting'], ['核对图题。'], 'format')).toMatchObject({ state: 'checked' });
+      expect(await owner.execute(STRUCTURED_FLASH_TASKS['standards-table-formatting'], ['甲乙'], 'table')).toMatchObject({ state: 'checked', value: [{ status: '待确认' }] });
+      expect(replies).toHaveLength(0);
+    } finally { owner.dispose(); }
+  });
+
+  it('validates each new underlying Flash answer on the configured route without replaying an earlier result', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic formatter', null, 'ready', 'openai-platform');
+    seedModelEfforts(store, 'openai-platform', { 'synthetic-formatter': ['low'] });
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'synthetic-formatter', reasoningEffort: 'low' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, binding);
+    const bodies: Array<Record<string, unknown>> = [];
+    const replies = ['{"items":["核对图题。"]}', '["修改原文。"]'];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return responsesTransport([], replies.shift()!)(url, init);
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    try {
+      const contract = STRUCTURED_FLASH_TASKS['guideline-clause-formatting'];
+      const source = ['核对图题。'];
+      expect(await owner.execute(contract, source, 'preview')).toEqual({ state: 'checked', value: source });
+      expect(await owner.execute(contract, source, 'preview')).toMatchObject({ state: 'fallback', value: null, formattingParseFailure: true });
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]).toMatchObject({ model: 'synthetic-formatter', max_output_tokens: contract.budget.maxOutputTokens });
+    } finally { owner.dispose(); }
+  });
+
+  it('serves a table import and search expansion in FIFO order on the shared underlying Flash owner', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Synthetic queue', null, 'ready', 'opencode-go');
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'opencode-go', modelId: 'deepseek-v4-flash' });
+    const binding = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, null, { pro: null, flash: binding });
+    const firstSend = deferred(), firstReply = deferred();
+    const calls: string[] = [];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body));
+        const message = request.messages.at(-1).content;
+        calls.push(message);
+        if (calls.length === 1) {
+          firstSend.resolve();
+          await firstReply.promise;
+        }
+        const items = message.includes('甲乙') ? [{ paragraph: 1, recommended: '甲', discouraged: ['乙'] }] : ['目录', '书目', '索引'];
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items }) }, finish_reason: 'stop' }] }));
+      } }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-placeholder' }) });
+    const table = owner.execute(STRUCTURED_FLASH_TASKS['standards-table-formatting'], ['甲乙'], 'table');
+    try {
+      await firstSend.promise;
+      const search = owner.execute(STRUCTURED_FLASH_TASKS['retrieval-query-expansion'], '目录', 'expand');
+      expect(owner.busy).toBe(true);
+      expect(calls).toEqual(['["甲乙"]']);
+      firstReply.resolve();
+      expect(await table).toMatchObject({ state: 'checked', value: [{ recommended: '甲' }] });
+      expect(await search).toEqual({ state: 'checked', value: ['目录', '书目', '索引'] });
+      expect(calls).toEqual(['["甲乙"]', '"目录"']);
+      expect(owner.busy).toBe(false);
+    } finally { firstReply.resolve(); owner.dispose(); }
+  });
+
   it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Fast effort', null, 'ready', 'openai-platform');
-    store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'high');
+    seedModelEfforts(store, 'openai-platform', { 'custom-fast-model': ['low', 'high'] });
+    store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'custom-fast-model', reasoningEffort: 'high' });
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
     const bodies: Array<Record<string, unknown>> = [];
@@ -1439,7 +1622,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const answer = await owner.ask('material-translation', 'Public synthetic reference text.', 'effort-proof');
       expect(answer).toMatchObject({ kind: 'answered', binding: { model: 'custom-fast-model', reasoningEffort: 'high' } });
       expect(bodies).toHaveLength(1); expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
-      store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'low');
+      store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId: 'custom-fast-model', reasoningEffort: 'low' });
       const second = await owner.ask('material-translation', 'Public synthetic second reference text.', 'second-effort-proof');
       expect(second).toMatchObject({ kind: 'answered', binding: { reasoningEffort: 'low' } });
       expect(bodies).toHaveLength(2); expect(bodies[1]).toMatchObject({ reasoning: { effort: 'low' } });
@@ -1452,10 +1635,35 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const body = JSON.parse(String(init.body));
       calls.push({ url, model: body.model, cap: body.max_output_tokens });
       expect(body.tools).toBeUndefined(); expect(body.stream).toBeUndefined();
-      return { status: 200, json: async () => ({ status: 'completed', output: [{ type: 'reasoning', id: 'rs_public_synthetic', summary: [], encrypted_content: 'public-synthetic-opaque-reasoning' }, { type: 'message', role: 'assistant',
+      return { status: 200, json: async () => ({ model: body.model, status: 'completed', output: [{ type: 'reasoning', id: 'rs_public_synthetic', summary: [], encrypted_content: 'public-synthetic-opaque-reasoning' }, { type: 'message', role: 'assistant',
         content: [{ type: 'output_text', text: answer }] }], usage: { input_tokens: 12, output_tokens: 7, output_tokens_details: { reasoning_tokens: 2 } } }) };
     }) as unknown as typeof fetch;
   }
+
+  it('translates 来源译文 on the recommended underlying Flash when only a Pro model is chosen', async () => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Pro only OpenAI', null, 'ready', 'openai-platform');
+    store.selectModelServiceRoute('openai-platform');
+    store.selectMainRoleModel('openai-platform', 'gpt-5.6-sol');
+    store.saveModelServiceConnection('Foreground Go', null, 'ready', 'opencode-go');
+    store.selectForegroundFlashModel('opencode-go', 'different-foreground-model');
+    const foreground = store.getConfiguredModelRoleBinding('foreground-flash')!;
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const fast = store.getConfiguredModelRoleBinding('underlying-flash')!;
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', main, foreground, { pro: main, flash: fast });
+    const calls: Array<{ url: string; model: string; cap: number }> = [];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA,
+        translations: [{ n: 1, text: '只选 Pro 的合成译文。' }] })) }, () => policy, () => main.credentialReference, { resolve: async () => 'public-synthetic-placeholder' }) });
+    try {
+      const result = await materialTranslator(owner, 'ordinary-production', () => 1).translate('b'.repeat(64), ['Public synthetic reference text for a Pro-only translation.'], 'pro-only');
+      expect(result.kind).toBe('translated');
+      const evidence = await evidenceTranslator(() => owner)({ text: 'Synthetic evidence sentence.', url: 'https://example.org/evidence' });
+      expect(evidence).toMatchObject({ route: fast.route, model: fast.model });
+      expect(calls.map(call => call.model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna']);
+      expect(foreground.model).toBe('different-foreground-model');
+    } finally { owner.dispose(); }
+  });
 
   it('tests, independently selects both reviewed models, restarts and translates through the exact persisted composition', async () => {
     let { store } = await openProductionStore();
@@ -1471,7 +1679,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const tested = await testModelServiceConnection(store, roots.codeRoot,
         { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') }, { route: 'openai-platform', modelId }, resolver, { requestGovernor });
       expect(tested).toMatchObject({ modelId, outcome: 'passed', verified: 'buffered-text-only' });
-      store.selectFastRoleModel('openai-platform', modelId);
+      store.selectUnderlyingModel({ roleId: 'underlying-flash', route: 'openai-platform', modelId });
       expect(store.getConfiguredModelRoleBinding('main-editorial')?.credentialReference).toBe(official.credentialReference);
       expect(store.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe(modelId);
     }
@@ -1490,7 +1698,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(result.kind).toBe('translated');
       if (result.kind !== 'translated') throw new Error('production translation failed');
       expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
-        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v35',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v36',
           usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
       expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
         { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
@@ -1513,7 +1721,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const record = JSON.parse(String(translations[0]!.canonical_json));
         expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
           endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
-          policyVersion: 'v35', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+          policyVersion: 'v36', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
         expect(record.label).toBe('来源译文');
         expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
       } finally { database.close(); }
@@ -1539,7 +1747,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const transport = vi.fn(async () => {
       if (failure === 'unknown') throw new Error('synthetic transport failure after submission');
       return { status: failure === 'invalid-key' ? 401 : failure === 'account-limit' ? 429 : 200,
-        json: async () => failure === 'unexpected-text' ? { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'unexpected public synthetic answer' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
+        json: async () => failure === 'unexpected-text' ? { model: 'gpt-5.6-luna', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'unexpected public synthetic answer' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
           : failure === 'refusal' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'synthetic refusal' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
           : failure === 'malformed' ? { invalid: true, usage: { input_tokens: 12, output_tokens: 0 } } : { error: { message: 'never retain synthetic provider body' } } };
     });
@@ -1562,15 +1770,15 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
     const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v35' } });
+    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v36' } });
     store.close();
-    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v24']) {
+    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v35', 'v24']) {
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
         database.prepare("UPDATE model_service_connections SET connection_test = ? WHERE provider_id = 'openai-platform'")
           .run(JSON.stringify({ ...status, provenance: { ...status.provenance, policyVersion } }));
       } finally { database.close(); }
-      if (!['v25', 'v26', 'v27', 'v32', 'v33', 'v34'].includes(policyVersion)) {
+      if (!['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v35'].includes(policyVersion)) {
         await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('连接测试来历无效。');
         continue;
       }
@@ -1624,32 +1832,6 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toBeNull();
     expect(store.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('openai-platform');
     expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).not.toThrow();
-  });
-
-  it('migrates revision83 without changing Main/reference/history and freezes the prior Fast choice independently', async () => {
-    const { store } = await openProductionStore();
-    const connection = store.saveModelServiceConnection('Legacy Main', null, 'ready', 'deepseek-open-platform');
-    store.selectModelServiceRoute('deepseek-open-platform'); store.close();
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    const columns = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at, selected';
-    const before = database.prepare(`SELECT ${columns} FROM model_service_connections`).all();
-    database.exec(`CREATE TEMP TABLE legacy_model_selection AS SELECT ${columns} FROM model_service_connections; DROP TABLE model_service_connections;`);
-    database.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
-    execPre74Fixture(database, `INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection;
-      DROP TABLE material_translation_attempts; PRAGMA user_version = 83;`);
-    database.close();
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(migrated);
-    const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      expect(after.prepare(`SELECT ${columns} FROM model_service_connections`).all()).toEqual(before);
-      expect(after.prepare('SELECT count(*) AS count FROM material_translation_attempts').get()!.count).toBe(0);
-    }
-    finally { after.close(); }
-    const saved = migrated.getModelServiceRouteConnection('deepseek-open-platform')!;
-    expect(saved).toMatchObject({ credentialReference: connection.credentialReference, selected: true, fastSelected: true, connectionTest: null });
-    migrated.saveModelServiceConnection('New Main', null, 'ready', 'opencode-go'); migrated.selectModelServiceRoute('opencode-go');
-    expect(migrated.getConfiguredModelRoleBinding('main-editorial')?.route).toBe('opencode-go');
-    expect(migrated.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('deepseek-open-platform');
   });
 
   it.each([1, 2])('refuses a replaced and retested credential during secret read %s without retargeting the attempt', async (replaceAt) => {
@@ -1746,7 +1928,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 116, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 117, dataVersion: 2 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

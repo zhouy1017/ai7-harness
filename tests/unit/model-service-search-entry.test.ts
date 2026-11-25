@@ -15,7 +15,7 @@ afterEach(() => { vi.unstubAllGlobals(); setTechnicalLayerVisible(true); restore
 function mount(timed = false) {
   // Public synthetic settings; all effects are stubbed and no provider is contacted.
   const settings = {
-    channels: modelServiceChannels(), roles: [], routeChoice: { routes: [], unsupportedProviders: [] },
+    channels: modelServiceChannels(), roles: [], modelRoles: [], routeChoice: { routes: [], unsupportedProviders: [] },
     searchBackends: searchBackendSettingsProjection(['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai'].map((backendId) => ({
       backendId, credentialReference: null, credentialOperationState: 'missing', selected: backendId === 'search-tinyfish', selectedAt: '2026-11-06T00:00:00.000Z',
     }))),

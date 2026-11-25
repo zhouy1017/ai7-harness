@@ -38,6 +38,8 @@ describe('a review Run freezes its search backend', () => {
       expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: second.reviewRunId }).start.readiness).toBe('ready');
       expect(store.factualReviewLedger.frozenPlan(original.taskIntent!.taskIntentId, original.planEnvelope!.digest)).toEqual(frozen);
       expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).service.provider).toContain('Brave');
+      // 预计 (#1670): a 事实核查 with a frozen search backend may add lookups and searches.
+      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).estimate!.sentence).toContain('查找资料、联网检索或复盘时会更多');
     } finally { store.close(); await roots.dispose(); }
   });
 
@@ -48,7 +50,7 @@ describe('a review Run freezes its search backend', () => {
       const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === route)!, credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', route);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v35');
+      expect(policy.providerProcessing.version).toBe('v36');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');

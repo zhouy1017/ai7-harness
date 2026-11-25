@@ -1,5 +1,4 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mergeBooks } from '../../src/service/database-merge.js';
@@ -13,11 +12,6 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
-import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
-import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -26,6 +20,7 @@ import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIG
 import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
 import { AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -135,6 +130,13 @@ function refusal(operation: () => unknown): string {
 
 const texts = (projection: DialogueProjection, attempt = projection.attempts.length - 1): string[] =>
   projection.attempts[attempt]!.fragments.map((fragment) => fragment.text);
+
+/** Each attempt's execution binding instant, the start of its 用时 (#1670). */
+function boundAt(): Map<string, string> {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return new Map((db.prepare('SELECT attempt_id, bound_at FROM dialogue_execution_bindings').all()).map((row) => [String(row.attempt_id), String(row.bound_at)])); }
+  finally { db.close(); }
+}
 
 function storeBytes(): Buffer {
   return Buffer.concat(readdirSync(join(roots.dataRoot, 'store')).map((name) => readFileSync(join(roots.dataRoot, 'store', name))));
@@ -319,6 +321,8 @@ describe('就这段提问… over the real store and harness', () => {
       expect(running.items.map((entry) => [entry.item.state, entry.item.object, entry.result])).toEqual([
         ['dialogue-answering', { kind: 'dialogue', question: QUESTION }, null],
       ]);
+      // 用时 (#1670): the attempt under way is the open stretch, from the instant its execution was bound.
+      expect(running.items[0]!.work).toEqual({ workedMs: 0, workingSince: boundAt().get(turn.attemptId), finished: null });
 
       // 停止回答: only complete fragments are kept, labelled incomplete; nothing is retried (DIALOG-012, 014).
       expect(refusal(() => store.convertDialogueToChangeSuggestion(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId, proposedText: '改', rationale: '' })))
@@ -352,6 +356,11 @@ describe('就这段提问… over the real store and harness', () => {
       expect(panelDone.running).toBe(false);
       expect(panelDone.groups.find((group) => group.key === 'recent')!.items.map((entry) => [entry.item.state, entry.result]))
         .toEqual([['dialogue-answered', { kind: 'dialogue', dialogueId: turn.dialogueId }]]);
+      // Once answered: the attempts' summed time, one request each, and the row's model (#1670).
+      const doneRow = panelDone.groups.find((group) => group.key === 'recent')!.items[0]!;
+      const bound = boundAt();
+      expect(doneRow.work).toEqual({ workedMs: answered.attempts.reduce((sum, attempt) => sum + Date.parse(attempt.settledAt!) - Date.parse(bound.get(attempt.attemptId)!), 0),
+        workingSince: null, finished: { requests: 2, modelLabel: doneRow.item.modelLabel ?? null } });
 
       // A restart: the history is joined again from the records to the Harness Session Ledger.
       await dialogues.dispose();
@@ -522,9 +531,13 @@ describe('就这段提问… over the real store and harness', () => {
     }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      expect(store.reconcileDialogueAttempts()).toBe(1);
+      // The next start settles it five hours on: none of the hours AI7 was closed is 用时 (#1670), only what the attempt recorded itself.
+      expect(store.reconcileDialogueAttempts(new Date(Date.now() + 5 * 3_600_000))).toBe(1);
       const reconciled = store.inspectDialogue(bookId, dialogueId, 0, () => null);
       expect(reconciled.attempts[1]).toMatchObject({ state: 'interrupted', causeCode: 'SERVICE_STOPPED', source: 'ledger', fragmentTotal: 0 });
+      const row = store.inspectBookTasks(bookId, () => null).groups.flatMap((group) => group.items).find((entry) => entry.item.target.kind === 'dialogue')!;
+      expect(row.work).toMatchObject({ workingSince: null, finished: { requests: 2 } });
+      expect(row.work!.workedMs).toBeLessThan(60_000);
       expect(store.reconcileDialogueAttempts()).toBe(0);
     } finally {
       await dialogues.dispose().catch(() => undefined);
@@ -637,31 +650,29 @@ describe('就这段提问… over the real store and harness', () => {
     }
   });
 
-  it('adds revision 60 to a revision-59 store, and keeps its relations append-only and verified', async () => {
+});
+
+describe('就这段提问… at its edges (PR #658 review)', () => {
+  /** A Book with one dialogue asked about it and answered whole, the store left open. */
+  async function answered(store: EditorialStore, dialogues: DialogueExecutionOwner, title: string): Promise<{ bookId: string; dialogueId: string }> {
+    const book = await importSample1Book(store, roots.codeRoot, title);
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    dialogues.begin(turn);
+    await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), (value) => value.attempts[0]!.state !== 'answering', 'settled');
+    return { bookId: book.bookId, dialogueId: turn.dialogueId };
+  }
+  it('keeps its relations append-only and a row altered by hand unread', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.close();
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    let database = new DatabaseSync(path);
-    try {
-      database.exec('PRAGMA foreign_keys = OFF');
-      // A revision-59 store held neither the evaluation rewrite records (revision 64), the Captured Procedures (revision 63) nor
-      // 审稿意见's relations and the reader's report kind in its kind-coupled CHECKs (revision 62).
-      for (const table of Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(READERS_REPORT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      execPre74Fixture(database, `PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
-    } finally {
-      database.close();
-    }
+    let database: DatabaseSync;
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const stepped = steppedHold();
     const dialogues = owner(store, stepped.hold);
     let dialogueId = '';
     let bookId = '';
     try {
-      const book = await importSample1Book(store, roots.codeRoot, '迁移');
+      const book = await importSample1Book(store, roots.codeRoot, '对话账本');
       bookId = book.bookId;
       const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
       dialogueId = turn.dialogueId;
@@ -680,7 +691,7 @@ describe('就这段提问… over the real store and harness', () => {
       // A row altered by hand does not read.
       database.exec('DROP TRIGGER dialogue_harness_spans_no_update');
       database.prepare('UPDATE dialogue_harness_spans SET start_seq = start_seq + 1').run();
-      database.exec(DIALOGUE_TRIGGER_FOR_TEST);
+      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_harness_spans_no_update!);
     } finally {
       database.close();
     }
@@ -693,17 +704,7 @@ describe('就这段提问… over the real store and harness', () => {
       store.close();
     }
   });
-});
 
-describe('就这段提问… at its edges (PR #658 review)', () => {
-  /** A Book with one dialogue asked about it and answered whole, the store left open. */
-  async function answered(store: EditorialStore, dialogues: DialogueExecutionOwner, title: string): Promise<{ bookId: string; dialogueId: string }> {
-    const book = await importSample1Book(store, roots.codeRoot, title);
-    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-    dialogues.begin(turn);
-    await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), (value) => value.attempts[0]!.state !== 'answering', 'settled');
-    return { bookId: book.bookId, dialogueId: turn.dialogueId };
-  }
 
   it('honours a stop asked before the turn began, once the answer streams', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -812,9 +813,3 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
     }
   }, 120_000);
 });
-
-const DIALOGUE_TRIGGER_FOR_TEST = `CREATE TRIGGER dialogue_harness_spans_no_update
-    BEFORE UPDATE ON dialogue_harness_spans
-    BEGIN
-      SELECT RAISE(ABORT, 'DIALOGUE_LEDGER_IMMUTABLE');
-    END`;

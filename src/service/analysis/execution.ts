@@ -8,6 +8,8 @@ import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factu
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
 import { withProviderResponseSalvage } from '../provider/response-normalization.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './factual-recheck.js';
+import { learningTidying, runStructuredFlashTask } from '../fast-role/flash-task-contract.js';
+import { isSyntheticLearningRecording } from '../fast-role/recording-inputs.js';
 import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
@@ -30,19 +32,18 @@ import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { PLATFORM_TOOL_CALL_PROGRESS, STOCK_TYPOS_FANOUT, describeComposition, prepareExecution, type HarnessSignal, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
   DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
   ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
   allowedProductionBindingOf,
-  isOrdinaryProductionRuntime, searchFallbackTermsOf,
+  developerLiveBindingFor, isOrdinaryProductionRuntime, searchFallbackTermsOf,
   type DeveloperLiveRuntime,
   type LiveRuntime,
   type OrdinaryProductionRuntime,
   type ConfiguredProviderBinding,
 } from '../launch-policy.js';
-import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
+import { CredentialBroker, CredentialBrokerError, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { classifyModelFailure, evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
@@ -50,7 +51,6 @@ import { OPENCODE_GO_V41_FLASH_PROFILE, modelProfileFor, type ProviderModelProfi
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
-  OPENCODE_GO_ROUTE,
   evaluateEgress,
   type EgressBindingFacts,
   type EgressCeilingState,
@@ -67,7 +67,7 @@ import {
   parseAssuranceSamplingResult,
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
-import { canonicalRecord, isRecord, sha256Hex } from './canonical.js';
+import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './canonical.js';
 import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type AnalysisRequestIdentity, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
@@ -555,95 +555,160 @@ export class BaselineAnalysisExecutionOwner {
   #curation: { abort: AbortController; done: Promise<void> } | null = null;
 
   /** One tool-free turn on the existing F17 lane, using the same broker, physical governor and final gate. */
-  startLearningCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
-    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
-      !isOrdinaryProductionRuntime(this.#live())) return;
+  startLearningCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment')) return;
+    const live = this.#live();
+    if (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'learning-curation')) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
     this.#curation = active;
     active.done = this.#executeCuration(store, active.abort.signal).finally(() => { this.#curation = null; this.#drain(); this.#changed(); });
   }
 
-  async #executeCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
+  async #executeCuration(store: Pick<EditorialStore, 'pendingLearningControl' | 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
     signal: AbortSignal): Promise<void> {
     const live = this.#live();
-    if (!isOrdinaryProductionRuntime(live)) return;
+    if (live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const validation = production ? null : live.launch.validation;
+    if (!production && (live.launch.recordingProvider === undefined || validation?.case !== 'learning-curation')) return;
     const ledger = this.#deps.ledger;
     let run: CurationRun | null = null, harness: PrimaryAgentHarnessHandle | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, producer: ModelRequestProducer | null = null;
-    let usage: UsageFacts | null = null, sent = false;
+    let usage: UsageFacts | null = null, sent = false, missingCredential = false;
     try {
-      if (await this.liveCredentialReadiness() !== 'present' || !this.#backgroundIdle || signal.aborted) return;
-      run = store.nextLearningCuration();
+      if (!this.#backgroundIdle || signal.aborted) return;
+      const control = store.pendingLearningControl();
+      if (!control?.envelope.tidying) return;
+      for (const binding of [control.envelope.tidying.binding, control.envelope.binding]) {
+        if (await this.#broker.checkPlanReadiness(binding.credentialSlot, binding.credentialReference) !== 'present') return;
+      }
+      if (!this.#backgroundIdle || signal.aborted) return;
+      run = store.nextLearningCuration(control.entryId);
       if (run === null) return;
       const frozen = run;
-      const binding = frozen.envelope.binding;
-      const sessionId = randomUUID();
-      const bound = ledger.bindCuration(frozen, sessionId);
-      const current = (): boolean => !signal.aborted && !this.#disposed && store.learningCurationCurrent(frozen) &&
-        learningCurationRule(this.#policy(), binding) !== null;
-      const requireCurrent = (): void => { if (!current()) throw new ExecutionAdmissionError('CURATION_STALE', '学习来源或启用范围已变化。'); };
-      const rule = learningCurationRule(this.#policy(), binding);
-      if (rule === null || frozen.bundle.emittedText === null || frozen.bundle.emittedDigest === null) throw new ExecutionAdmissionError('CURATION_STALE', '学习整理来源或策略不可用。');
+      if (!production && !isSyntheticLearningRecording(frozen.bundle)) throw new ExecutionAdmissionError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
+      const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
+      if (cache !== null) await cache.open();
+      const flash = frozen.envelope.tidying;
+      if (!flash || flash.contractDigest !== learningTidying.promptContractDigest || !frozen.bundle.emittedText) {
+        throw new ExecutionAdmissionError('CURATION_STALE', '学习整理范围已变化。');
+      }
+      const proSession = randomUUID();
+      const bound = ledger.bindCuration(frozen, proSession);
       producer = this.#deps.requestGovernor.registerProducer({ key: `curation:${frozen.runRecordId}`, kind: 'analysis-stage', lane: 'background' });
-      let ticket: TransmitTicket | null = null, admitted = false;
-      const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
-        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
-        systemPrompt: CURATION_CONTRACT.systemPrompt, outboundDataCategory: 'editorial-learning-example',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
-        admittedUserMessages: new Set([frozen.bundle.emittedText]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
-        contractCategories: new Set(['editorial-learning-example', 'house-review-preference-excerpt']),
-        learningCurationScope: { messageDigest: frozen.bundle.emittedDigest, current } };
-      harness = await prepareExecution({ sessionId, route: binding.route, model: binding.model,
-        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
-        systemPrompt: CURATION_CONTRACT.systemPrompt, promptContractDigest: CURATION_CONTRACT_DIGEST,
-        compositionOptions: { version: 2, learningCuration: { bundleDigest: frozen.bundle.digest, contractDigest: CURATION_CONTRACT_DIGEST } },
-        acquireRequest: async (_payload, requestSignal) => {
-          const permit = await this.#deps.requestGovernor.acquire(producer!, AbortSignal.any([signal, requestSignal]));
-          try {
-            requireCurrent();
-            if (!this.#backgroundIdle) throw new ExecutionAdmissionError('CURATION_NOT_IDLE', '学习整理等待空闲时停止；未发送。');
-            return { release: () => { ticket = null; permit.release(); }, admit: (decision) => {
+      let spent = 0;
+      const turn = async (stage: 'learning-sample-tidying' | 'learning-curation', message: string): Promise<string> => {
+        const tidying = stage === 'learning-sample-tidying';
+        const binding = tidying ? flash.binding : frozen.envelope.binding;
+        const sessionId = tidying ? randomUUID() : proSession;
+        const systemPrompt = tidying ? learningTidying.systemPrompt : CURATION_CONTRACT.systemPrompt;
+        const promptContractDigest = tidying ? flash.contractDigest : frozen.envelope.contractDigest;
+        const current = (): boolean => !signal.aborted && !this.#disposed && this.#backgroundIdle && store.learningCurationCurrent(frozen) &&
+          learningCurationRule(this.#policy(), binding, stage) !== null;
+        const requireCurrent = (): void => { if (!current()) throw new ExecutionAdmissionError('CURATION_STALE', '学习来源或启用范围已经变化。'); };
+        const rule = learningCurationRule(this.#policy(), binding, stage);
+        const inputBytes = Buffer.byteLength(message) + Buffer.byteLength(systemPrompt);
+        const remaining = frozen.envelope.budget.perPassTokens - spent - inputBytes;
+        if (!rule || remaining <= 0 || inputBytes > learningTidying.budget.maxInputBytes) throw new ExecutionAdmissionError('CURATION_BOUND', '学习整理超过本次预算或范围。');
+        const routeProfile = productionRouteProfile(binding.route);
+        const maxOutputTokens = Math.min(remaining, routeProfile.maxOutputTokens ?? remaining, tidying ? learningTidying.budget.maxOutputTokens : remaining);
+        const messageDigest = sha256Hex(message);
+        let ticket: TransmitTicket | null = null, admitted = false;
+        const category = tidying ? 'qualified-learning-example-bundle' : 'editorial-learning-example';
+        const stageDigest = canonicalRecord({ bindingDigest: bound.bindingDigest, stage, sessionId, binding, messageDigest, promptContractDigest }).digest;
+        const facts: EgressBindingFacts = { bindingDigest: stageDigest, route: binding.route, model: binding.model,
+          ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
+          systemPrompt, outboundDataCategory: category,
+          policy: production
+            ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+            : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          admittedUserMessages: new Set([message]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
+          contractCategories: new Set(tidying ? [category] : [category, 'house-review-preference-excerpt']),
+          structuredTaskMessageDigest: messageDigest, learningCurationScope: { messageDigest, current } };
+        harness = await prepareExecution({ sessionId, route: binding.route, model: binding.model,
+          ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
+          systemPrompt, promptContractDigest,
+          compositionOptions: { version: 2, learningCuration: { bundleDigest: frozen.bundle.digest, contractDigest: promptContractDigest } },
+          acquireRequest: async (_payload, requestSignal) => {
+            const permit = await this.#deps.requestGovernor.acquire(producer!, AbortSignal.any([signal, requestSignal]));
+            try {
               requireCurrent();
-              if (decision.decision !== 'transmit-remote' || admitted) throw new ExecutionAdmissionError('CURATION_REQUEST_BOUND', '学习整理只允许一次请求。');
-              admitted = true;
-              ledger.recordRunState(frozen.runRecordId, 'executing', { detail: '完整编辑样例已通过最终发送检查。',
-                curationRequest: { requestId: randomUUID(), sessionId, payloadDigest: decision.payloadDigest, messageDigest: frozen.bundle.emittedDigest,
-                  sourceManifestDigest: frozen.bundle.digest, reservedTokens: frozen.envelope.budget.perPassTokens } });
-            } };
-          } catch (error) { permit.release(); throw error; }
-        },
-        gate: (payload) => evaluateEgress(payload, facts, { currentBindingDigest: () => current() ? bound.bindingDigest : null,
-          acceptedOutputDigests: new Set(), ceilingState: () => admitted ? 'reached' : 'within' }),
-        onTransmitTicket: (value) => { ticket = value; },
-        adapterFactory: (codes) => {
-          adapter = new DeepSeekOpenAiCompatibleAdapter({ broker: this.#broker,
-            ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
-            slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
-            tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
-            promptContractDigest: CURATION_CONTRACT_DIGEST, codes, signal, beforeSend: requireCurrent,
-            profile: productionRouteProfile(binding.route), modelProfile: productionModelProfile(binding.route, binding.model),
-            ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
-            sessionId: () => sessionId, transport: (url, init) => { requireCurrent(); sent = true; return live.nativeFetch(url, init); } });
-          return adapter;
-        },
-      });
-      if (harness.composition.digest !== frozen.compositionDigest) throw new ExecutionAdmissionError('CURATION_COMPOSITION_CHANGED', '整理组合与固定计划不一致。');
-      harness.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: frozen.compositionDigest, promptContractDigest: CURATION_CONTRACT_DIGEST });
-      const outcome = await harness.submitUnit(frozen.bundle.emittedText);
-      const result = (adapter as DeepSeekOpenAiCompatibleAdapter | null)?.lastCanonicalResult;
-      usage = result !== undefined && result !== null && 'usage' in result ? result.usage : null;
-      if (outcome.terminal !== 'completed' || result?.kind !== 'answer') throw new ExecutionAdmissionError('CURATION_UNCERTAIN', '整理未获得完整可核对的回答；不会自动重发。');
-      requireCurrent();
-      store.publishLearningCuration(frozen, result.text, { usage, transmitted: sent });
+                return { release: () => { ticket = null; permit.release(); }, admit: (decision) => {
+                requireCurrent();
+                if (decision.decision !== 'transmit-remote' || admitted) throw new ExecutionAdmissionError('CURATION_REQUEST_BOUND', '学习整理只允许一次请求。');
+                admitted = true;
+                ledger.recordRunState(frozen.runRecordId, 'executing', { detail: '完整编辑样例已通过最终发送检查。',
+                  curationRequest: { stage, stageDigest, route: binding.route, model: binding.model, promptContractDigest, requestId: randomUUID(), sessionId, payloadDigest: decision.payloadDigest, messageDigest,
+                    sourceManifestDigest: frozen.bundle.digest, reservedTokens: frozen.envelope.budget.perPassTokens } });
+              } };
+            } catch (error) { permit.release(); throw error; }
+          },
+          gate: (payload) => evaluateEgress(payload, facts, { currentBindingDigest: () => current() ? stageDigest : null,
+            acceptedOutputDigests: new Set(), ceilingState: () => admitted ? 'reached' : 'within' }),
+          onTransmitTicket: (value) => { ticket = value; },
+          adapterFactory: (codes) => {
+            adapter = new DeepSeekOpenAiCompatibleAdapter({ broker: this.#broker,
+              ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
+              slotBinding: { bindingDigest: stageDigest, modelRole: tidying ? 'Fast Interaction Role' : 'Main Editorial Role', isCurrent: current, slot: binding.credentialSlot, credentialReference: binding.credentialReference },
+              tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
+              promptContractDigest, codes, signal, beforeSend: requireCurrent,
+              onRequestNotSent: error => { missingCredential = error instanceof CredentialBrokerError && error.code === 'CREDENTIAL_MISSING'; },
+              profile: { ...routeProfile, maxOutputTokens, taskOutputTokenLimit: maxOutputTokens }, modelProfile: productionModelProfile(binding.route, binding.model),
+              ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
+              sessionId: () => sessionId, transport: (url, init) => {
+                const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
+                  requireCurrent(); sent = true; return live.nativeFetch(target, request);
+                };
+                if (cache === null || validation === null) return send(url, init);
+                requireCurrent();
+                return transmitOnce(cache, send,
+                  { purpose: stage, slice: 'S80', promptContractDigest, taskPromptContractDigest: promptContractDigest },
+                  { intent: validation, step: stage, requestShape: productionModelProfile(binding.route, binding.model).capabilities.requestShape },
+                  routeProfile, binding.model, url, init);
+              } });
+            return adapter;
+          },
+        });
+        if (!tidying && harness.composition.digest !== frozen.compositionDigest) throw new ExecutionAdmissionError('CURATION_COMPOSITION_CHANGED', '整理组合与固定计划不一致。');
+        harness.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
+        const outcome = await harness.submitUnit(message);
+        const result = (adapter as DeepSeekOpenAiCompatibleAdapter | null)?.lastCanonicalResult;
+        const reported = result && 'usage' in result ? result.usage : null;
+        if (reported) {
+          spent += totalTokens([reported]);
+          usage = { ...addUsage(usage, reported)!, cacheReadTokens: (usage?.cacheReadTokens ?? 0) + (reported.cacheReadTokens ?? 0),
+            reasoningTokens: (usage?.reasoningTokens ?? 0) + (reported.reasoningTokens ?? 0) };
+        }
+        else spent = frozen.envelope.budget.perPassTokens;
+        if (outcome.terminal !== 'completed' || result?.kind !== 'answer') throw new ExecutionAdmissionError('CURATION_UNCERTAIN', '整理未获得完整可核对的回答；不会自动重发。');
+        requireCurrent();
+        await harness.finish();
+        harness = null;
+        return result.text;
+      };
+      const tidied = await runStructuredFlashTask(learningTidying, frozen.bundle.examples, message => turn('learning-sample-tidying', message));
+      if (tidied.state !== 'checked') throw new ExecutionAdmissionError('CURATION_INVALID_SAMPLES', tidied.reason);
+      const kept = tidied.value;
+      const examples = kept.map(item => item.example);
+      let text = '{"proposals":[]}';
+      if (examples.length) {
+        const packet = JSON.parse(frozen.bundle.emittedText) as Record<string, unknown>;
+        const message = canonicalJson({ ...packet, examples, classifications: kept.map(({ example, editorialDimension }) => ({ exampleId: example.exampleId, editorialDimension })) });
+        text = await turn('learning-curation', message);
+      }
+      store.publishLearningCuration(frozen, text, examples.map(example => example.exampleId), { usage, transmitted: sent });
     } catch {
       if (run !== null) ledger.settleCuration(run, sent ? 'interrupted' : 'failed', { usage, proposals: 0, transmitted: sent,
-        reason: sent ? '学习整理结果未发布或结果不确定；保留预算与来源，不自动重发。' : '学习整理在发送前停止；没有发布候选。' });
+        retryAfterCredential: !sent && missingCredential,
+        reason: !sent && missingCredential ? '学习整理所需的凭据已不可用，恢复后可重试。' : sent ? '学习整理结果未发布或结果不确定；保留预算与来源，不自动重发。' : '学习整理在发送前停止；没有发布候选。' });
     } finally {
-      try { await harness?.finish(); } finally { if (producer !== null) this.#deps.requestGovernor.unregisterProducer(producer); }
+      try { await (harness as PrimaryAgentHarnessHandle | null)?.finish(); } finally { if (producer !== null) this.#deps.requestGovernor.unregisterProducer(producer); }
     }
   }
   startFactualRecheck(store: Pick<EditorialStore, 'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>): void {
-    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') || !isOrdinaryProductionRuntime(this.#live())) return;
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment')) return;
+    const live = this.#live();
+    if (live === null || !isOrdinaryProductionRuntime(live) && (live.launch.recordingProvider === undefined || live.launch.validation?.case !== 'factual-recheck')) return;
     const candidate = store.nextFactualRecheck();
     if (candidate === null) return;
     const active = { abort: new AbortController(), done: Promise.resolve() };
@@ -655,7 +720,10 @@ export class BaselineAnalysisExecutionOwner {
   async #executeFactualRecheck(store: Pick<EditorialStore, 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>,
     candidate: FactualRecheckCandidate, signal: AbortSignal): Promise<void> {
     const live = this.#live();
-    if (!isOrdinaryProductionRuntime(live)) return;
+    if (live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const validation = production ? null : live.launch.validation;
+    if (!production && (live.launch.recordingProvider === undefined || validation?.case !== 'factual-recheck')) return;
     const ledger = store.factualReviewLedger;
     const owner = ledger.factualVerification;
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
@@ -664,6 +732,7 @@ export class BaselineAnalysisExecutionOwner {
     try {
       const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
+      const routeProfile = productionRouteProfile(candidate.binding.route);
       const backend = searchBackend(candidate.search.backendId);
       if (admitted?.factualRecheck === undefined || platformToolsFromProjection(admitted) === null ||
         admitted.route !== candidate.binding.route || admitted.model !== candidate.binding.model ||
@@ -673,6 +742,10 @@ export class BaselineAnalysisExecutionOwner {
         await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, candidate.search.credentialReference) !== 'present' ||
         !this.#backgroundIdle || signal.aborted) return;
       run = store.startFactualRecheck(candidate);
+      const cache = production ? null : new ProviderResultCache(live.launch.providerCacheRoot);
+      const snapshots = production ? null : new ResearchSnapshotCache(live.launch.providerCacheRoot);
+      if (cache !== null) await cache.open();
+      if (snapshots !== null) await snapshots.open();
       const frozen = run;
       const binding = frozen.binding;
       const bound = ledger.bindFactualRecheck(frozen);
@@ -694,14 +767,16 @@ export class BaselineAnalysisExecutionOwner {
       };
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
-        systemPrompt: frozen.prompt, outboundDataCategory: 'unpublished-excerpts',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        systemPrompt: frozen.prompt, outboundDataCategory: production ? 'unpublished-excerpts' : 'public-or-synthetic',
+        policy: production
+          ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.message]), ruleOutboundCategories: new Set(rule!.outboundDataCategories),
         factualClaimScope: { stage: 'web-verification', current }, platformTools: tools,
         searchBackend: { backendId: frozen.search.backendId, host: frozen.search.host, endpoint: backend.declaration.endpoint!,
           credentialSlot: backend.declaration.credentialSlot, credentialReference: frozen.search.credentialReference } };
       const platform = new PlatformToolSession({ binding: facts, scope: { currentBindingDigest: () => current() ? bound.bindingDigest : null, acceptedOutputDigests, ceilingState },
-        fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, purpose: 'factual-recheck', onUsage: (value) => spent.push(value),
+        fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, cache, snapshots, purpose: 'factual-recheck', onUsage: (value) => spent.push(value),
         factualClaimAccounting: { sourceExcluded: (url) => frozen.selection.excludedSources.includes(url),
           reserveTool: (id) => owner.reserveClaimCall(frozen.session.sessionId, 'tool', id),
           reserveSearch: (digest) => owner.reserveClaimCall(frozen.session.sessionId, 'search', digest),
@@ -734,8 +809,17 @@ export class BaselineAnalysisExecutionOwner {
             slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
             tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
             promptContractDigest: frozen.promptDigest, codes, signal, beforeSend: requireCurrent,
-            profile: productionRouteProfile(binding.route), modelProfile: productionModelProfile(binding.route, binding.model),
-            sessionId: () => frozen.session.sessionId, transport: (url, init) => { requireCurrent(); return live.nativeFetch(url, init); } });
+            profile: routeProfile, modelProfile: profile,
+            sessionId: () => frozen.session.sessionId, transport: (url, init) => {
+              requireCurrent();
+              const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
+                requireCurrent(); return live.nativeFetch(target, request);
+              };
+              return cache === null || validation === null ? send(url, init) : transmitOnce(cache, send,
+                { purpose: 'factual-recheck', promptContractDigest: frozen.promptDigest },
+                { intent: validation, step: 'factual-recheck/verification', requestShape: profile.capabilities.requestShape },
+                routeProfile, binding.model, url, init);
+            } });
           return adapter;
         } });
       requireCompositionMatch(harness.composition.digest, frozen.compositionDigest);
@@ -899,9 +983,9 @@ export class BaselineAnalysisExecutionOwner {
     }
     const rule = liveKindRule(policy, definition.kind, [production ? 'unpublished-excerpts' : 'public-or-synthetic'],
       facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
-    const binding = routeFactsOf(facts, live);
+    const binding = routeFactsOf(facts, live, definition.kind);
     if (rule === null || rule.modelRole !== 'Main Editorial Role' || rule.route !== binding.route || rule.model !== binding.model ||
-        rule.credentialSlot !== binding.credentialSlot || rule.endpoint !== (production ? facts.productionBinding!.endpoint : OPENCODE_GO_ROUTE_PROFILE.endpoint) ||
+        rule.credentialSlot !== binding.credentialSlot || rule.endpoint !== productionRouteProfile(binding.route).endpoint ||
         production && definition.kind !== BASELINE_ANALYSIS_KIND && liveKindAdmission(policy, definition, facts.productionBinding!) === null) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', '当前策略未唯一准许本任务固定连接的实际执行规则。');
     }
@@ -1164,7 +1248,7 @@ export class BaselineAnalysisExecutionOwner {
     const production = isOrdinaryProductionRuntime(live);
     const rule = ledger.definition.kind !== BASELINE_ANALYSIS_KIND ? null
       : liveKindRule(policy, BASELINE_ANALYSIS_KIND, [production ? 'unpublished-excerpts' : 'public-or-synthetic'], 'background');
-    const { route, model, credentialSlot } = routeFactsOf(facts, live);
+    const { route, model, credentialSlot } = routeFactsOf(facts, live, ledger.definition.kind);
     if (rule === null || rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot) {
       throw new ExecutionAdmissionError('EXECUTION_ORIGIN_NOT_ADMITTED', '当前策略没有准许后台分析登记开始的运行发送内容；什么都没有发送。');
     }
@@ -1195,7 +1279,8 @@ export class BaselineAnalysisExecutionOwner {
       const allowed = allowedProductionBindingOf(configured);
       return configured === null || allowed === null ? 'missing' : this.#broker.checkPlanReadiness(allowed.credentialSlot, configured.credentialReference);
     }
-    return this.#broker.checkPlanReadiness(OPENCODE_GO_ROUTE_PROFILE.credentialSlot, DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
+    const configured = developerLiveBindingFor(live.launch);
+    return this.#broker.checkPlanReadiness(configured.credentialSlot, configured.credentialReference);
   }
 
   /**
@@ -1334,7 +1419,7 @@ export class BaselineAnalysisExecutionOwner {
     // The composition this launch would execute under — its harness pins included — as `prepareExecution` will
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
-    const { route, model } = routeFactsOf(facts, live);
+    const { route, model } = routeFactsOf(facts, live, ledger.definition.kind);
     // A factual plan executes under the level it froze (Issue #901): 快速整理 declares no local tool.
     const definition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const webTools = definition.factualClaims === undefined && definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
@@ -1747,11 +1832,12 @@ export class BaselineAnalysisExecutionOwner {
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
-    const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
-    const effortConfig = facts.productionBinding?.reasoningEffort === undefined ? {} : { reasoningEffort: facts.productionBinding.reasoningEffort };
+    const { route, model, credentialSlot, credentialReference, runBudgetCeiling, reasoningEffort } = routeFactsOf(facts, live, definition.kind);
+    const effortConfig = reasoningEffort === undefined ? {} : { reasoningEffort };
     // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
-    const routeProfile: ProviderRouteProfile = production === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
-    let liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
+    const routeProfile: ProviderRouteProfile = live === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
+    let liveModelProfile: ProviderModelProfile = live === null || (!isOrdinaryProductionRuntime(live) && live.launch.recordingProvider === undefined)
+      ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
     // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
@@ -1925,7 +2011,7 @@ export class BaselineAnalysisExecutionOwner {
           digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
             .filter((block) => (facts.compositionOptions?.version ?? 1) < 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text }))
         }),
-      }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
+      }], ledger.pinnedToolSourcesForRun(facts.runRecordId));
       const validationContractOf = (): string => {
         if (validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
         if (validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
@@ -2100,7 +2186,7 @@ export class BaselineAnalysisExecutionOwner {
                   }, {
                     intent: validation,
                     step: `${testItemPurpose}/${validationStep}`,
-                    requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape,
+                    requestShape: liveModelProfile.capabilities.requestShape,
                   }, routeProfile, model, url, init);
                 }
                 catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
@@ -2311,6 +2397,7 @@ export class BaselineAnalysisExecutionOwner {
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set(unitMessages.values()),
         ...(localRule === null ? {} : { localTools: localRule }),
+        ...(facts.compositionOptions?.toolSchemaVersion === undefined ? {} : { toolSchemaVersion: facts.compositionOptions.toolSchemaVersion }),
       };
       if (!settlingLocally()) await context.bind(bindingDigest, bindingFactsForRun);
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
@@ -4055,12 +4142,13 @@ function liveRuleOf(ledger: BaselineAnalysisStore): LiveKindRule | null {
 }
 
 /** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
-function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null): {
+function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null, kind: string): {
   route: ExecutionRouteId;
   model: string;
   credentialSlot: CredentialSlotBinding['slot'];
   credentialReference: string;
   runBudgetCeiling: RunBudgetCeiling;
+  reasoningEffort?: string;
 } {
   // Ordinary production (Issue #811): the binding the plan froze, on the connection's own Credential Reference it named.
   if (isOrdinaryProductionRuntime(live)) {
@@ -4071,16 +4159,14 @@ function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null): {
       model: binding.model,
       credentialSlot: binding.credentialSlot,
       credentialReference: facts.credentialReference,
+      ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
       runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
     };
   }
-  return {
-    route: live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE,
-    model: live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V41_FLASH_PROFILE.model,
-    credentialSlot: live === null ? 'deepseek-api-key' : OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
-    credentialReference: live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-    runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
-  };
+  const binding = live === null
+    ? { route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, credentialSlot: 'deepseek-api-key' as const, credentialReference: facts.credentialReference }
+    : developerLiveBindingFor(live.launch, kind);
+  return { ...binding, runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling };
 }
 
 /**
@@ -4099,7 +4185,7 @@ function executionBindingRecordOf(input: {
   compositionDigest: string;
 }): ExecutionBindingRecord {
   const { facts, definition, live, fixture } = input;
-  const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+  const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live, definition.kind);
   const update = facts.update;
   return {
     attemptId: input.attemptId,

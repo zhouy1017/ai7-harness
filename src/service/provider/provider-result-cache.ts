@@ -11,7 +11,9 @@ import type { DevelopmentValidationDelta } from '../../shared/protocol.js';
  * Response keys bind route, endpoint, request shape, model and canonical request bytes. Capture hashes
  * and the active prompt generation are checked before reuse. Legacy captures retain their unproved
  * namespace and cannot be relabeled as current evidence. Normalized identities select evidence and
- * durable claim chains only; they never select a response for another input.
+ * durable claim chains only; they never select a response for another input. An identity-normalised replay
+ * (Issue #1585, `identity-replay.ts`) answers the same input asked with newly minted identities from a capture
+ * that stays byte for byte as it was kept.
  */
 export const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 export const PROVIDER_CACHE_DIRECTORY = 'entries';
@@ -64,13 +66,14 @@ export interface ProviderRequestNamespace {
 }
 
 /**
- * Why a development validation call was answered, refused, or sent (Issue #808). `exact-replay` answered it from the cache, and
- * `refused` sent nothing (`refusal` says why); the others sent it: `first-capture` because no valid evidence exists for its
+ * Why a development validation call was answered, refused, or sent (Issue #808). `exact-replay` answered it from the cache,
+ * `identity-replay` (Issue #1585) answered it from a capture of the same question asked with other minted identities, mapped
+ * onto this request in memory, and `refused` sent nothing (`refusal` says why); the others sent it: `first-capture` because no valid evidence exists for its
  * purpose and step, `config-delta` because the evidence there was captured under another route, endpoint, request shape, model
  * or prompt contract (`changed` names which), `input-delta` because the launch declared that the input itself differs and it
  * does, `retry-unknown` because the launch declared a resend of a request whose result is unknown.
  */
-export type ProviderValidationDecision = 'exact-replay' | 'refused' | 'first-capture' | 'config-delta' | 'input-delta' | 'retry-unknown';
+export type ProviderValidationDecision = 'exact-replay' | 'identity-replay' | 'refused' | 'first-capture' | 'config-delta' | 'input-delta' | 'retry-unknown';
 
 /** The development validation one model-call line belongs to, and why it was answered or sent. */
 export interface ProviderValidationRecord {
@@ -350,13 +353,15 @@ export function providerResponseDigest(response: unknown): string {
   return providerRequestDigest(JSON.stringify(response) ?? 'null');
 }
 
-/** The OpenAI-compatible usage shape, reduced to the two counts the ceiling and the report use. */
-export function usageOfResponse(body: unknown): ProviderUsageRecord | null {
+/** The response family's reported input and output counts. */
+export function usageOfResponse(body: unknown, shape = 'openai-chat-completions'): ProviderUsageRecord | null {
   if (body === null || typeof body !== 'object') return null;
-  const usage = (body as { usage?: unknown }).usage;
-  if (usage === null || typeof usage !== 'object') return null;
-  const prompt = (usage as { prompt_tokens?: unknown }).prompt_tokens;
-  const completion = (usage as { completion_tokens?: unknown }).completion_tokens;
+  const fields = body as { usage?: Record<string, unknown>; usageMetadata?: Record<string, unknown> };
+  const [prompt, completion] = shape === 'google-generate-content'
+    ? [fields.usageMetadata?.promptTokenCount, fields.usageMetadata?.candidatesTokenCount]
+    : shape === 'openai-responses' || shape === 'anthropic-messages'
+      ? [fields.usage?.input_tokens, fields.usage?.output_tokens]
+      : [fields.usage?.prompt_tokens, fields.usage?.completion_tokens];
   if (!Number.isSafeInteger(prompt) || !Number.isSafeInteger(completion) || (prompt as number) < 0 || (completion as number) < 0) return null;
   return { inputTokens: prompt as number, outputTokens: completion as number };
 }
@@ -449,7 +454,7 @@ function validValidation(value: unknown): value is ProviderValidationRecord {
   return typeof record.family === 'string' && typeof record.case === 'string' && typeof record.step === 'string' &&
     (delta === null || (delta !== undefined && typeof delta === 'object' && !Array.isArray(delta) &&
       ['input', 'retry-unknown'].includes(delta.kind) && typeof delta.rationale === 'string' && delta.rationale.length > 0)) &&
-    ['exact-replay', 'refused', 'first-capture', 'config-delta', 'input-delta', 'retry-unknown'].includes(record.decision ?? '') &&
+    ['exact-replay', 'identity-replay', 'refused', 'first-capture', 'config-delta', 'input-delta', 'retry-unknown'].includes(record.decision ?? '') &&
     Array.isArray(record.evidence) && record.evidence.every((id) => typeof id === 'string' &&
       (LEDGER_ITEM_ID_PATTERN.test(id) || (record.decision === 'refused' && id === 'unreadable'))) &&
     (record.changed === undefined || (Array.isArray(record.changed) && record.changed.every((field) =>
@@ -828,12 +833,18 @@ export class ProviderResultCache {
    * Lines written before #808 carry no validation scope and cannot prove current namespaced evidence.
    */
   async validEvidence(): Promise<ProviderLedgerLine[]> {
+    return (await this.validCaptures()).map(({ line }) => line);
+  }
+
+  /** The valid evidence with the verified entry each line captured, for a replay that needs the captured request. */
+  async validCaptures(): Promise<Array<{ readonly line: ProviderLedgerLine; readonly entry: ProviderCacheEntry }>> {
     const evidence = this.#lines.filter(isModelCallLine).filter((line) =>
       isSupportedProviderTestItemId(line.itemId) && line.outcome === 'transmitted' && line.validation !== undefined && line.semanticDigest !== undefined &&
       line.generation !== undefined && !this.isRetired(line.itemId, {
         family: line.validation.family, case: line.validation.case, capturedAt: line.recordedAt,
         ...(line.evidencePosition === undefined ? {} : { evidencePosition: line.evidencePosition }),
       }));
+    const captures: Array<{ line: ProviderLedgerLine; entry: ProviderCacheEntry }> = [];
     for (const line of evidence) {
       requireCache(typeof line.cacheKey === 'string', 'PROVIDER_LEDGER_CORRUPT', '验证证据缺少缓存身份。');
       let read = await this.readEntry(line.cacheKey);
@@ -857,8 +868,9 @@ export class ProviderResultCache {
         read.entry.validation?.family === line.validation!.family && read.entry.validation.case === line.validation!.case &&
         read.entry.validation.step === line.validation!.step,
       'PROVIDER_VALIDATION_EVIDENCE_UNAVAILABLE', '已记录的验证证据缺失、损坏或身份不一致；请核查并作废，未将其当作新请求。');
+      captures.push({ line, entry: read.entry });
     }
-    return evidence;
+    return captures;
   }
 
   /**
@@ -911,7 +923,7 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
       typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
       typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
       !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||
-      !sameUsage(entry.usage, usageOfResponse(entry.response)) ||
+      !sameUsage(entry.usage, usageOfResponse(entry.response, entry.requestShape)) ||
       (entry.streamedAnswer !== undefined && (typeof entry.streamedAnswer.complete !== 'boolean' ||
         !Array.isArray(entry.streamedAnswer.chunks) || !entry.streamedAnswer.chunks.every((chunk) => typeof chunk === 'string') ||
         !entry.response || typeof entry.response !== 'object' ||

@@ -50,6 +50,20 @@
       "note": "Buffered text only with max_output_tokens 8192. The explicit synthetic connection test narrows this to 512; neither probe nor saved credential proves tools or native streaming.",
       "models": [
         {
+          "modelId": "gpt-6.2-sol",
+          "displayName": "GPT-6.2 Sol",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "openai-responses", "efforts": ["low", "medium", "high", "xhigh", "max"], "source": "https://developers.openai.com/api/docs/guides/deployment-checklist#set-up-reasoningeffort", "readOn": "2026-11-24" },
+          "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)."
+        },
+        {
+          "modelId": "gpt-6.1-terra",
+          "displayName": "GPT-6.1 Terra",
+          "context": { "tokens": null, "evidence": "unverified" },
+          "reasoning": { "control": "openai-responses", "efforts": ["none", "low", "medium", "high", "xhigh", "max"], "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra", "readOn": "2026-11-24" },
+          "note": "Listed by the test account's model discovery on 2026-11-24 (ADR 0108)."
+        },
+        {
           "modelId": "gpt-6-astra",
           "displayName": "GPT-6 Astra",
           "context": {
@@ -121,5 +135,9 @@
     "Account/model access requires the editor-initiated exact-binding text test; no live access was tested by Issue #1044.",
     "Function tools, native reasoning replay, effort control and streaming have provider-free family coverage (#1180, #1453); structured outputs remain unsupported. This does not establish live account/model access.",
     "429/account denial is classified by the existing adapter; AI7 does not automatically retry or choose another binding."
-  ]
+  ],
+  "recommendedModels": {
+    "pro": ["gpt-5.6-sol", "gpt-6-astra"],
+    "flash": ["gpt-5.6-luna"]
+  }
 }

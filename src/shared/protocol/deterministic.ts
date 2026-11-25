@@ -20,7 +20,8 @@ export function validBookTerms(value: unknown): value is readonly BookTermEntry[
   });
 }
 export function validLocalTables(value: unknown): value is LocalCheckTables {
-  return isRecord(value) && hasExactKeys(value, ['characters', 'variantWords', 'bookTerms', 'houseWordList']) &&
+  return isRecord(value) && hasExactKeys(value, ['characters', 'variantWords', 'bookTerms', 'houseWordList', ...(value.tableIds === undefined ? [] : ['tableIds'])]) &&
+    (value.tableIds === undefined || Array.isArray(value.tableIds) && value.tableIds.every(id => typeof id === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) && new Set(value.tableIds).size === value.tableIds.length) &&
     typeof value.characters === 'boolean' && typeof value.variantWords === 'boolean' && validBookTerms(value.bookTerms) &&
     (value.houseWordList === null || validHousePin(value.houseWordList));
 }

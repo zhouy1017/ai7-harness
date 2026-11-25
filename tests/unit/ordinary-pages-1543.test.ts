@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { DatabaseSync } from 'node:sqlite';
 import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,7 @@ import { mountCustomAnalysisTab } from '../../src/renderer/custom-analysis.js';
 import { visibleKnowledgeBaseTabs } from '../../src/renderer/knowledge-base-labels.js';
 import { SETTINGS_HUB_GROUPS } from '../../src/renderer/shell-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
-import { HouseWordLists, initializeHouseWordListSchema } from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, HOUSE_WORD_LIST_SCHEMA_SQL } from '../../src/service/review/house-word-list.js';
 import type { HouseWordListApi } from '../../src/shared/protocol/house-word-list.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, EvaluationCalibrationProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
@@ -97,7 +98,7 @@ describe('本社词表 for an ordinary editor', () => {
   const click = async (name: string): Promise<void> => { (miniDocument.body.querySelector(`[data-house-action="${name}"]`) as MiniElement).click(); await settle(); };
 
   it('says one name, shows only what applies in each state, and words every state without a bare 版本', async () => {
-    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db);
     const { root, panel } = mount({ inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) });
     try {

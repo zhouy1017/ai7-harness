@@ -132,7 +132,7 @@ const SHAPE_RULES = Object.freeze({
     toolCalling: ['none', 'function'],
     streaming: 'generate-content-sse',
     requiresOutputCap: false,
-    headerForms: ['x-goog-api-key'],
+    headerForms: ['x-goog-api-key', 'authorization-bearer'],
   },
 });
 
@@ -575,7 +575,9 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         refuse(model.context.tokens === null || contextEvidence.kind === 'vendor-documentation',
           `PROVIDER_CONFIGURATION/context-evidence: ${modelWhere} (a context size names the vendor page that states it)`);
         if (model.reasoning !== undefined) {
-          refuse(model.reasoning.control === route.requestShape || route.requestShape === 'google-generate-content' && model.reasoning.control === 'google-thinking-budget', `PROVIDER_CONFIGURATION/model-reasoning-family: ${modelWhere}`);
+          refuse(model.reasoning.control === route.requestShape || model.reasoning.control === route.reasoning?.control ||
+            route.requestShape === 'google-generate-content' && model.reasoning.control === 'google-thinking-budget',
+          `PROVIDER_CONFIGURATION/model-reasoning-family: ${modelWhere}`);
           refuse(isCalendarDay(model.reasoning.readOn), `PROVIDER_CONFIGURATION/model-reasoning-day: ${modelWhere}`);
         }
         refuse(model.pre114ReasoningEffort === undefined || capabilities.reasoningControl === 'deepseek-thinking', `PROVIDER_CONFIGURATION/pre114-reasoning: ${modelWhere}`);
@@ -637,6 +639,7 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         .map(([key, entry]) => ({ key, record: evidence[key], note: entry.note ?? null })),
       openQuestions: [...data.openQuestions],
       notes: [...(data.notes ?? [])],
+      recommendedModels: data.recommendedModels ?? null,
     });
   }
   refuse(providers.length > 0, 'PROVIDER_CONFIGURATION/no-documents');
@@ -653,15 +656,52 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
   // And the converse: the marker says the row left the documents, so a row a document still declares carries none.
   const withdrawnDeclared = [...recorded.items].filter(([, item]) => item.withdrawn !== null && declaredRows.has(rowText(item))).map(([itemId]) => itemId);
   refuse(withdrawnDeclared.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-withdrawn-declared: ${RECORDED_EVIDENCE_FILE} marks ${withdrawnDeclared.join(', ')} withdrawn, but a document still declares its row`);
+  const runtimeModelTable = resolveRuntimeBindings(runtimeBindings, providers);
+  refuseUnservedRecommendations(providers, runtimeModelTable);
   return {
     providers,
-    runtimeModelTable: resolveRuntimeBindings(runtimeBindings, providers),
+    runtimeModelTable,
     searchBackends: resolvedSearchBackends,
     recordedEvidence: {
       liveTestItems: [...recorded.items].map(([itemId, item]) => ({ itemId, ...item })),
       frozenRequestBaselines: [...recorded.baselines].map(([since, baseline]) => ({ since, ...baseline })),
     },
   };
+}
+
+/**
+ * The models a channel declares on a further route only (Issue #1582), by that route: a model id the channel's first route
+ * does not list. Such a model is sent on its own route when the runtime table serves that route, and is otherwise refused.
+ */
+function alternateRouteModels(providers) {
+  return Object.fromEntries(providers.flatMap((provider) => {
+    const primary = new Set(provider.routes[0].models.map((model) => model.model));
+    return provider.routes.slice(1).map((route) => [route.profile.route, route.models.map((model) => model.model).filter((model) => !primary.has(model))]);
+  }));
+}
+
+/** A recommended model is one the document lists, on a route the runtime table serves (Issue #1620): never one #1582 refuses. */
+function refuseUnservedRecommendations(providers, runtimeModelTable) {
+  const alternate = alternateRouteModels(providers);
+  // A model on two further routes of one channel has no one route to be sent on (#1582).
+  for (const provider of providers) {
+    const further = provider.routes.slice(1).flatMap((route) => alternate[route.profile.route]);
+    const twice = further.filter((model, index) => further.indexOf(model) !== index);
+    refuse(twice.length === 0, `PROVIDER_CONFIGURATION/alternate-route-ambiguous: ${provider.providerId}.json declares ${[...new Set(twice)].join(', ')} on two further routes and not on its first`);
+  }
+  for (const provider of providers) {
+    if (provider.recommendedModels === null) continue;
+    for (const [tier, role] of [['pro', 'main'], ['flash', 'fast']]) {
+      const rows = runtimeModelTable.policyBaseline[role];
+      for (const model of provider.recommendedModels[tier]) {
+        const own = provider.routes.find((route) => route.models.some((entry) => entry.model === model));
+        const served = own !== undefined && (rows.some((row) => row.model === model && provider.routes.some((route) => route.profile.route === row.route)) ||
+          (own === provider.routes[0] ? rows.some((row) => row.route === provider.providerId)
+            : !(alternate[own.profile.route] ?? []).includes(model) || rows.some((row) => row.route === own.profile.route)));
+        refuse(served, `PROVIDER_CONFIGURATION/recommended-unserved: ${provider.providerId}.json recommends ${model} for ${tier}, which it does not list on a route the runtime table serves`);
+      }
+    }
+  }
 }
 
 /** Resolve only reviewed, readable rows; no endpoint or credential slot is independently configurable here. */
@@ -675,8 +715,22 @@ function resolveRuntimeBindings(input, providers) {
     return { route, endpoint: declared.profile.endpoint, model, credentialSlot: declared.profile.credentialSlot };
   };
   const resolveRoles = (roles, readableRequired = true) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map((binding) => resolveBinding(binding, readableRequired))]));
+  const recordingProviders = Object.fromEntries(Object.entries(input.data.recordingProviders).map(([id, tiers]) => {
+    const provider = providers.find((entry) => entry.providerId === id);
+    refuse(provider?.credential.developmentCredentialReference != null, `PROVIDER_CONFIGURATION/recording-credential: ${id}`);
+    return [id, Object.fromEntries(Object.entries(tiers).map(([tier, binding]) => {
+      const route = provider.routes.find((route) => route.profile.route === binding.route);
+      refuse(route !== undefined, `PROVIDER_CONFIGURATION/recording-route: ${id}/${tier}`);
+      const { reasoningEffort } = binding;
+      const reasoning = route.models.find(model => model.model === binding.model)?.reasoning;
+      refuse(reasoningEffort === undefined || reasoning?.efforts.includes(reasoningEffort) === true,
+        `PROVIDER_CONFIGURATION/recording-effort: ${id}/${tier}`);
+      return [tier, { ...resolveBinding(binding, false), ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }];
+    }))];
+  }));
   const result = {
     developerLive: resolveBinding(input.data.developerLive),
+    recordingProviders,
     legacyDeepSeek: resolveBinding(input.data.legacyDeepSeek),
     policyBaseline: resolveRoles(input.data.policyBaseline, false),
     ordinaryProduction: resolveRoles(input.data.ordinaryProduction),
@@ -799,6 +853,12 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
         .models.find((entry) => entry.model === key.slice(key.indexOf('/') + 1)).displayName)},`),
     '};',
     '',
+    '/** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */',
+    `export const CONFIGURED_RECOMMENDED_MODELS: Readonly<Record<string, { readonly pro: readonly string[]; readonly flash: readonly string[] }>> = ${renderValue(Object.fromEntries(providers.filter((provider) => provider.recommendedModels !== null).map((provider) => [provider.providerId, provider.recommendedModels])), 0)};`,
+    '',
+    '/** The models a channel declares on a further route only (Issue #1582), by route: never sent on the first route of the channel. */',
+    `export const CONFIGURED_ALTERNATE_ROUTE_MODELS: Readonly<Record<string, readonly string[]>> = ${renderValue(alternateRouteModels(providers), 0)};`,
+    '',
     '/** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker\'s closed set. */',
     'export const CONFIGURED_CREDENTIAL_SLOTS = [',
     ...slots.map((slot) => `  ${literal(slot.slot)},`),
@@ -819,8 +879,7 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
     '/**',
     ' * The fixed development Credential Reference of each such slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the',
     ' * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret, and it is a',
-    ' * place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067; ADR 0073 §5',
-    ' * authorizes no credential).',
+    ' * place for a key. Enrollment requires separate authorization, as in ADR 0067 and ADR 0108.',
     ' */',
     'export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredDevelopmentSlot, string>> = {',
     ...developmentSlots.map((slot) => `  ${literal(slot.slot)}: ${literal(slot.developmentCredentialReference)},`),
@@ -881,8 +940,7 @@ function renderSlots({ providers, searchBackends = [] }) {
     '',
     '/**',
     ' * [slot, development Credential Reference], one per configured provider whose document fixes one (ADR 0073 §4). A slot',
-    ' * here is a place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067), and',
-    ' * every other slot waits for a record that names it (ADR 0073 §5 authorizes no credential; ADR 0080 §5 「先支持后添加key」).',
+    ' * here is a place for a key. Enrollment requires separate authorization, as in ADR 0067 and ADR 0108.',
     ' */',
     'export const DEVELOPMENT_CREDENTIAL_SLOTS = Object.freeze([',
     ...providers
@@ -1043,7 +1101,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
       lines.push(`| Per-turn output cap | ${route.profile.maxOutputTokens === null ? 'none' : grouped(route.profile.maxOutputTokens)} |`);
       if (route.profile.reasoning !== undefined) {
         const reasoning = route.profile.reasoning;
-        lines.push(`| Reasoning control / suggestions | \`${reasoning.control}\` / ${reasoning.efforts.map((effort) => `\`${effort}\``).join(', ')} |`);
+        lines.push(`| Reasoning encoding / route hints | \`${reasoning.control}\` / ${reasoning.efforts.map((effort) => `\`${effort}\``).join(', ')} |`);
         lines.push(`| Reasoning protocol source | ${reasoning.source}, read ${reasoning.readOn} |`);
       }
       lines.push('');
@@ -1071,7 +1129,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
           record(model.model, `\`${capability}: ${model.capabilities[capability]}\` — ${describeEvidence(evidence)}`);
         }
         if (model.context.tokens !== null) record(model.model, `context ${grouped(model.context.tokens)} — ${describeEvidence(model.context.evidence)}`);
-        if (model.reasoning !== undefined) record(model.model, `reasoning control ${model.reasoning.control}; suggestions ${model.reasoning.efforts.join(', ')} — ${model.reasoning.source}, read ${model.reasoning.readOn}`);
+        if (model.reasoning !== undefined) record(model.model, `reasoning control ${model.reasoning.control}; documented choices ${model.reasoning.efforts.join(', ')} — ${model.reasoning.source}, read ${model.reasoning.readOn}`);
         if (model.pre114ReasoningEffort !== undefined) record(model.model, `pre-114 selected-role effective effort ${model.pre114ReasoningEffort}; retained during upgrade only`);
       }
       const every = route.models.length;

@@ -1,5 +1,4 @@
-import { dataVersionMarkerPath, readDataVersionMarker } from '../../src/service/data-version.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,19 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { replacementStagingFor } from '../../src/service/database-replacement.js';
-import {
-  DATA_VERSION_TRIGGER_SQL,
-  DataVersionError,
-  DataVersionLedger,
-  initializeDataVersionSchema,
-  MAX_STORE_VERSIONS_LISTED,
-  readUpgrade,
-} from '../../src/service/data-version.js';
+import { DATA_VERSION_TRIGGER_SQL, DataVersionError, DataVersionLedger, DATA_VERSION_SCHEMA_SQL, MAX_STORE_VERSIONS_LISTED, readUpgrade } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SUPERVISION_TRIGGER_SQL } from '../../src/service/learning/supervision-directives.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) over the real store:
 // the software version and the Data Version apart, one record of the versions that opened the store and none for an
@@ -70,11 +60,11 @@ describe('数据版本 over the real store', () => {
     const first = await reopened((store) => store.inspectDataVersion());
     expect(first).toEqual({
       softwareVersion: version,
-      dataVersion: 1,
+      dataVersion: 2,
       frozen: true,
       schemaRevision: LATEST_SCHEMA_VERSION,
       update: null,
-      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
+      history: [{ softwareVersion: version, dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
       upgrades: [],
       backupLocation: `${roots.dataRoot}-backups`,
@@ -92,16 +82,16 @@ describe('数据版本 over the real store', () => {
       database.exec(DATA_VERSION_TRIGGER_SQL.store_versions_no_delete!);
       const recordedAt = '2026-09-01T00:00:00.000Z';
       const earlier = canonicalRecord({
-        schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 1,
+        schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 2,
         schemaRevision: LATEST_SCHEMA_VERSION, supersedes: null, recordedAt,
       });
       database.prepare(`INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
-        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', LATEST_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
+        VALUES (?, 1, '0.0.9', 2, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', LATEST_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
     } finally {
       database.close();
     }
     const updated = await reopened((store) => store.inspectDataVersion());
-    expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 1, 1]);
+    expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 2, 2]);
     expect(updated.history.map((entry) => entry.softwareVersion)).toEqual([version, '0.0.9']);
     // The version the service entry hands the store is the one recorded: here, a later software opening the same data.
     const parts = version.split('.').map(Number);
@@ -145,8 +135,7 @@ describe('数据版本 over the real store', () => {
     };
     const fresh = (): DatabaseSync => {
       const database = new DatabaseSync(':memory:');
-      initializeDataVersionSchema(database);
-      initializeDataVersionSchema(database);
+      createBaselineRelations(database, DATA_VERSION_SCHEMA_SQL);
       return database;
     };
     // The ledger alone: a malformed version is refused, and a record is appended only when a version changed.
@@ -222,7 +211,7 @@ describe('数据版本 over the real store', () => {
   it('keeps an older software transition while bounding recent records and validating superseded history', () => {
     const database = new DatabaseSync(':memory:');
     try {
-      initializeDataVersionSchema(database);
+      createBaselineRelations(database, DATA_VERSION_SCHEMA_SQL);
       const ledger = new DataVersionLedger(database);
       ledger.recordOpen({ softwareVersion: '0.1.0', dataVersion: 1, schemaRevision: 1 });
       ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision: 1 });
@@ -263,7 +252,7 @@ describe('数据版本 over the real store', () => {
     // The ledger refuses to record the same rollback, and records the strictly earlier one.
     const database = new DatabaseSync(':memory:');
     try {
-      initializeDataVersionSchema(database);
+      createBaselineRelations(database, DATA_VERSION_SCHEMA_SQL);
       const ledger = new DataVersionLedger(database);
       ledger.recordOpen({ softwareVersion: '0.0.9', dataVersion: 3, schemaRevision: 60 });
       expect(() => ledger.recordOpen({ softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: 61, upgrade: upgrade({ dataVersion: 3, schemaRevision: 59 }) as never }))
@@ -274,24 +263,6 @@ describe('数据版本 over the real store', () => {
     }
   });
 
-  it('adds revision 54 to a revision-53 store, recording the versions that open it from then on', async () => {
-    await reopened(() => undefined);
-    const plant = new DatabaseSync(databasePath());
-    try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-    } finally {
-      plant.close();
-    }
-    const migrated = await reopened((store) => store.inspectDataVersion());
-    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([LATEST_SCHEMA_VERSION, 1, null]);
-    const database = new DatabaseSync(databasePath(), { readOnly: true });
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-    } finally {
-      database.close();
-    }
-  }, 120_000);
 });
 
 describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => {
@@ -351,7 +322,7 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     const originalMarker = await readFile(markerPath(), 'utf8');
     const snapshot = () => Promise.all([roots.dataRoot, replacementStagingFor(roots.dataRoot), `${roots.dataRoot}-backups`].map(treeBytes));
     for (const [text, code] of [
-      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
+      [JSON.stringify({ dataVersion: 3, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
       ['{', 'DATA_VERSION_MARKER_UNREADABLE'],
     ]) {
       await writeFile(markerPath(), text!);
@@ -383,15 +354,15 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     await reopened(() => undefined);
     const written = await readMarker();
     expect(Object.keys(written).sort()).toEqual(['dataVersion', 'schemaRevision', 'softwareVersion', 'writtenAt']);
-    expect(written).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
+    expect(written).toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
     for (const place of [roots.dataRoot, JSON.stringify(roots.dataRoot).slice(1, -1)]) expect(await readFile(markerPath(), 'utf8')).not.toContain(place);
     // A later software opening the data replaces it, and an earlier one of the same Data Version opens it as ever.
     await reopened(() => undefined, '0.2.0');
-    expect(await readMarker()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.2.0' });
+    expect(await readMarker()).toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.2.0' });
     await reopened(() => undefined, '0.1.0');
     expect((await readMarker()).softwareVersion).toBe('0.1.0');
-    // A marker of an earlier schema revision — data an earlier AI7 of the same Data Version wrote — opens and is replaced.
-    await writeFile(markerPath(), JSON.stringify({ dataVersion: 1, schemaRevision: 60, softwareVersion: '0.0.9', writtenAt: '2026-09-01T00:00:00.000Z' }));
+    // A marker an earlier AI7 of the same Data Version wrote opens and is replaced (an earlier Data Version is refused: #1634).
+    await writeFile(markerPath(), JSON.stringify({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.0.9', writtenAt: '2026-09-01T00:00:00.000Z' }));
     await reopened(() => undefined);
     expect(await readMarker()).toMatchObject({ schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
     // An existing store without a marker — one from before this software, or a store a replacement brought in — opens, and
@@ -415,12 +386,12 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
 
   it('refuses a newer Data Version, an unknown schema revision or a corrupt marker before anything opens, and writes nothing', async () => {
     await reopened(() => undefined);
-    const newer = '这份数据来自更新的 AI7（数据版本 2 / 数据库修订 90），请使用更新的 AI7 打开。';
-    const unknown = `这份数据来自更新的 AI7（数据版本 1 / 数据库修订 ${LATEST_SCHEMA_VERSION + 1}），请使用更新的 AI7 打开。`;
+    const newer = '这份数据来自更新的 AI7（数据版本 3 / 数据库修订 90），请使用更新的 AI7 打开。';
+    const unknown = `这份数据来自更新的 AI7（数据版本 2 / 数据库修订 ${LATEST_SCHEMA_VERSION + 1}），请使用更新的 AI7 打开。`;
     const corrupt = '这份数据的数据版本标记无法读取：AI7 没有打开这份数据，也没有改动它。请使用写入这份数据的 AI7 打开，或从备份恢复。';
     for (const [text, expected] of [
-      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', newer]],
-      [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION + 1, softwareVersion: '1.1.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', unknown]],
+      [JSON.stringify({ dataVersion: 3, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', newer]],
+      [JSON.stringify({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION + 1, softwareVersion: '1.1.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', unknown]],
       ['{"dataVersion":1', ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
       [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '1.0.0', writtenAt: '2027-01-01T00:00:00.000Z', dataRoot: 'C:/AI7' }), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
       ['x'.repeat(8192), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
@@ -443,50 +414,3 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
   }, 120_000);
 });
 
-
-it.each([90, 91])('advances a valid historical reader%s without rewriting Book or version-history rows (#1131)', async (revision) => {
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  const creation = store.prepareBookCreation('合成历史读取', null);
-  store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
-  await store.close();
-  const db = new DatabaseSync(databasePath());
-  const before = db.prepare('SELECT rowid, * FROM books ORDER BY rowid').all();
-  new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.9', dataVersion: 1, schemaRevision: revision });
-  const history = db.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all();
-  execPre74Fixture(db, `PRAGMA user_version = ${revision}`); db.close();
-  const marker = (await readDataVersionMarker(roots.dataRoot))!;
-  await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: revision }));
-  const upgraded = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  expect(upgraded.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
-  await upgraded.close();
-  const read = new DatabaseSync(databasePath());
-  try {
-    expect(read.prepare('SELECT rowid, * FROM books ORDER BY rowid').all()).toEqual(before);
-    expect(read.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all().slice(0, history.length)).toEqual(history);
-  } finally { read.close(); }
-});
-
-it('refuses a revision-91 store whose current-format learning records are damaged before any successor stamp (#1131)', async () => {
-  // A genuine revision-91 predecessor: an editor's House supervision directive, and no model Run or request evidence at all.
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合成本社原则。', effect: 'guide' });
-  await store.close();
-  const db = new DatabaseSync(databasePath());
-  try {
-    expect(db.prepare("SELECT count(*) count FROM analysis_run_states WHERE json_type(canonical_json, '$.requestAdmission') IS NOT NULL").get()!.count).toBe(0);
-    const row = db.prepare('SELECT directive_id, canonical_json FROM learning_supervision_directives ORDER BY ordinal LIMIT 1').get()!;
-    const tampered = canonicalRecord({ ...(JSON.parse(String(row.canonical_json)) as Record<string, unknown>), effect: 'not-an-effect' });
-    for (const name of Object.keys(SUPERVISION_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
-    db.prepare('UPDATE learning_supervision_directives SET canonical_json = ?, sha256 = ? WHERE directive_id = ?').run(tampered.json, tampered.digest, String(row.directive_id));
-    for (const sql of Object.values(SUPERVISION_TRIGGER_SQL)) db.exec(sql);
-    execPre74Fixture(db, 'PRAGMA user_version = 91');
-  } finally { db.close(); }
-  const marker = (await readDataVersionMarker(roots.dataRoot))!;
-  await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: 91 }));
-  const written = await readFile(dataVersionMarkerPath(roots.dataRoot), 'utf8');
-  await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
-  // Refused by its own revision-91 readers: neither the database nor the marker claims the successor.
-  const read = new DatabaseSync(databasePath());
-  try { expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(91); } finally { read.close(); }
-  expect(await readFile(dataVersionMarkerPath(roots.dataRoot), 'utf8')).toBe(written);
-});

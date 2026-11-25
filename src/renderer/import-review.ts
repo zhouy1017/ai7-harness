@@ -1,5 +1,6 @@
 import { rendererApi, navigation as shellNavigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { focusImportStep, importSteps } from './components/import-steps.js';
+import { IMPORT_RELATIONSHIP_LABELS, importFileLabel } from './import-review-labels.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -14,6 +15,7 @@ import {
   REIMPORT_GROUP_VERB_LABELS,
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
+  type ImportEditingChoices,
 } from '../shared/protocol.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
@@ -25,7 +27,6 @@ import {
   WORD_IMPORT_MODE_NAMES,
   fidelityDetailText,
   fidelityReviewHeading,
-  fidelitySurfaceDetail,
   commitNote,
 } from './import-fidelity-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -49,6 +50,12 @@ const REIMPORT_VERB_ACTIONS: Readonly<Record<ReimportGroupProjection['verbs'][nu
   rewrite: '改写与新增 · 标记跟随保留的文字',
   delete: '删除 · 标记不跟随',
   merge: '并入 · 标记跟随文字',
+};
+const REIMPORT_VERB_EXPLANATIONS: Readonly<Record<ReimportGroupProjection['verbs'][number], string>> = {
+  split: '把旧稿这一处拆成新稿的多段，原有标记跟随对应文字。',
+  rewrite: '用新稿改写这一处或加入新段落，原有标记只跟随保留的文字。',
+  delete: '删去旧稿这一处，原有标记不带入新稿。',
+  merge: '把旧稿的多段并成新稿这一处，原有标记跟随对应文字。',
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -160,6 +167,12 @@ export function createImportReview(options: ImportReviewOptions) {
       bind: (control) => { buttons.push(control); paint(); }, setBusy: (value) => { busy = value; paint(); } };
   }
 
+  // The currently drawn form owns unsent choices; paging and valid target changes keep them.
+  let chosenRelationship: ImportRelationshipChoice | null = null;
+  let currentForm: { key: string; content: HTMLElement } | undefined;
+  const formControls = '[data-structure-candidate], [data-structure-level], [data-long-paragraph-choice], [data-text-box-disposition]';
+  let savedForm: { title?: string; controls: Array<{ key: string; value: string; checked: boolean }>; fidelityOpen?: boolean } = { controls: [] };
+
   function renderTargetChoice(
     staged: StagedImportProjection,
     selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
@@ -168,7 +181,20 @@ export function createImportReview(options: ImportReviewOptions) {
     relationshipSelection: ImportRelationshipChoice | null = null,
     reuseSourceVersionId: string | null | undefined = undefined,
     reimportLineageChoice: ReimportLineageChoice | undefined = undefined,
+    editingChoices?: ImportEditingChoices,
   ): void {
+    const formKey = `${staged.draftId}:${staged.draftVersion}`;
+    const freshForm = currentForm?.key !== formKey;
+    if (currentForm?.key === formKey) {
+      const title = currentForm.content.querySelector<HTMLInputElement>('[id="book-title"]');
+      if (title) savedForm.title = title.value;
+      const controls = Array.from(currentForm.content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls));
+      if (controls.length > 0) savedForm.controls = controls.map((control) => ({
+        key: JSON.stringify(control.dataset), value: control.value, checked: 'checked' in control && control.checked,
+      }));
+      const fold = currentForm.content.querySelector<HTMLDetailsElement>('.fidelity-details');
+      if (fold) savedForm.fidelityOpen = fold.open;
+    } else { savedForm = { controls: [], ...(editingChoices?.title == null ? {} : { title: editingChoices.title }) }; chosenRelationship = relationshipSelection; }
     if (selectedChoiceId === null) {
       const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
       const origin = document.querySelector('#screen')?.firstElementChild;
@@ -188,6 +214,8 @@ export function createImportReview(options: ImportReviewOptions) {
           ?? offered.targetChoices.find((choice) => choice.kind === 'new-book') ?? offered.targetChoices[0];
         if (target) renderTargetChoice(offered, target.id, recoveryNotice, recoveryReturn,
           !staged.editableImport.available || target.kind === 'existing-book' && target.manuscriptState === 'populated' ? 'source-only' : defaults.importRelationship);
+        // Remembered defaults are not the editor's explicit choice from an import entry or this form.
+        chosenRelationship = null;
       }).catch((error: unknown) => renderError(error, () => void initializeStartup()));
       return;
     }
@@ -197,6 +225,9 @@ export function createImportReview(options: ImportReviewOptions) {
       const preview = button('查看导入详情', 'quiet', () => { previewOnly = true; confirm.click(); });
       controls?.bind(preview); return preview;
     };
+    if (relationshipSelection === 'reimport' && (defaultTarget?.kind !== 'existing-book' || defaultTarget.manuscriptState !== 'populated') ||
+      relationshipSelection === 'first-manuscript' && defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated') relationshipSelection = null;
+    if (!staged.editableImport.available) relationshipSelection = 'source-only';
     relationshipSelection ??= !staged.editableImport.available || defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated' ? 'source-only' : 'first-manuscript';
     const content = panel();
     content.append(
@@ -207,46 +238,34 @@ export function createImportReview(options: ImportReviewOptions) {
     );
     if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
     if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
-    const choices = element('fieldset');
-    choices.setAttribute('role', 'radiogroup');
-    choices.setAttribute('aria-label', '本地文件导入目标');
+    const choices = element('div', 'import-book-choice');
     choices.dataset['importTargetChoices'] = 'remembered-default';
-    choices.append(element('legend', undefined, '图书目标'));
-    for (const targetChoice of staged.targetChoices) {
-      const choice = element('label', 'choice');
-      const radio = element('input');
-      radio.type = 'radio';
-      radio.name = 'import-target';
-      radio.value = targetChoice.id;
-      radio.dataset['importTargetChoice'] = targetChoice.kind;
-      if (targetChoice.kind === 'existing-book') radio.dataset['bookId'] = targetChoice.bookId;
-      // The Book's identity is one disclosure away, beside the choice and outside its label, so opening it chooses nothing.
-      const words = targetChoice.kind === 'existing-book' ? bookChoiceWords(targetChoice.label, targetChoice.bookId) : targetChoice.label;
-      radio.setAttribute('aria-label', words);
-      radio.checked = selectedChoiceId === targetChoice.id;
-      const copy = element('span');
-      copy.append(element('strong', undefined, words));
-      if (targetChoice.kind === 'new-book') {
-        copy.append(element('small', undefined, '用文件名作为书名。'));
-      } else {
-        copy.append(element(
-          'small',
-          undefined,
-          `${targetChoice.internalNumber ? `内部编号 ${targetChoice.internalNumber} · ` : ''}${
-          targetChoice.manuscriptState === 'empty' ? '尚无稿件' : '已有主稿件；仍可导入来源材料'
-        }`,
-        ));
-      }
-      choice.append(radio, copy);
-      choices.append(choice, ...(targetChoice.kind === 'existing-book' ? [identityDisclosure('图书 ID', targetChoice.bookId)] : []));
-      radio.addEventListener('change', () =>
-        renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
+    const bookLabel = element('label', undefined, '图书');
+    bookLabel.htmlFor = 'import-book';
+    const bookSelect = element('select');
+    bookSelect.id = 'import-book';
+    bookSelect.name = 'import-target';
+    bookSelect.setAttribute('aria-label', '图书');
+    for (const target of [...staged.targetChoices].sort((a, b) => Number(b.kind === 'new-book') - Number(a.kind === 'new-book'))) {
+      const option = element('option', undefined, target.kind === 'new-book' ? target.label :
+        `${bookChoiceWords(target.label, target.bookId)}${target.internalNumber && !target.label.includes(`内部编号 ${target.internalNumber}`) ? ` · 内部编号 ${target.internalNumber}` : ''}`);
+      option.value = target.id;
+      option.selected = target.id === selectedChoiceId;
+      option.dataset['importTargetChoice'] = target.kind;
+      if (target.kind === 'existing-book') option.dataset['bookId'] = target.bookId;
+      bookSelect.append(option);
     }
+    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn,
+      chosenRelationship ?? (relationshipSelection === 'reimport' ? 'reimport' : null)));
+    choices.append(bookLabel, bookSelect);
+    if (defaultTarget?.kind === 'existing-book') choices.append(identityDisclosure('图书 ID', defaultTarget.bookId));
     content.append(choices);
+    if (defaultTarget?.kind === 'existing-book') content.append(element('p', 'field-note',
+      defaultTarget.manuscriptState === 'empty' ? '尚无稿件' : '已有主稿件；仍可导入来源材料'));
     if (staged.nextBookCursor) {
-      const moreTargets = button('加载更多图书目标', 'secondary', async () => {
+      const moreTargets = button('加载更多图书', 'secondary', async () => {
         moreTargets.disabled = true;
-        setStatus('正在读取下一页图书目标…', 'busy');
+        setStatus('正在读取下一页图书…', 'busy');
         try {
           const page = await rendererApi.listBooks({ after: staged.nextBookCursor });
           const knownBookIds = new Set(staged.targetChoices.flatMap((choice) =>
@@ -255,7 +274,7 @@ export function createImportReview(options: ImportReviewOptions) {
             kind: 'existing-book' as const,
             id: `existing-book:${book.bookId}`,
             bookId: book.bookId,
-            label: `${book.title} · ${book.internalNumber === null ? '' : `内部编号 ${book.internalNumber} · `}图书 ID ${book.bookId}`,
+            label: book.title,
             internalNumber: book.internalNumber,
             manuscriptState: book.manuscriptState,
             reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
@@ -268,17 +287,17 @@ export function createImportReview(options: ImportReviewOptions) {
             { ...staged, targetChoices: [...staged.targetChoices, ...additional], nextBookCursor: page.nextCursor },
             selectedChoiceId,
             recoveryNotice,
-            recoveryReturn,
+            recoveryReturn, relationshipSelection, reuseSourceVersionId, reimportLineageChoice,
           );
-          setStatus('已加载更多图书目标', 'success');
+          setStatus('已加载更多图书', 'success');
         } catch (error) {
           moreTargets.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法读取下一页图书目标。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法读取下一页图书。'), 'error');
         }
       });
       const moreTargetActions = element('div', 'button-row');
       moreTargetActions.append(moreTargets);
-      content.append(moreTargetActions);
+      choices.append(moreTargetActions);
     }
     const selectedChoice = selectedChoiceId === null
       ? undefined
@@ -305,7 +324,13 @@ export function createImportReview(options: ImportReviewOptions) {
         : selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
           ? ['source-only', 'reimport']
           : ['first-manuscript', 'source-only'];
-      for (const relationshipKind of allowedRelationships) {
+      if (allowedRelationships.length === 1) {
+        const sentence = element('p', undefined, '这个文件只能存为来源材料。');
+        sentence.dataset['importRelationship'] = 'source-only';
+        relationship.removeAttribute('role');
+        relationship.append(sentence);
+      }
+      for (const relationshipKind of allowedRelationships.length === 1 ? [] : allowedRelationships) {
         const relationshipChoice = element('label', 'choice');
         const radio = element('input');
         radio.type = 'radio';
@@ -315,28 +340,30 @@ export function createImportReview(options: ImportReviewOptions) {
         radio.checked = relationshipSelection === relationshipKind;
         const copy = element('span');
         if (relationshipKind === 'first-manuscript') {
-          radio.setAttribute('aria-label', '作为首份稿件导入');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS['first-manuscript']);
           copy.append(
             element('strong', undefined, '作为首份稿件导入'),
             element('small', undefined, '创建主稿件。'),
           );
         } else if (relationshipKind === 'source-only') {
-          radio.setAttribute('aria-label', '作为来源材料导入');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS['source-only']);
           copy.append(
-            element('strong', undefined, '作为来源材料导入'),
+            element('strong', undefined, IMPORT_RELATIONSHIP_LABELS['source-only']),
             element('small', undefined, '保留为来源材料，不改变稿件。'),
           );
         } else {
-          radio.setAttribute('aria-label', '重新导入主稿件');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS.reimport);
           copy.append(
-            element('strong', undefined, '重新导入主稿件'),
+            element('strong', undefined, IMPORT_RELATIONSHIP_LABELS.reimport),
             element('small', undefined, '比较新旧稿件，由你决定保留哪些改动。'),
           );
         }
         relationshipChoice.append(radio, copy);
         relationship.append(relationshipChoice);
-        radio.addEventListener('change', () =>
-          renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, relationshipKind));
+        radio.addEventListener('change', () => {
+          chosenRelationship = relationshipKind;
+          renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, relationshipKind);
+        });
         if (!revealedControl) revealedControl = radio;
       }
       content.append(relationship);
@@ -404,7 +431,7 @@ export function createImportReview(options: ImportReviewOptions) {
       });
       const actions = element('div', 'button-row');
       actions.append(confirm, previewAction(confirm, wordControls ?? undefined), cancelImport);
-      form.append(label, title);
+      form.append(label, title, element('p', 'field-note', '用文件名作为书名。'));
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
         form.append(...fidelityView.elements, ...structureView.elements);
@@ -455,7 +482,13 @@ export function createImportReview(options: ImportReviewOptions) {
         .map((finding) => finding.sourceVersionId))];
       // The same Book's exact source is reused to begin with (Issue #1410 item 32B); the editor may choose another.
       if (sameBookMatches.length > 0 && reuseSourceVersionId === undefined) reuseSourceVersionId = sameBookMatches[0]!;
-      if (sameBookMatches.length > 0) {
+      if (sameBookMatches.length === 1) {
+        const sentence = element('p', undefined, '这本书已导入过同一个文件，将沿用那一份。');
+        sentence.dataset['sourceVersionReuseChoices'] = 'single-answer';
+        sentence.dataset['reuseSourceVersionId'] = sameBookMatches[0]!;
+        content.append(sentence, identityDisclosure('来源版本', sameBookMatches[0]!));
+      }
+      if (sameBookMatches.length > 1) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
         reuseChoices.setAttribute('aria-label', technicalWords('同图书精确来源版本复用', '使用已导入的文件'));
@@ -469,9 +502,9 @@ export function createImportReview(options: ImportReviewOptions) {
           radio.value = sourceVersionId;
           radio.dataset['reuseSourceVersionId'] = sourceVersionId;
           radio.checked = reuseSourceVersionId === sourceVersionId;
-          radio.setAttribute('aria-label', technicalWords('复用这个同图书精确来源版本', '使用已导入的文件'));
+          radio.setAttribute('aria-label', importFileLabel(staged.identityFindings.find((finding) => finding.sourceVersionId === sourceVersionId)!));
           const copy = element('span');
-          copy.append(element('strong', undefined, technicalWords('复用这个同图书精确来源版本', '使用已导入的文件')));
+          copy.append(element('strong', undefined, importFileLabel(staged.identityFindings.find((finding) => finding.sourceVersionId === sourceVersionId)!)));
           reuseChoice.append(radio, copy);
           reuseChoices.append(reuseChoice, identityDisclosure('来源版本', sourceVersionId));
           radio.addEventListener('change', () =>
@@ -519,7 +552,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const verifiedLineageSources = selectedChoice.reimportLineageSourceVersionIds;
       // The first verified source, else 来源关系未确认, and the exact same-Book source, else a new one, are chosen to begin with
       // (Issue #1410 item 32B); each stays changeable.
-      if (reimportLineageChoice === undefined) reimportLineageChoice = verifiedLineageSources[0] ?? 'unconfirmed';
+      if (reimportLineageChoice === undefined) reimportLineageChoice = verifiedLineageSources[0]?.sourceVersionId ?? 'unconfirmed';
       if (reuseSourceVersionId === undefined) reuseSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
 
       const lineageChoices = element('fieldset');
@@ -546,10 +579,16 @@ export function createImportReview(options: ImportReviewOptions) {
             reuseSourceVersionId, value));
         if (reimportLineageChoice === undefined) revealedControl = radio;
       };
-      addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
-      verifiedLineageSources.forEach((sourceVersionId, index) => addLineageChoice(sourceVersionId,
-        verifiedLineageSources.length === 1 ? technicalWords('确认这个来源版本', '确认此文件') : technicalWords(`确认来源版本（第 ${index + 1} 个）`, `确认第 ${index + 1} 个文件`),
-        technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), sourceVersionId));
+      if (verifiedLineageSources.length === 0) {
+        lineageChoices.removeAttribute('role');
+        lineageChoices.querySelector('legend')!.textContent = '来源关系';
+        lineageChoices.append(element('p', undefined, '没有找到这本书的原文件，将对比这次导入与当前稿件。'));
+        lineageChoices.dataset['reimportLineage'] = 'unconfirmed';
+      } else {
+        addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
+        verifiedLineageSources.forEach((item) => addLineageChoice(item.sourceVersionId, importFileLabel(item),
+          technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), item.sourceVersionId));
+      }
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
         control.disabled = true;
         setStatus(technicalWords('正在读取来源关系版本页…', '正在读取更多文件…'), 'busy');
@@ -560,7 +599,10 @@ export function createImportReview(options: ImportReviewOptions) {
           });
           const pageItems = [...page.items];
           if (reimportLineageChoice !== undefined && reimportLineageChoice !== 'unconfirmed' &&
-            !pageItems.includes(reimportLineageChoice)) pageItems.push(reimportLineageChoice);
+            !pageItems.some((item) => item.sourceVersionId === reimportLineageChoice)) {
+            const selected = verifiedLineageSources.find((item) => item.sourceVersionId === reimportLineageChoice);
+            if (selected !== undefined) pageItems.push(selected);
+          }
           const targetChoices = staged.targetChoices.map((choice) =>
             choice.kind !== 'existing-book' || choice.id !== selectedChoice.id
             ? choice
@@ -599,31 +641,14 @@ export function createImportReview(options: ImportReviewOptions) {
       sourceChoices.setAttribute('role', 'radiogroup');
       sourceChoices.setAttribute('aria-label', technicalWords('稿件重新导入来源版本结果', '选择来源文件'));
       sourceChoices.dataset['reimportSourceVersionChoices'] = 'unselected-by-default';
-      sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果（必须另行明确选择）', '选择来源文件')));
-      const sourceChoice = element('label', 'choice');
-      const sourceRadio = element('input');
-      sourceRadio.type = 'radio';
-      sourceRadio.name = 'reimport-source-version';
+      sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果', '来源文件')));
       const exactSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
-      if (exactSourceVersionId) {
-        sourceRadio.value = exactSourceVersionId;
-        sourceRadio.dataset['reuseSourceVersionId'] = exactSourceVersionId;
-        sourceRadio.checked = reuseSourceVersionId === exactSourceVersionId;
-        sourceRadio.setAttribute('aria-label', technicalWords(`复用来源版本 ${exactSourceVersionId}`, '使用已导入的文件'));
-      } else {
-        sourceRadio.value = 'create-new';
-        sourceRadio.dataset['createSourceVersion'] = 'true';
-        sourceRadio.checked = reuseSourceVersionId === null;
-        sourceRadio.setAttribute('aria-label', technicalWords('创建新的图书来源版本', '导入新文件'));
-      }
-      const sourceCopy = element('span');
-      sourceCopy.append(element('strong', undefined, exactSourceVersionId ? technicalWords('复用这个同图书精确来源版本', '使用已导入的文件') : technicalWords('创建新的图书来源版本', '导入新文件')));
-      sourceChoice.append(sourceRadio, sourceCopy);
-      sourceChoices.append(sourceChoice, exactSourceVersionId ? identityDisclosure('来源版本', exactSourceVersionId) : identityDisclosure('来源 SHA-256', staged.source.sourceSha256));
-      sourceRadio.addEventListener('change', () =>
-        renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
-          exactSourceVersionId, reimportLineageChoice));
-      if (reuseSourceVersionId === undefined && reimportLineageChoice !== undefined) revealedControl = sourceRadio;
+      sourceChoices.removeAttribute('role');
+      sourceChoices.append(element('p', undefined, exactSourceVersionId
+        ? '这个文件之前导入过，将沿用那一份。' : '这个文件将作为新的原文件保存。'));
+      if (exactSourceVersionId) sourceChoices.dataset['reuseSourceVersionId'] = exactSourceVersionId;
+      else sourceChoices.dataset['createSourceVersion'] = 'true';
+      sourceChoices.append(exactSourceVersionId ? identityDisclosure('来源版本', exactSourceVersionId) : identityDisclosure('来源 SHA-256', staged.source.sourceSha256));
       content.append(sourceChoices);
 
       const actions = element('div', 'button-row');
@@ -711,6 +736,39 @@ export function createImportReview(options: ImportReviewOptions) {
         if (target) focusImportStep(target);
       },
     }));
+    const actionBar = element('section', 'commit-bar import-page-actions');
+    for (const row of content.querySelectorAll<HTMLElement>('.button-row')) {
+      if (row.contains(cancelImport)) { row.classList.add('compact-actions'); actionBar.append(row); }
+    }
+    content.append(actionBar);
+    // Returned choices seed the editable controls once; subsequent paging keeps the editor's changes.
+    if (freshForm) {
+      const structure = editingChoices?.structure ?? staged.savedStructureChoice;
+      for (const control of content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls)) {
+        const candidate = control.dataset['structureCandidate'];
+        const level = control.dataset['structureLevel'];
+        if (candidate !== undefined && structure) (control as HTMLInputElement).checked = structure.headings.some((heading) => heading.position === Number(candidate));
+        if (level !== undefined && structure) {
+          const heading = structure.headings.find((item) => item.position === Number(level));
+          if (heading) control.value = String(heading.level);
+        }
+        if (control.dataset['longParagraphChoice'] !== undefined && structure) (control as HTMLInputElement).checked = control.dataset['longParagraphChoice'] === structure.longParagraphs;
+        if (control.dataset['textBoxDisposition'] !== undefined && editingChoices?.textBoxDisposition) (control as HTMLInputElement).checked = control.dataset['textBoxDisposition'] === editingChoices.textBoxDisposition;
+        control.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+    const titleControl = content.querySelector<HTMLInputElement>('[id="book-title"]');
+    if (titleControl && savedForm.title !== undefined) titleControl.value = savedForm.title;
+    for (const control of content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls)) {
+      const saved = savedForm.controls.find((item) => item.key === JSON.stringify(control.dataset));
+      if (!saved) continue;
+      control.value = saved.value;
+      if ('checked' in control) control.checked = saved.checked;
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const fold = content.querySelector<HTMLDetailsElement>('.fidelity-details');
+    if (fold && savedForm.fidelityOpen !== undefined) fold.open = savedForm.fidelityOpen;
+    currentForm = { key: formKey, content };
     content.addEventListener('focusin', (event) => {
       const target = event.target as HTMLElement;
       const current = target.closest('.fidelity-list, .import-structure') ? '3' : target.closest('[data-import-target-choices], [data-import-title-for-relationship]') ? '2' : null;
@@ -724,8 +782,8 @@ export function createImportReview(options: ImportReviewOptions) {
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {
       revealedControl?.focus();
-      if (!selectedChoice) setStatus(technicalWords('请选择精确图书目标。', '请选择要导入到哪本书。'));
-      else if (relationshipSelection === null) setStatus('图书目标已选择；请另行选择导入关系。');
+      if (!selectedChoice) setStatus(technicalWords('请选择精确图书。', '请选择要导入到哪本书。'));
+      else if (relationshipSelection === null) setStatus('图书已选择；请另行选择导入关系。');
       else if (relationshipSelection === 'source-only' && reuseSourceVersionId === undefined &&
         selectedChoice.kind === 'existing-book' && staged.identityFindings.some((finding) =>
           finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')) {
@@ -735,12 +793,12 @@ export function createImportReview(options: ImportReviewOptions) {
           relationshipSelection === 'first-manuscript'
             ? `已选择“作为首份稿件导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
             : relationshipSelection === 'source-only'
-              ? `已选择“作为来源材料导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
+              ? `已选择“存为来源材料”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
               : reimportLineageChoice === undefined
-                ? '已选择“重新导入主稿件”；请明确来源关系。'
+                ? '已选择“更新稿件”；请明确来源关系。'
                 : reuseSourceVersionId === undefined
                   ? technicalWords('来源关系已选择；请另行明确来源版本结果。', '请选择来源文件。')
-                  : `重新导入决定已明确；可以准备目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的逐块比较。`,
+                  : `更新稿件的选择已确认；可以准备图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的新旧稿比较。`,
         );
       }
     });
@@ -792,6 +850,55 @@ export function createImportReview(options: ImportReviewOptions) {
       list.append(row);
     }
     return list;
+  }
+
+  function returnToEditingAction(review: Pick<ReviewBeforeImportProjection, 'draftId' | 'draftVersion'>, recoveryReturn?: RecoveryReturnContext): HTMLButtonElement {
+    const back = button('返回修改', 'secondary', async () => {
+      const follow = shellNavigation.route();
+      const controls = Array.from(back.closest('.page-content')!.querySelectorAll<HTMLButtonElement>('button'), control => ({ control, disabled: control.disabled }));
+      for (const { control } of controls) control.disabled = true;
+      setStatus('正在返回导入设置…', 'busy');
+      try {
+        const input = { draftId: review.draftId, expectedDraftVersion: review.draftVersion };
+        let returned;
+        try { returned = await rendererApi.returnImportToEditing(input); }
+        catch (error) {
+          if (!hasErrorCode(error, 'REVIEW_CHANGED')) throw error;
+          const continued = await rendererApi.continueImportDraft(input);
+          if (!follow.isCurrent()) return;
+          if (continued.state === 'target-review-required') {
+            currentForm = undefined;
+            renderTargetChoice(continued.staged, null, continued.notice, recoveryReturn);
+          } else await initializeStartup();
+          return;
+        }
+        if (!follow.isCurrent()) return;
+        currentForm = undefined;
+        if (returned.state === 'reimport') {
+          renderManuscriptReimportReview({ ...returned.review, draftVersion: returned.draftVersion }, undefined, recoveryReturn);
+        } else {
+          const { editingChoices: choices } = returned;
+          const staged = { ...returned.staged, draftVersion: returned.draftVersion };
+          if (staged.wordTrackedChanges?.compatibility === 'ready' && choices.trackedChanges) staged.wordTrackedChanges = { ...staged.wordTrackedChanges, savedChoice: choices.trackedChanges };
+          const targetId = choices.target.kind === 'new-book' ? staged.targetChoices.find((target) => target.kind === 'new-book')!.id : `existing-book:${choices.target.bookId}`;
+          while (!staged.targetChoices.some((target) => target.id === targetId) && staged.nextBookCursor) {
+            const page = await rendererApi.listBooks({ after: staged.nextBookCursor });
+            staged.nextBookCursor = page.nextCursor;
+            staged.targetChoices = [...staged.targetChoices, ...page.items.map((book) => ({ kind: 'existing-book' as const,
+              id: `existing-book:${book.bookId}`, bookId: book.bookId, label: book.title, internalNumber: book.internalNumber,
+              manuscriptState: book.manuscriptState, reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
+              reimportLineagePageAfter: null, reimportLineagePreviousCursor: null, reimportLineageNextCursor: book.reimportLineageNextCursor, selected: false as const }))];
+          }
+          if (!follow.isCurrent()) return;
+          renderTargetChoice(staged, targetId, undefined, recoveryReturn, choices.relationship, undefined, undefined, choices);
+        }
+      } catch (error) {
+        for (const { control, disabled } of controls) control.disabled = disabled;
+        setStatus(rendererErrorMessage(error, '暂时无法返回修改，请重试。'), 'error');
+      }
+    });
+    back.dataset['returnImportToEditing'] = review.draftId;
+    return back;
   }
 
   function renderSourceImportReview(
@@ -898,7 +1005,7 @@ export function createImportReview(options: ImportReviewOptions) {
       'primary',
       async () => {
         const follow = shellNavigation.route();
-        commitButton.disabled = true;
+        for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
         setStatus(technicalWords('正在原子提交来源材料记录…', '正在添加资料…'), 'busy');
         try {
           const result = await rendererApi.commitSourceImport({
@@ -918,7 +1025,7 @@ export function createImportReview(options: ImportReviewOptions) {
             if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
-          commitButton.disabled = false;
+          for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false;
           setStatus(rendererErrorMessage(error, '来源材料导入未完成，请重试。'), 'error');
         }
       },
@@ -927,6 +1034,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const actions = element('div', 'button-row compact-actions');
     actions.append(
       commitButton,
+      returnToEditingAction(review, recoveryReturn),
       button('取消导入', 'quiet', () =>
         abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn)),
     );
@@ -954,7 +1062,6 @@ export function createImportReview(options: ImportReviewOptions) {
     recoveryNotice?: string,
     recoveryReturn?: RecoveryReturnContext,
     mappingAfter: number | null = null,
-    commitNow = false,
   ): void {
     const content = panel();
     content.dataset['importReviewKind'] = 'reimport';
@@ -987,7 +1094,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '文件'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
       element('dt', undefined, technicalWords('暂存文件名', '文件名')), element('dd', undefined, review.source.displayName),
       element('dt', undefined, technicalWords('暂存格式', '格式')), element('dd', undefined, review.source.format),
-      element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
+      ...(technicalLayerVisible ? [element('dt', undefined, '文件大小'), element('dd', undefined, String(review.source.sourceBytes))] : []),
       ...(technicalLayerVisible ? [element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel)] : []),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
@@ -1012,46 +1119,33 @@ export function createImportReview(options: ImportReviewOptions) {
 
     const summary = element('section', 'review-section');
     summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
+    const summaryLine = element('p');
+    const updateSummary = (): void => {
+      summaryLine.textContent = `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
+        ? technicalWords('每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。', '请逐处选择拆分、改写与新增、删除或并入。')
+        : technicalWords('稿件逐块一致，提交只记录未发现变化，不创建空修订版。', '与当前稿件相同，没有需要更新的内容。')}`;
+      summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
+      summary.dataset['reimportGroups'] = String(review.comparison.groups);
+      summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
+      content.dataset['reimportCommitReady'] = String(review.commitReady);
+      content.dataset['reimportDraftVersion'] = String(review.draftVersion);
+      content.dataset['reimportReviewDigest'] = review.reviewDigest;
+      content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
+    };
     summary.append(
       element('h3', undefined, '比较摘要'),
-      element('p', undefined, `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
-        ? technicalWords('每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。', '请逐处选择拆分、改写与新增、删除或并入。')
-        : technicalWords('稿件逐块一致，提交只记录未发现变化，不创建空修订版。', '与当前稿件相同，没有需要更新的内容。')}`),
+      summaryLine,
     );
-    summary.dataset['reimportGroups'] = String(review.comparison.groups);
-    summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
+    updateSummary();
     content.append(summary);
 
     const fidelity = element('section', 'review-section');
     fidelity.append(element('h3', undefined, reimportFidelityHeading(review.fidelity)));
-    const fidelityList = element('ul', 'degradation-list');
-    for (const category of review.fidelity) {
-      fidelityList.append(element('li', undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelitySurfaceDetail(category)}`));
-    }
-    fidelity.append(fidelityList);
+    fidelity.append(...renderFidelityReview(review.fidelity, review.source.conversion, { kind: 'none' }).elements);
     if (review.degradationDecision.state === 'required-unselected') {
-      // Accepting the listed degradations and committing are one step (Issue #1410 item 32C).
       fidelity.append(element('p', 'attention-note', '提交本次重新导入即接受上面列出的全部降级。'));
-      const accept = button(review.comparison.changed ? '接受降级并提交稿件重新导入' : '接受降级并记录', 'primary', async () => {
-        accept.disabled = true;
-        setStatus('正在持久化重新导入降级接受…', 'busy');
-        try {
-          const refreshed = await rendererApi.acceptReimportDegradation({
-            draftId: review.draftId,
-            expectedDraftVersion: review.draftVersion,
-          });
-          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter, true);
-          setStatus('完整降级集合已明确接受', 'success');
-        } catch (error) {
-          accept.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法接受重新导入降级集合。'), 'error');
-        }
-      });
-      accept.dataset['acceptReimportDegradation'] = review.draftId;
-      fidelity.append(accept);
     } else if (review.degradationDecision.state === 'accepted-complete-set') {
-      fidelity.append(element('p', 'success-note', '已明确接受完整降级集合'));
+      fidelity.append(element('p', 'success-note', '已同意按上面列出的方式导入'));
     } else {
       fidelity.append(element('p', 'success-note', '未发现需要接受的降级'));
     }
@@ -1061,17 +1155,37 @@ export function createImportReview(options: ImportReviewOptions) {
     mappingsHost.dataset['reimportMappings'] = 'loading';
     mappingsHost.append(element('h3', undefined, '章节对应 · 正在读取…'));
     content.append(mappingsHost);
-    void Promise.resolve().then(async () => {
+    let busy = false;
+    const setBusy = (value: boolean): void => {
+      busy = value;
+      for (const control of content.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice], [data-reimport-previous-page], [data-reimport-next-page]')) control.disabled = value;
+      abandon.disabled = value;
+      back.disabled = value;
+      updateCommit();
+    };
+    const loadMappings = async (after: number | null, jump = false): Promise<void> => {
+      setBusy(true);
+      mappingsHost.dataset['reimportMappings'] = 'loading';
       try {
         const page = await rendererApi.getReimportMappingPage({
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
-          after: mappingAfter,
+          after,
         });
         if (!mappingsHost.isConnected) return;
         const list = element('div', 'comparison-list');
-        const resolve = async (group: ReimportGroupProjection, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
-          for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = true;
+        mappingAfter = after;
+        const focusUnresolved = (afterOrdinal = 0): boolean => {
+          const rows = Array.from(list.querySelectorAll<HTMLElement>('article[data-reimport-group-verb=""]'));
+          const row = rows.find(candidate => Number(candidate.dataset['reimportGroupOrdinal']) > afterOrdinal) ?? rows[0];
+          const next = row?.querySelector<HTMLButtonElement>('[data-reimport-verb-choice]');
+          if (!next) return false;
+          next.scrollIntoView({ block: 'nearest' }); next.focus(); return true;
+        };
+        const resolve = async (group: ReimportGroupProjection, row: HTMLElement, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
+          if (busy) return;
+          setBusy(true);
+          let cancelResolution: HTMLButtonElement | undefined;
           try {
             const initial = await rendererApi.resolveReimportMapping({
               draftId: review.draftId,
@@ -1079,8 +1193,8 @@ export function createImportReview(options: ImportReviewOptions) {
               groupId: group.groupId,
               verb,
             });
-            const cancelResolution = button('取消当前操作', 'quiet', async () => {
-              cancelResolution.disabled = true;
+            cancelResolution = button('取消当前操作', 'quiet', async () => {
+              cancelResolution!.disabled = true;
               await rendererApi.cancelServiceJob({ jobId: initial.jobId });
             });
             cancelResolution.dataset['cancelReimportResolution'] = initial.jobId;
@@ -1088,34 +1202,40 @@ export function createImportReview(options: ImportReviewOptions) {
             cancelResolution.dataset['jobProgressTotal'] = String(initial.progress.total);
             control.after(cancelResolution);
             const completed = await awaitServiceJob(initial, (job) => {
-              cancelResolution.dataset['jobProgressCompleted'] = String(job.progress.completed);
-              cancelResolution.dataset['jobProgressTotal'] = String(job.progress.total);
+              cancelResolution!.dataset['jobProgressCompleted'] = String(job.progress.completed);
+              cancelResolution!.dataset['jobProgressTotal'] = String(job.progress.total);
               const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
-              setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+              setStatus(`正在保存这一处的选择… ${progress}`, job.state === 'failed' ? 'error' : 'busy');
             });
             if (completed.state === 'cancelled') {
               cancelResolution.remove();
-              for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
-              setStatus('这一处的选择已取消；复核未变化。', 'success');
+              setStatus('这一处的选择已取消，保留原来的选择。', 'success');
               return;
             }
             if (completed.kind !== 'reimport-resolution') throw new Error('对应行解决任务未返回复核结果。');
             const refreshed = completed.result;
-            if (refreshed === null || !('draftId' in refreshed)) throw new Error('对应行解决任务未返回复核结果。');
+            if (refreshed === null || !('row' in refreshed)) throw new Error('未能取得这一处的新选择。');
             cancelResolution.remove();
-            renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
-            setStatus(`第 ${group.ordinal} 处已按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定；复核摘要已更新`, 'success');
+            review = { ...refreshed, comparison: { ...refreshed.comparison, unresolvedGroups: refreshed.unresolvedGroups } };
+            if (!content.isConnected) return;
+            drawRow(refreshed.row, row);
+            updateSummary();
+            setBusy(false);
+            setStatus(`第 ${group.ordinal} 处已选择「${REIMPORT_GROUP_VERB_LABELS[verb]}」，还剩 ${refreshed.unresolvedGroups} 处待选择。`, 'success');
+            if (!focusUnresolved(group.ordinal) && refreshed.unresolvedGroups > 0) await loadMappings(page.nextCursor, true);
           } catch (error) {
             if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
               await initializeStartup();
               return;
             }
-            for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
             setStatus(rendererErrorMessage(error, '无法记录这一处的选择。'), 'error');
+          } finally {
+            cancelResolution?.remove();
+            setBusy(false);
           }
         };
-        for (const group of page.items) {
-          const row = element('article', 'comparison-item reimport-group');
+        const drawRow = (group: ReimportGroupProjection, row = element('article', 'comparison-item reimport-group')): HTMLElement => {
+          row.replaceChildren();
           row.dataset['reimportGroupId'] = group.groupId;
           row.dataset['reimportGroupOrdinal'] = String(group.ordinal);
           row.dataset['reimportGroupVerb'] = group.verb ?? '';
@@ -1139,33 +1259,38 @@ export function createImportReview(options: ImportReviewOptions) {
             return host;
           };
           row.append(side('当前', group.current), side('新文件', group.staged));
-          if (group.verb === null) {
-            const choices = element('div', 'button-row compact-actions reimport-verbs');
-            for (const verb of group.verbs) {
-              const choice = button(REIMPORT_VERB_ACTIONS[verb], 'secondary', async () => {
-                setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
-                await resolve(group, verb, choice);
-              });
-              choice.dataset['reimportVerbChoice'] = verb;
-              choice.dataset['reimportGroupId'] = group.groupId;
-              choices.append(choice);
-            }
-            row.append(choices);
-          } else {
+          const choices = element('div', 'button-row compact-actions reimport-verbs');
+          for (const verb of group.verbs) {
+            const choice = button(REIMPORT_VERB_ACTIONS[verb], 'secondary', async () => {
+              setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
+              await resolve(group, row, verb, choice);
+            });
+            choice.dataset['reimportVerbChoice'] = verb;
+            choice.dataset['reimportGroupId'] = group.groupId;
+            choice.setAttribute('aria-pressed', String(group.verb === verb));
+            const option = element('div', 'reimport-verb-option');
+            const explanation = element('p', 'field-note', REIMPORT_VERB_EXPLANATIONS[verb]);
+            explanation.id = `reimport-${group.ordinal}-${verb}-explanation`;
+            choice.setAttribute('aria-describedby', explanation.id);
+            option.append(choice, explanation); choices.append(option);
+          }
+          row.append(choices);
+          if (group.verb !== null) {
             row.append(element('p', 'success-note', `已选择：${REIMPORT_GROUP_VERB_LABELS[group.verb]}`));
           }
-          list.append(row);
-        }
+          return row;
+        };
+        for (const group of page.items) list.append(drawRow(group));
         const navigation = element('div', 'button-row compact-actions');
         if (page.previousCursor !== null || mappingAfter !== null) {
           const previous = windowStep(button('上一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor)), 'before', "向前浏览");
+            loadMappings(page.previousCursor)), 'before', "向前浏览");
           previous.dataset['reimportPreviousPage'] = String(page.previousCursor ?? 0);
           navigation.append(previous);
         }
         if (page.nextCursor !== null) {
           const next = windowStep(button('下一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor)), 'after', "向后浏览");
+            loadMappings(page.nextCursor)), 'after', "向后浏览");
           next.dataset['reimportNextPage'] = String(page.nextCursor);
           navigation.append(next);
         }
@@ -1173,14 +1298,19 @@ export function createImportReview(options: ImportReviewOptions) {
         mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
         mappingsHost.replaceChildren(element('h3', undefined, `章节对应${page.items.length === 0 ? ' · 没有需要你确定的变化。' : ''}`),
           ...(page.items.length === 0 ? [] : [list]), navigation);
+        setBusy(false);
+        if (jump && !focusUnresolved() && review.comparison.unresolvedGroups > 0) await loadMappings(page.nextCursor, true);
       } catch (error) {
         mappingsHost.dataset['reimportMappings'] = 'failed';
         mappingsHost.replaceChildren(
           element('h3', undefined, '章节对应'),
           element('p', 'attention-note', rendererErrorMessage(error, '无法读取章节对应。')),
         );
+      } finally {
+        setBusy(false);
       }
-    });
+    };
+    void Promise.resolve().then(() => loadMappings(mappingAfter));
 
     if (technicalLayerVisible) {
       const grid = element('div', 'review-grid');
@@ -1190,77 +1320,81 @@ export function createImportReview(options: ImportReviewOptions) {
     const actions = element('div', 'button-row compact-actions');
     const abandon = button('取消导入', 'quiet', () =>
       abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn));
-    if (review.commitReady) {
-      let activeCommitJob: ServiceJobProjection | null = null;
-      const cancelCommit = button('取消当前提交', 'secondary', async () => {
-        if (activeCommitJob === null) return;
-        cancelCommit.disabled = true;
-        try {
-          activeCommitJob = await rendererApi.cancelServiceJob({ jobId: activeCommitJob.jobId });
-          setStatus(activeCommitJob.progress.label, 'success');
-        } catch (error) {
-          setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+    const back = returnToEditingAction({ get draftId() { return review.draftId; }, get draftVersion() { return review.draftVersion; } }, recoveryReturn);
+    let activeCommitJob: ServiceJobProjection | null = null;
+    const cancelCommit = button('取消当前提交', 'secondary', async () => {
+      if (activeCommitJob === null) return;
+      cancelCommit.disabled = true;
+      try {
+        activeCommitJob = await rendererApi.cancelServiceJob({ jobId: activeCommitJob.jobId });
+        setStatus('正在取消提交…', 'busy');
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+      }
+    });
+    cancelCommit.dataset['cancelReimportCommit'] = 'true';
+    cancelCommit.hidden = true;
+    const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
+      if (busy || review.comparison.unresolvedGroups > 0) return;
+      const follow = shellNavigation.route();
+      setBusy(true);
+      setStatus('正在保存新稿…', 'busy');
+      try {
+        activeCommitJob = await rendererApi.commitManuscriptReimport({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest,
+          commitAttemptId: review.commitAttemptId,
+          ...(review.degradationDecision.state === 'required-unselected' ? { acceptDegradation: true } : {}),
+        });
+        cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
+        cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
+        cancelCommit.hidden = false;
+        cancelCommit.disabled = false;
+        const completed = await awaitServiceJob(activeCommitJob, (job) => {
+          activeCommitJob = job;
+          cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
+          cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
+          const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+          setStatus(`正在保存新稿… ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          activeCommitJob = null;
+          cancelCommit.hidden = true;
+          setStatus('重新导入提交已取消，稿件没有改变。', 'success');
+          return;
         }
-      });
-      cancelCommit.dataset['cancelReimportCommit'] = 'true';
-      cancelCommit.hidden = true;
-      const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
-        const follow = shellNavigation.route();
-        commit.disabled = true;
-        abandon.disabled = true;
-        setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
-        try {
-          activeCommitJob = await rendererApi.commitManuscriptReimport({
-            draftId: review.draftId,
-            expectedDraftVersion: review.draftVersion,
-            reviewDigest: review.reviewDigest,
-            commitAttemptId: review.commitAttemptId,
-          });
-          cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
-          cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
-          cancelCommit.hidden = false;
-          cancelCommit.disabled = false;
-          const completed = await awaitServiceJob(activeCommitJob, (job) => {
-            activeCommitJob = job;
-            cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
-            cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
-            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
-            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
-          });
-          if (completed.state === 'cancelled') {
-            activeCommitJob = null;
-            cancelCommit.hidden = true;
-            commit.disabled = false;
-            abandon.disabled = false;
-            setStatus('重新导入提交已取消；复核与稿件权威未变化。', 'success');
-            return;
-          }
-          const result = completed.result;
-          if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
-            throw new Error('重新导入提交任务未返回完成记录。');
-          }
-          await presentImportCompletion(result, recoveryReturn, follow);
-        } catch (error) {
-          if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
-            hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
-            if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
-            return;
-          }
-          commit.disabled = false;
-          abandon.disabled = false;
-          setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+        const result = completed.result;
+        if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
+          throw new Error('重新导入提交任务未返回完成记录。');
         }
-      });
-      commit.dataset['commitManuscriptReimport'] = review.target.bookId;
-      actions.append(commit, cancelCommit);
-      // Reached from 接受降级并提交: the commit follows in the same step.
-      if (commitNow) queueMicrotask(() => commit.click());
-    }
-    actions.append(abandon);
-    // The sticky `.commit-bar` the other two reviews use, so this review's commit and cancel stay
-    // reachable below the fidelity table and the block mappings (V2-UX-LAYER-005). It carries the
-    // action row alone: the atomic-commit sentence its siblings show is copy, and this change is
-    // position only.
+        await presentImportCompletion(result, recoveryReturn, follow);
+      } catch (error) {
+        if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
+          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
+          if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+          return;
+        }
+        setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+      } finally {
+        activeCommitJob = null;
+        cancelCommit.hidden = true;
+        setBusy(false);
+      }
+    });
+    commit.dataset['commitManuscriptReimport'] = review.target.bookId;
+    const updateCommit = (): void => {
+      const accept = review.degradationDecision.state === 'required-unselected';
+      commit.textContent = accept ? review.comparison.changed ? '接受降级并提交稿件重新导入' : '接受降级并记录'
+        : review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化';
+      if (accept) commit.dataset['acceptReimportDegradation'] = review.draftId;
+      else delete commit.dataset['acceptReimportDegradation'];
+      commit.disabled = busy || !(review.commitReady || accept && review.comparison.unresolvedGroups === 0);
+    };
+    updateCommit();
+    actions.append(commit, cancelCommit);
+    actions.append(back, abandon);
+    // Keep the final action reachable below the comparison rows (V2-UX-LAYER-005).
     const commitBar = element('section', 'commit-bar');
     commitBar.append(actions);
     content.append(commitBar);
@@ -1347,7 +1481,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const explanation = element('p', undefined, commitNote(acceptedDegradation));
       const commitButton = button(finalActionLabel, 'primary', async () => {
         const follow = shellNavigation.route();
-        commitButton.disabled = true;
+        for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
         setStatus(technicalWords(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', '正在导入…'), 'busy');
         try {
           const result = await rendererApi.commitNewBookImport({
@@ -1367,13 +1501,14 @@ export function createImportReview(options: ImportReviewOptions) {
             if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
-          commitButton.disabled = false;
+          for (const control of commitBar.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false;
           setStatus(rendererErrorMessage(error, '导入未完成，请重试。'), 'error');
         }
       });
       const actions = element('div', 'button-row compact-actions');
       actions.append(
         commitButton,
+        returnToEditingAction(review, recoveryReturn),
         button('取消导入', 'quiet', () =>
           abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
         ),
@@ -1383,6 +1518,7 @@ export function createImportReview(options: ImportReviewOptions) {
     } else {
       const actions = element('div', 'button-row');
       actions.append(
+        returnToEditingAction(review, recoveryReturn),
         button('取消导入', 'quiet', () =>
           abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
         ),

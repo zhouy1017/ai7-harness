@@ -81,7 +81,8 @@ async function open(): Promise<void> {
   if (connection?.credentialOperationState !== 'ready') connection = store.saveModelServiceConnection('合成全域对话连接', null, 'ready', binding.route);
   credentialReference = connection.credentialReference;
   store.selectModelServiceRoute(binding.route);
-  store.selectFastRoleModel(binding.route, binding.model);
+  // Only a Pro model is chosen (Issue #1620): every AI 助手 turn of this file runs on it through the Flash roles' cascade.
+  expect(store.getModelRoles().find((role) => role.roleId === 'foreground-flash')?.source).toBe('follows-foreground-pro');
   const selected = { ...binding, credentialReference };
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', selected, selected);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
@@ -164,7 +165,7 @@ describe('v30 Book-less Global Agent', () => {
     transport = async () => response();
     const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
     await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
-    expect(continued.qualification?.providerProcessingVersion).toBe('v35');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v36');
     expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
     // Retained dialogue fields stay authentic; the new turn separately reads current enabled memory.
     const sent = JSON.parse(calls[1]!.body);
@@ -179,7 +180,7 @@ describe('v30 Book-less Global Agent', () => {
     const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
     const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
-      selectedPolicyIdentity: { providerProcessingVersion: 'v35', activePolicySetVersion: 'no-policy-lock' } });
+      selectedPolicyIdentity: { providerProcessingVersion: 'v36', activePolicySetVersion: 'no-policy-lock' } });
     expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
     const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
@@ -575,6 +576,49 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
     return { turn, dialogue: inspect(turn.dialogueId) };
   }
   const propose = (text: string) => () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'house', effect: 'guide', text } });
+
+  it('refuses the other remembered model of the same connection at the AI assistant gate (#1650)', () => {
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    store.selectFastRoleModel(binding.route, binding.model);
+    const pro = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const configured = store.getConfiguredModelRoleBinding.bind(store);
+    vi.spyOn(store, 'getConfiguredModelRoleBinding').mockImplementation((role, override) => role === 'foreground-flash' ? pro : configured(role, override));
+    expect(() => store.globalAgentModelConnection()).toThrowError(expect.objectContaining({ code: 'GLOBAL_AGENT_POLICY_BLOCKED' }));
+    expect(calls).toHaveLength(0);
+  });
+
+  it('answers both AI 助手 kinds on the Pro model when only a Pro model is chosen (#1620)', async () => {
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+    expect(store.getConfiguredModelRoleBinding('foreground-flash')).toEqual(main);
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { scope: 'ordinary-production', ...binding, model: main.model, credentialReference, runBudgetCeiling: 'unset' } });
+    const bookless = start();
+    await waitFor(() => inspect(bookless.dialogueId).attempts[0]?.state === 'completed');
+    const { ask, disclosure } = await scopedAsk();
+    scripted([]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.attempts[0]!.state).toBe('completed');
+    expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual([[binding.endpoint, 'glm-5.3'], [binding.endpoint, 'glm-5.3']]);
+  });
+
+  it('answers both AI 助手 kinds on the Flash model when Pro and Flash are different models of one channel (#1620)', async () => {
+    store.selectFastRoleModel(binding.route, binding.model);
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('foreground-flash')!;
+    expect([main.model, flash.model]).toEqual(['glm-5.3', binding.model]);
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { scope: 'ordinary-production', ...binding, model: main.model, credentialReference, runBudgetCeiling: 'unset' } });
+    const bookless = start();
+    await waitFor(() => inspect(bookless.dialogueId).attempts[0]?.state === 'completed');
+    const { ask, disclosure } = await scopedAsk();
+    scripted([]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.attempts[0]!.state).toBe('completed');
+    expect(calls.map((call) => JSON.parse(call.body).model)).toEqual([binding.model, binding.model]);
+  });
 
   it('discloses the pinned scope and runs the four declared tools with each call read back, mutating nothing', async () => {
     const { book, procedure, ask, disclosure } = await scopedAsk();

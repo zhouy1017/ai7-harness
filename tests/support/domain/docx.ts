@@ -1,19 +1,14 @@
+import { createBaselineRelations } from '../baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { BoundedManuscriptStore } from '../../../src/service/bounded-manuscript.js';
 import { compileWordTrackedDocxBytes, DOCX_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY } from '../../../src/service/docx.js';
-import { EditorialMarkStore, initializeEditorialMarkSchema } from '../../../src/service/editorial-marks.js';
+import { EditorialMarkStore, EDITORIAL_MARK_SCHEMA_SQL } from '../../../src/service/editorial-marks.js';
 import { writeImportedManuscriptRows } from '../../../src/service/import-intake-operations.js';
-import {
-  bindWordReadingToRevision, IMPORT_FIDELITY_CATEGORIES_SQL, initializeImportRetentionSchema, initializeWordImportRetentionSchema, readWordParentSourcePin, retainWordRevisionSource,
-  WORD_EXTRACTOR_IDENTITY,
-  wordParentSourcePinRecord,
-  type WordImportChoiceRecord
-} from '../../../src/service/import-retention.js';
-import { initializeImportedMarkSchema } from '../../../src/service/imported-marks.js';
+import { bindWordReadingToRevision, IMPORT_RETENTION_SCHEMA_SQL, WORD_IMPORT_RETENTION_SCHEMA_SQL, readWordParentSourcePin, retainWordRevisionSource, WORD_EXTRACTOR_IDENTITY, wordParentSourcePinRecord, type WordImportChoiceRecord } from '../../../src/service/import-retention.js';
+import { IMPORTED_MARK_SCHEMA_SQL } from '../../../src/service/imported-marks.js';
 import { LOCAL_LEARNING_POLICY_BASIS } from '../../../src/service/learning-eligibility.js';
-import { TARGET_VIRTUAL_TABLE_SQL, V6_TARGET_INDEX_SQL, V6_TARGET_SCHEMA_SQL } from '../../../src/service/manuscript/bounded-schema-sql.js';
-import { initializeProductionDocumentSchema, MANUSCRIPTS_REVISION_37_SQL, MULTI_DOCUMENT_INDEX_SQL } from '../../../src/service/production-document-ledger.js';
+import { PRODUCTION_DOCUMENT_SCHEMA_SQL } from '../../../src/service/production-document-ledger.js';
 import { canonicalJson, sha256 } from '../../../src/service/store-records.js';
 import { buildWordProfileRecipe } from '../../fixtures/docx-fidelity/builder.js';
 import { DOCX_SOURCE_STUBS } from './docx-stubs.js';
@@ -24,18 +19,9 @@ export async function docxDatabase(): Promise<DatabaseSync> {
   db.exec('PRAGMA foreign_keys = ON');
   try {
     for (const sql of Object.values(DOCX_SOURCE_STUBS)) db.exec(sql);
-    db.exec(MANUSCRIPTS_REVISION_37_SQL);
-    initializeProductionDocumentSchema(db);
-    db.exec(MULTI_DOCUMENT_INDEX_SQL.production_documents_book_type);
-    db.exec(IMPORT_FIDELITY_CATEGORIES_SQL);
-    initializeEditorialMarkSchema(db);
-    initializeImportedMarkSchema(db);
-    initializeImportRetentionSchema(db);
-    initializeWordImportRetentionSchema(db);
-    db.exec(V6_TARGET_SCHEMA_SQL.manuscript_outline);
-    db.exec(V6_TARGET_SCHEMA_SQL.working_offset_nodes);
-    db.exec(TARGET_VIRTUAL_TABLE_SQL);
-    db.exec(V6_TARGET_INDEX_SQL.manuscript_outline_order);
+    createBaselineRelations(db, 'manuscripts', PRODUCTION_DOCUMENT_SCHEMA_SQL, 'import_fidelity_categories', EDITORIAL_MARK_SCHEMA_SQL,
+      IMPORTED_MARK_SCHEMA_SQL, IMPORT_RETENTION_SCHEMA_SQL, WORD_IMPORT_RETENTION_SCHEMA_SQL, 'manuscript_outline', 'working_pages',
+      'working_block_search');
     return db;
   } catch (error) { db.close(); throw error; }
 }

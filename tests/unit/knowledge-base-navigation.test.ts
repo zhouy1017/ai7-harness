@@ -39,11 +39,12 @@ it.each(['knowledge','quality'])('keeps the ordinary developer-only redirect not
  expect(miniDocument.body.querySelector('[data-toast]')?.textContent).toBe('该页在开发者模式下显示');
 });
 
-it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {
+it.each(['guidelines', 'standard-tables', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {
   vi.stubGlobal('window', { ai7: {
     inspectReviewGuidelines: vi.fn(async () => ({ documents: [] })),
     inspectLibraryMaterials: vi.fn(async () => ({ materials: [], nextCursor: null })),
     inspectLibraryMaterial: vi.fn(async () => null),
+    inspectStandardTables: vi.fn(async () => ({ tables: [], missingPreinstalledKeys: [] })),
   } });
   const history = new ScreenReturnHistory();
   const book = vi.fn(); const fallback = vi.fn();
@@ -59,6 +60,30 @@ it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Bo
   back!.click();
   expect(book).toHaveBeenCalledOnce();
   expect(fallback).not.toHaveBeenCalled();
+});
+
+it('opens standard tables in ordinary mode and summarizes the latest table on the home card', async () => {
+  setTechnicalLayerVisible(false);
+  const inspect = vi.fn(async () => ({ tables: [], missingPreinstalledKeys: [] }));
+  vi.stubGlobal('window', { ai7: { inspectStandardTables: inspect } });
+  const page = navigation(); await page.renderKnowledgeBase('standard-tables');
+  expect(page.root.querySelector('[data-standard-table-action="import"]')).not.toBeNull();
+  expect(page.setStatus).toHaveBeenCalledWith('正在读取字表与词表…', 'busy');
+  expect(page.setStatus).toHaveBeenLastCalledWith('字表与词表已打开');
+  vi.stubGlobal('window', { ai7: { inspectStandardTables: async () => ({ tables: [
+    { name: '旧字表', recordedAt: '2026-11-01T00:00:00Z' }, { name: '新字表', recordedAt: '2026-11-23T00:00:00Z' },
+  ], missingPreinstalledKeys: [] }) } });
+  await page.renderKnowledgeBase();
+  expect(page.root.querySelectorAll('[data-knowledge-category]')).toHaveLength(6);
+  expect(page.root.querySelector('[data-knowledge-category="standard-tables"]')?.textContent).toContain('2 份');
+  expect(page.root.querySelector('[data-knowledge-category="standard-tables"]')?.textContent).toContain('最近：新字表');
+  expect(page.root.querySelector('.knowledge-recent')?.textContent).toContain('字表与词表 · 新字表');
+});
+
+it('reports a standard-table load failure without claiming the page opened', async () => {
+  vi.stubGlobal('window', { ai7: { inspectStandardTables: async () => { throw new Error('read failed'); } } });
+  const page = navigation(); await page.renderKnowledgeBase('standard-tables');
+  expect(page.setStatus).toHaveBeenLastCalledWith('无法读取字表与词表。', 'error');
 });
 
 it.each([false, true])('ignores a late rules response after navigating away (developer mode switched off: %s)', async (switchOff) => {
@@ -209,7 +234,7 @@ it('defaults ordinary quality to preferences and shares its controls with the kn
   } });
   const page = navigation(); await page.renderQualityLearning();
   expect(page.root.querySelector('[id="quality-tab-preferences"]')!.getAttribute('aria-selected')).toBe('true');
-  expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录']);
+  expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录', '学习回溯']);
   expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
   expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('对话历史');
   page.root.querySelector<HTMLButtonElement>('[id="quality-tab-feedback"]')!.click();

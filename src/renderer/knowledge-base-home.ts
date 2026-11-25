@@ -20,6 +20,12 @@ export function mountKnowledgeBaseHome(root: HTMLElement, api: RendererApi, deve
       changes.sort((a, b) => b.at.localeCompare(a.at));
       return { count: `${page.documents.length} 份`, latest: changes[0]?.title ?? '内置规范', changes };
     },
+    'standard-tables': async () => {
+      const page = await api.inspectStandardTables({});
+      const changes = page.tables.map((table) => ({ title: table.name, at: table.recordedAt }))
+        .sort((a, b) => b.at.localeCompare(a.at));
+      return { count: page.tables.length === 0 ? '尚未添加' : `${page.tables.length} 份`, latest: changes[0]?.title ?? '预装字表', changes };
+    },
     evaluation: async () => {
       const page = await api.inspectEvaluationProfiles();
       return { count: `${page.profiles.length}${page.nextBefore == null ? '' : '+'} 个`, latest: page.profiles[0]?.title ?? '暂无方案' };

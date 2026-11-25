@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -57,52 +58,14 @@ export const BOOK_DELIVERY_PACKAGE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const BOOK_DELIVERY_PACKAGE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const BOOK_DELIVERY_PACKAGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  book_delivery_package_versions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'prior_version_id>book_delivery_package_versions.package_version_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const BOOK_DELIVERY_PACKAGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  book_delivery_package_versions: 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE',
+});
 
 export class BookDeliveryPackageSchemaError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'BookDeliveryPackageSchemaError';
-  }
-}
-
-/** Revision 39's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeBookDeliveryPackageSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_versions'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Book delivery package schema rollback failed.');
-    }
-    throw error;
-  }
-  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
-    throw new BookDeliveryPackageSchemaError('SCHEMA_INVALID', '图书交付包的关系与已有记录不一致。');
   }
 }
 
@@ -116,14 +79,10 @@ export const BOOK_DELIVERY_PACKAGE_WORDS = {
   publicationNotice: `${PUBLICATION_CHANGE_NOTICE}：可以另设发稿版本，也可以按当前发稿版本打包。`,
   publicationRoute: '设为发稿版本…',
   notForThisBook: '本书不做',
-  documentMissing: '尚未创建',
-  documentUndelivered: '尚未交付',
+  /** A derivative document with no saved version cannot be held yet (Issue #1639). */
+  documentNoSavedVersion: '还没有保存过版本，保存后才能放进交付包',
   /** A derivative document the editor did not tick (Issue #1405). */
   documentUnchosen: '未选入本包',
-  documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
-  documentCreateRoute: '前往衍生稿件',
-  documentDeliverRoute: '交付…',
-  documentRedeliverRoute: '再交付…',
   noReviews: '暂无审阅记录',
   reviewRoute: '前往审阅',
   exportHistoryNone: '暂无导出记录',
@@ -147,21 +106,11 @@ export function evaluationRecordLabel(ordinal: number): string {
   return `评估记录 · 第 ${ordinal} 版定稿`;
 }
 
-/** `评估记录无法读取：…` when the Book's versions cannot be read: the package says so, and holds none. */
-export function evaluationUnreadableDetail(reason: string): string {
-  return `评估记录无法读取：${reason}`;
-}
-
 export const BOOK_DELIVERY_PACKAGE_REFUSALS = {
   changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
   selection: '所选稿件或版本已不在本书中，请重新勾选。',
   purpose: `请写明交付包用途（1–${MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS} 个字）。`,
 } as const;
-
-/** `第 2 次交付 · 版本 3`: a document's latest delivery, never 已交付 (PUB-009's words stay out of 交付物). */
-function deliveryLabel(ordinal: number, versionLabel: string): string {
-  return `第 ${ordinal} 次交付 · ${versionLabel}`;
-}
 
 /** The most saved versions a package's choice of one document lists (Issue #1405); any saved version may still be ticked. */
 const PACKAGE_DOCUMENT_VERSIONS_OFFERED = 20;
@@ -429,7 +378,6 @@ export class BookDeliveryPackages {
   #read(bookId: string, choices?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): PackageReading {
     const conditions: BookDeliveryPackageConditionProjection[] = [];
     const included: BookDeliveryPackageItemProjection[] = [];
-    const excluded: BookDeliveryPackageItemProjection[] = [];
     const limitations: string[] = [];
 
     // 发稿版本: the Book's current designation — unless a 撤回 holds it (Issue #426, S68a): in AI7 it is no longer used for
@@ -456,109 +404,66 @@ export class BookDeliveryPackages {
       if (publication.changedSince) limitations.push(`稿件：${PUBLICATION_CHANGE_NOTICE}，本包按发稿版本。`);
     }
 
-    // One row per house type: 本书不做, or its latest delivered version — or, with choices, the ticked saved version.
+    // One row per house type: 本书不做, or its derivative document at the saved version held. With no `choices` that is every
+    // document that has a saved version, at its latest one (Issue #1639); with them exactly the ticked documents at their ticked
+    // saved versions. No Delivery Record or workflow phase is asked for either way.
     const documents: PackageContent['documents'][number][] = [];
     const readings = this.#sources.documents(bookId);
-    const chosen = choices === undefined ? null : new Map(choices.map((choice) => [choice.documentId, choice.revisionId]));
+    const savedOf = (type: PackageDocumentReading) => (type.notForThisBook ? [] : type.document?.versions ?? []);
+    const chosen = new Map(choices === undefined
+      ? readings.flatMap((type) => savedOf(type).length === 0 ? [] : [[type.document!.documentId, savedOf(type)[0]!.revisionId] as const])
+      : choices.map((choice) => [choice.documentId, choice.revisionId] as const));
     const options: BookDeliveryPackageDocumentOptionProjection[] = [];
-    if (chosen !== null) {
+    if (choices !== undefined) {
       const known = new Map(readings.filter((type) => !type.notForThisBook && type.document !== null).map((type) => [type.document!.documentId, type.document!]));
-      requirePackage(chosen.size === choices!.length &&
-        choices!.every((choice) => known.get(choice.documentId)?.versions?.some((version) => version.revisionId === choice.revisionId) === true),
+      requirePackage(chosen.size === choices.length &&
+        choices.every((choice) => known.get(choice.documentId)?.versions?.some((version) => version.revisionId === choice.revisionId) === true),
       'BOOK_DELIVERY_PACKAGE_SELECTION_INVALID', BOOK_DELIVERY_PACKAGE_REFUSALS.selection);
     }
     for (const type of readings) {
-      if (chosen !== null && !type.notForThisBook) {
-        if (type.document === null) continue;
-        const documentNow = type.document;
-        const revisionId = chosen.get(documentNow.documentId) ?? null;
-        const saved = revisionId === null ? undefined : documentNow.versions?.find((version) => version.revisionId === revisionId);
-        options.push(documentOption(type, saved === undefined ? null : saved.revisionId));
-        conditions.push({
-          key: 'document',
-          documentId: documentNow.documentId,
-          typeId: type.typeId,
-          label: type.typeLabel,
-          met: true,
-          stateLabel: saved === undefined ? BOOK_DELIVERY_PACKAGE_WORDS.documentUnchosen : saved.versionLabel,
-          notice: null,
-          route: null,
-          routeLabel: null,
-        });
-        if (saved === undefined) {
-          excluded.push({ kind: 'exclusion', label: type.typeLabel, detail: BOOK_DELIVERY_PACKAGE_WORDS.documentUnchosen });
-          continue;
-        }
-        const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
-        const namedMember = type.multiple === true || (documentNow.title !== undefined && documentNow.title !== defaultTitle);
-        documents.push({
-          typeId: type.typeId,
-          disposition: 'included',
-          ...(namedMember ? { exportKey: type.multiple === true ? `document:${documentNow.documentId}` : `document:${type.typeId}`,
-            ...(documentNow.title === undefined ? {} : { title: documentNow.title }) } : {}),
-          documentId: documentNow.documentId,
-          version: saved.version,
-          revisionId: saved.revisionId,
-          revisionDigest: saved.revisionDigest,
-          deliveryIds: documentNow.deliveries.filter((delivery) => delivery.revisionId === saved.revisionId).map((delivery) => delivery.deliveryId),
-        });
-        included.push({ kind: 'document', label: `${type.typeLabel} · ${saved.versionLabel}`, detail: null });
+      if (type.notForThisBook) {
+        conditions.push({ key: 'document', typeId: type.typeId, label: type.typeLabel, met: true, stateLabel: BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook,
+          notice: null, route: null, routeLabel: null });
+        documents.push({ typeId: type.typeId, disposition: 'not-for-this-book' });
         continue;
       }
-      if (type.document !== null && !type.notForThisBook) options.push(documentOption(type, type.document.deliveries[0]?.revisionId ?? null));
-      const latest = type.document?.deliveries[0];
-      const met = type.notForThisBook || latest !== undefined;
-      const notice = !type.notForThisBook && latest !== undefined && type.document!.changedSinceDelivery ? BOOK_DELIVERY_PACKAGE_WORDS.documentNotice : null;
-      const route = type.notForThisBook ? null : latest === undefined || notice !== null ? 'document' : null;
+      if (type.document === null) continue;
+      const documentNow = type.document;
+      if (savedOf(type).length === 0) {
+        // Not offered: nothing of it can be held until a version is saved.
+        conditions.push({ key: 'document', documentId: documentNow.documentId, typeId: type.typeId, label: type.typeLabel, met: true,
+          stateLabel: BOOK_DELIVERY_PACKAGE_WORDS.documentNoSavedVersion, notice: null, route: null, routeLabel: null });
+        continue;
+      }
+      const revisionId = chosen.get(documentNow.documentId) ?? null;
+      const saved = revisionId === null ? undefined : documentNow.versions?.find((version) => version.revisionId === revisionId);
+      options.push(documentOption(type, saved === undefined ? null : saved.revisionId));
       conditions.push({
         key: 'document',
-        ...(type.document === null ? {} : { documentId: type.document.documentId }),
+        documentId: documentNow.documentId,
         typeId: type.typeId,
         label: type.typeLabel,
-        met,
-        stateLabel: type.notForThisBook
-          ? BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook
-          : latest !== undefined
-            ? deliveryLabel(latest.ordinal, latest.versionLabel)
-            : type.document === null ? BOOK_DELIVERY_PACKAGE_WORDS.documentMissing : BOOK_DELIVERY_PACKAGE_WORDS.documentUndelivered,
-        notice,
-        route,
-        routeLabel: route === null
-          ? null
-          : type.document === null
-            ? BOOK_DELIVERY_PACKAGE_WORDS.documentCreateRoute
-            : latest === undefined ? BOOK_DELIVERY_PACKAGE_WORDS.documentDeliverRoute : BOOK_DELIVERY_PACKAGE_WORDS.documentRedeliverRoute,
+        met: true,
+        stateLabel: saved === undefined ? BOOK_DELIVERY_PACKAGE_WORDS.documentUnchosen : saved.versionLabel,
+        notice: null,
+        route: null,
+        routeLabel: null,
       });
-      if (type.notForThisBook) {
-        documents.push({ typeId: type.typeId, disposition: 'not-for-this-book' });
-        excluded.push({ kind: 'not-for-this-book', label: type.typeLabel, detail: BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook });
-      } else if (latest !== undefined) {
-        const deliveries = type.document!.deliveries;
-        const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
-        const namedMember = type.multiple === true || (type.document!.title !== undefined && type.document!.title !== defaultTitle);
-        documents.push({
-          typeId: type.typeId,
-          disposition: 'included',
-          ...(namedMember ? { exportKey: type.multiple === true ? `document:${type.document!.documentId}` : `document:${type.typeId}`,
-            ...(type.document!.title === undefined ? {} : { title: type.document!.title }) } : {}),
-          documentId: type.document!.documentId,
-          version: latest.version,
-          revisionId: latest.revisionId,
-          revisionDigest: latest.revisionDigest,
-          deliveryId: latest.deliveryId,
-          deliveryIds: deliveries.map((delivery) => delivery.deliveryId),
-        });
-        included.push({
-          kind: 'document',
-          label: `${type.typeLabel} · ${latest.versionLabel}`,
-          detail: `${deliveryLabel(latest.ordinal, latest.versionLabel)} · ${latest.recipientLabel}；交付记录 ${deliveries.length} 条`,
-        });
-        if (notice !== null) limitations.push(`${type.typeLabel}：交付后有修改，本包按交付时的${latest.versionLabel}。`);
-      } else {
-        const reason = type.document === null ? BOOK_DELIVERY_PACKAGE_WORDS.documentMissing : BOOK_DELIVERY_PACKAGE_WORDS.documentUndelivered;
-        excluded.push({ kind: 'exclusion', label: type.typeLabel, detail: reason });
-        limitations.push(`${type.typeLabel}：${reason}，不在包中。`);
-      }
+      if (saved === undefined) continue;
+      const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
+      const namedMember = type.multiple === true || (documentNow.title !== undefined && documentNow.title !== defaultTitle);
+      documents.push({
+        typeId: type.typeId,
+        disposition: 'included',
+        ...(namedMember ? { exportKey: type.multiple === true ? `document:${documentNow.documentId}` : `document:${type.typeId}`,
+          ...(documentNow.title === undefined ? {} : { title: documentNow.title }) } : {}),
+        documentId: documentNow.documentId,
+        version: saved.version,
+        revisionId: saved.revisionId,
+        revisionDigest: saved.revisionDigest,
+        deliveryIds: documentNow.deliveries.filter((delivery) => delivery.revisionId === saved.revisionId).map((delivery) => delivery.deliveryId),
+      });
+      included.push({ kind: 'document', label: `${type.typeLabel} · ${saved.versionLabel}`, detail: null });
     }
 
     // 工作记录: every Review Run that ran, finished and reported.
@@ -608,18 +513,12 @@ export class BookDeliveryPackages {
     included.push(...reportItems.reverse().slice(0, MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED));
 
     // 评估记录 and 审稿意见 (Issue #429; BUNDLE-001): the 定稿 version current now, and each template's 审稿意见 at the version
-    // 设为发稿版本时的最新一版. Neither is a condition (BUNDLE-002 names none): a Book without one lists it under 不包含, with why.
+    // 设为发稿版本时的最新一版. Neither is a condition (BUNDLE-002 names none): a Book without one simply has none of it.
     const evaluation = this.#sources.evaluation?.(bookId) ?? null;
     const readersReports = this.#sources.readersReports?.(bookId, publication === null ? null : this.#designatedAt(publication.publicationVersionId)) ?? [];
     const recordLimitations: string[] = [];
     if (evaluation?.kind === 'finalized') {
       included.push({ kind: 'evaluation-record', label: evaluationRecordLabel(evaluation.ordinal), detail: `评估方案「${evaluation.profileTitle}」 第 ${evaluation.profileVersion} 版 · 定稿于 ${evaluation.finalizedAt}` });
-    } else {
-      excluded.push({
-        kind: 'evaluation-record',
-        label: BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord,
-        detail: evaluation === null ? BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing : evaluationUnreadableDetail(evaluation.reason),
-      });
     }
     for (const report of readersReports) {
       included.push({
@@ -631,16 +530,7 @@ export class BookDeliveryPackages {
         recordLimitations.push(`${report.typeLabel}：设为发稿版本后又有修改，本包按${BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned}（版本 ${report.version}）。`);
       }
     }
-    if (readersReports.length === 0) {
-      excluded.push({ kind: 'readers-report', label: BOOK_DELIVERY_PACKAGE_WORDS.readersReport, detail: BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing });
-    }
     limitations.push(...recordLimitations, ...reviewLimitations);
-
-    excluded.push(
-      { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.editorNotes, detail: BOOK_DELIVERY_PACKAGE_WORDS.editorNotesDetail },
-      { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.libraryOriginals, detail: null },
-      { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisions, detail: BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisionsDetail },
-    );
 
     const content: PackageContent = {
       schema: 'ai7.book-delivery-package-content/2',
@@ -664,7 +554,8 @@ export class BookDeliveryPackages {
       readersReports: readersReports.map((report) => ({
         template: report.template, documentId: report.documentId, version: report.version, revisionId: report.revisionId, revisionDigest: report.revisionDigest, pin: report.pin,
       })),
-      exclusions: ['editor-notes', 'library-originals', 'intermediate-revisions'],
+      // Packages made from now on carry no 不会做 list; a stored record's own keys stay as they were (Issue #1639).
+      exclusions: [],
       limitations,
       typeConfiguration: { version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version, digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST },
     };
@@ -682,7 +573,8 @@ export class BookDeliveryPackages {
         digest: contentDigest,
         included,
         includedTruncated: reportItems.length > MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
-        excluded,
+        // No 不包含 list: what a package leaves out is not itemised any more (Issue #1639); the field stays for the page.
+        excluded: [],
         // The Manuscript's, the documents' and the 审稿意见's lines, and the newest Runs' as far as the preview lists them.
         limitations: [
           ...limitations.slice(0, limitations.length - reviewLimitations.length),

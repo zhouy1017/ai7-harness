@@ -162,6 +162,22 @@ const RECONCILED_INTERRUPTED_STAGE_REASON = 'AI7 上次关闭时运行中断，�
 export const RECONCILED_QUEUED_DETAIL =
   'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' as const;
 
+/** Read historical reconciliation rows too: startup need not write a new reason to tell the truth. */
+export function runStopReasonOf(db: DatabaseSync, runRecordId: string, state: BaselineAnalysisRunState, value: unknown): ResumableStopReason | undefined {
+  if (!isRecord(value)) return undefined;
+  if (state === 'resumable') return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
+    ? value.stopReason : undefined;
+  if (value.reconciled !== true) return undefined;
+  if (state === 'blocked-before-dispatch' && value.detail === RECONCILED_QUEUED_DETAIL) return 'shutdown';
+  if (state !== 'paused') return undefined;
+  if (value.detail === RECONCILED_YIELDED_DETAIL) return 'shutdown';
+  if (value.detail !== RECONCILED_PAUSED_DETAIL) return undefined;
+  const previous = db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1 OFFSET 1').get(runRecordId);
+  if (previous?.state !== 'pausing' || typeof previous.canonical_json !== 'string') return undefined;
+  const record = parseCanonicalJson(previous.canonical_json);
+  return isRecord(record) && record.idleYield === true ? 'shutdown' : undefined;
+}
+
 /** The schema of one unit's continuation checkpoint (Issue #422, S76b). */
 export const UNIT_CHECKPOINT_SCHEMA = 'ai7.analysis.unit-checkpoint/1' as const;
 
@@ -460,4 +476,26 @@ const LEVEL_ORDER: Readonly<Record<EvidenceAssuranceLevel, number>> = { quick: 0
 /** Whether a level is below the minimum the pinned Factual Verification Policy Document requires (EASSURE-008). */
 export function levelBelowPolicyMinimum(level: EvidenceAssuranceLevel, minimum: EvidenceAssuranceLevel | null = FACTUAL_VERIFICATION_POLICY_VERSION.minimumLevel): boolean {
   return minimum !== null && LEVEL_ORDER[level] < LEVEL_ORDER[minimum];
+}
+
+/** The same carry rule for prepared and one-step launches; a failed Run never supplies a redo. */
+export function validateTaskRedo(existing: import('../../shared/protocol.js').AnalysisProjection, update: { mode: string; selectedRange: BaselineAnalysisSelectedRange | null } | null, kind: string, redoOf: string | null, reconfirm: boolean): void {
+  const latest = existing.resultSetRevision;
+  if (redoOf !== null) {
+    const run = existing.run;
+    // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
+    // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
+    const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
+    requireAnalysis(run !== null && run.runRecordId === redoOf &&
+      ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
+    'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
+    const expected = latest !== null && latest.provenance.runRecordId === redoOf
+      ? { mode: 'sync-current', selectedRange: null }
+      : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
+    requireAnalysis(!reconfirm && (kind !== BASELINE_ANALYSIS_KIND || (expected === null
+      ? update === null
+      : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
+        update.selectedRange?.endPosition === expected.selectedRange?.endPosition)),
+    'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
+  }
 }

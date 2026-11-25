@@ -79,16 +79,6 @@ describe('评估方案 editing follow-ups (#798)', () => {
 
   // At the stamped version an earlier exact-schema check already names the missing table; the window before the stamp, where
   // `initializeEvaluationProfileSchema` itself met the half-present pair, is pinned in evaluation-profiles.test.ts.
-  it('refuses a store holding only initial_evaluation_tasks by naming the missing table, not a raw SQLite error (P3-3)', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    first.close();
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try { db.exec('DROP TABLE evaluation_profile_versions'); } finally { db.close(); }
-    const refusal = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then(() => null, (error: unknown) => error);
-    expect(refusal).toBeInstanceOf(Error);
-    expect((refusal as Error).message).not.toContain('already exists');
-    expect((refusal as Error).message).toContain('数据库表 evaluation_profile_versions');
-  });
 
   it('counts records merged from another house under a labelled 未知版本 bucket (P3-6)', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

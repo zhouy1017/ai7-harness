@@ -35,7 +35,7 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
     : projection.launchPolicy.providerProcessing.settingsSearchTools?.websearch.backends.find((backend) => mainRoute.route.startsWith(`${backend.id.slice('search-'.length)}-`));
   if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索${native.id === 'search-openai' || native.id === 'search-anthropic' ? '（未实测）' : ''}`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
-  return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
+  return selected === undefined ? `当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，${technicalWords('请在 设置 › 联网检索 保存一个后端密钥。', '请在下面的检索服务里，为其中一个保存密钥。')}`
     : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
     : `当前生效来源：兜底 · ${selected.name}`;
 }
@@ -86,7 +86,7 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   card.append(element('h4', undefined, `${candidate.name} · 未实测`));
   const price = `单价 ${candidate.price} · 不可选择`;
   const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
-  card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
+  card.append(element('p', 'field-note', !technicalLayerVisible || disclosure === '' ? price : `${price}；${disclosure}。`));
   if (technicalLayerVisible) card.append(element('p', 'field-note search-candidate-technical', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
@@ -113,11 +113,11 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
   heading.tabIndex = -1;
-  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
+  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；${technicalLayerVisible ? `新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}` : '可设一个备用来源，出错时自动切换。'}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
-  const label = element('label', 'field-note'); label.append(override, element('span', undefined, '总是使用联网检索里选定的后端'));
+  const label = element('label', 'field-note'); label.append(override, element('span', undefined, technicalWords('总是使用联网检索里选定的后端', '总是使用选定的检索服务')));
   override.addEventListener('change', async () => {
     override.disabled = true;
     try { render(await api.selectSearchBackend({ backendId: selectedBackendId, alwaysUseSelectedBackend: override.checked })); setStatus('联网检索来源偏好已保存。', 'success'); }

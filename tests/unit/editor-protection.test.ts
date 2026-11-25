@@ -165,8 +165,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('pins protocol 205 for 生成统合总结 in 0.7.3 R4 (Issue #1506)', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(205);
+  it('pins protocol 206 for 0.7.9 Alpha closure (Issues #1539, #1540)', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(206);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {
@@ -192,6 +192,30 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
       expect(() => packagedLaunchForm(control)).toThrow('AI7_PACKAGED_ARGUMENT_INVALID');
     } finally { vi.unstubAllEnvs(); }
 
+  });
+
+  // Round 1 finding 1 of #1641: J-04's browser record is a bare switch; the main process places the file inside the data root.
+  it('admits the browser record only as J-04\'s bare switch in development-ci and refuses every path, Journey and scope else', () => {
+    const args = ['--data-root', resolve('.cache/test-data'), '--launcher-pid', String(process.ppid)];
+    const control = ['--j04-browser-record', 'on'];
+    try {
+      vi.stubEnv('AI7_E2E_JOURNEY', 'J-04');
+      expect(parseArguments(args).browserRecord).toBe(false);
+      expect(parseArguments([...args, ...control]).browserRecord).toBe(true);
+      // A caller never names where the record goes: an absolute path, one beside the run root, a `..` or a link is refused.
+      for (const value of [resolve('.cache/outside-run.txt'), resolve('.cache/test-data/../outside-run.txt'), '..', 'true', 'ON', '']) {
+        expect(() => parseArguments([...args, '--j04-browser-record', value])).toThrow();
+      }
+      for (const scope of ['ordinary-production', 'developer-live']) expect(() => parseArguments([...args, ...control, '--trusted-operational-scope', scope, ...(scope==='developer-live' ? ['--validation-case','baseline-analysis/sample1-whole-book'] : [])])).toThrow();
+      for (const journey of ['J-01', 'J-07', '']) {
+        vi.stubEnv('AI7_E2E_JOURNEY', journey);
+        expect(() => parseArguments([...args, ...control])).toThrow();
+      }
+      vi.unstubAllEnvs();
+      vi.stubEnv('AI7_E2E_JOURNEY', undefined);
+      expect(() => parseArguments([...args, ...control])).toThrow();
+      expect(() => packagedLaunchForm(control)).toThrow('AI7_PACKAGED_ARGUMENT_INVALID');
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it('knows exactly three modes', () => {

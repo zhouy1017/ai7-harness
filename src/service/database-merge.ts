@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -52,48 +53,10 @@ export const DATABASE_MERGE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DATABASE_MERGE_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  database_merges_no_update: `CREATE TRIGGER database_merges_no_update
-    BEFORE UPDATE ON database_merges
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merges_no_delete: `CREATE TRIGGER database_merges_no_delete
-    BEFORE DELETE ON database_merges
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merge_books_no_update: `CREATE TRIGGER database_merge_books_no_update
-    BEFORE UPDATE ON database_merge_books
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merge_books_no_delete: `CREATE TRIGGER database_merge_books_no_delete
-    BEFORE DELETE ON database_merge_books
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-};
-
-export const DATABASE_MERGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  database_merge_books: ['merge_id>database_merges.merge_id:NO ACTION/NO ACTION/NONE'],
-};
-
-/** Revision 58's relations, created once: a store that predates them gains an empty ledger and nothing existing moves. */
-export function initializeDatabaseMergeSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_merges'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATABASE_MERGE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATABASE_MERGE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Database merge schema rollback failed.');
-    }
-    throw error;
-  }
-}
+export const DATABASE_MERGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  database_merges: 'DATABASE_MERGE_LEDGER_IMMUTABLE',
+  database_merge_books: 'DATABASE_MERGE_LEDGER_IMMUTABLE',
+});
 
 export type MergeTablePolicy = 'seed' | 'owned' | 'dependent' | 'shared' | 'excluded' | 'transient' | 'house' | 'derived';
 
@@ -125,7 +88,12 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_outline: 'owned',
   branch_working_state: 'owned',
   working_blocks: 'owned',
-  working_offset_nodes: 'owned',
+  working_pages: 'owned',
+  editor_steps: 'owned',
+  editor_step_parts: 'owned',
+  editor_step_effects: 'owned',
+  editor_step_mark_anchors: 'owned',
+  editor_step_restore_revisions: 'owned',
   edit_journal_entries: 'owned',
   milestone_versions: 'owned',
   milestone_signoff_records: 'owned',
@@ -219,6 +187,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   default_execution_rule_versions: 'owned',
   default_execution_rule_states: 'owned',
   house_word_list_versions: 'house', // House settings stay local; a Book carries its frozen Run snapshot.
+  // R5-L1: the 字表与词表 library (ADR 0106 §9): house settings, never taken; a merged Book keeps its findings' own text.
+  standard_tables: 'house',
+  standard_table_versions: 'house',
+  standard_table_entries: 'house',
   review_runs: 'owned',
   review_run_synthesis: 'owned',
   review_run_authorizations: 'owned',
@@ -335,6 +307,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_replacement_matches: 'transient',
   // The house's own records.
   model_service_connections: 'house',
+  model_role_choices: 'house', // R5-F1a: choices are this house's settings, never a merged Book's
   search_backend_connections: 'house',
   search_backend_fallback: 'house',
   // The house's own versions of its guideline documents: a Book brings those its Runs applied as the snapshots they hold.
@@ -399,7 +372,6 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   material_index_segments: 'derived',
   // 相似段落检索 and 来源译文 (Issue #892): kept beside the build they were made from, which a merge never carries; a merged
   // item's are made again here on request, from the build made here.
-  material_index_vectors: 'derived',
   material_index_translations: 'derived',
   // Attempts name the source machine's exact build and batch; Book merge keeps destination attempts and takes none from source.
   material_translation_attempts: 'derived',
@@ -1190,10 +1162,11 @@ function mergeListedBooks(
     }
     const selectedBook = db.prepare('SELECT 1 FROM temp.merge_books WHERE book_id = ?');
     rows += importBookLearningControls(db, (bookId) => selectedBook.get(bookId) !== undefined);
-    // The search index over the working text the Book brought.
+    // The search index over the working text the Book brought, each row under its block's rowid here (Issue #1654).
     db.prepare(
-      `INSERT INTO main.working_block_search (branch_id, block_id, text)
-       SELECT x.branch_id, x.block_id, x.text FROM src.working_blocks x ${owned('working_blocks', 'x')}`,
+      `INSERT INTO main.working_block_search (rowid, branch_id, block_id, text)
+       SELECT w.rowid, w.branch_id, w.block_id, w.text FROM src.working_blocks x ${owned('working_blocks', 'x')}
+       JOIN main.working_blocks w ON w.branch_id = x.branch_id AND w.block_id = x.block_id`,
     ).run();
     db.exec('DROP TABLE temp.merge_rows');
     receipt?.(db);

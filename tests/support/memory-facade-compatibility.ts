@@ -82,7 +82,15 @@ export async function memoryCompatibilityPacket() {
   const ordinaryFetch: typeof fetch = (url, init) => {
     const body = String(init?.body);
     requests.push({ surface: body.includes('ai7.review.run-synthesis-input/1') ? surface + '-synthesis' : surface, body });
-    if (surface === 'curation') return Promise.resolve(new Response(JSON.stringify({ model: JSON.parse(body).model, choices: [{ message: { content: JSON.stringify({ proposals: [{ title: '保持合成编辑尺度。', editorialDimension: 'style-and-format', confidence: 0.6, exampleIds: ['e1'] }] }) }, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 }));
+    if (surface === 'curation') {
+      const request = JSON.parse(body);
+      const input = JSON.parse(request.messages.find((entry: { role: string }) => entry.role === 'user').content);
+      const result = Array.isArray(input)
+        ? { items: input.map(({ exampleId, beforeDigest, afterDigest }) => ({ exampleId, beforeDigest, afterDigest, editorialDimension: 'style-and-format' })) }
+        : { proposals: [{ title: '保持合成编辑尺度。', editorialDimension: 'style-and-format', confidence: 0.6, exampleIds: ['e1'] }] };
+      return Promise.resolve(new Response(JSON.stringify({ model: request.model, choices: [{ message: { content: JSON.stringify(result) },
+        finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 20 } })));
+    }
     return capture.nativeFetch(url, init);
   };
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor: governor, ledger: store.baselineAnalysisLedger,
@@ -225,7 +233,7 @@ export async function memoryCompatibilityPacket() {
     surface = 'curation';
     for (const signal of store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals)
       if (signal.kind !== 'manual-edit-journal') store.changeEditorialLearning({ kind: 'material', signalId: signal.signalId });
-    store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: controls(), curation: { maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 } });
+    store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: controls(), offerDigest: store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).curation!.offerDigest!, curation: { maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 } });
     owner.setBackgroundIdle(true); owner.startLearningCuration(store); await owner.whenIdle();
     snapshots.curation = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     surface = 'word-write';

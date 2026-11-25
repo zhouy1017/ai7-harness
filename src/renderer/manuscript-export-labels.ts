@@ -28,6 +28,9 @@ export const EXPORT_ACTION_LABELS = {
 } as const;
 export type ExportAction = keyof typeof EXPORT_ACTION_LABELS;
 
+/** The menu 交付物 offers to write the manuscript to a file; 帮助's 第一次审稿 names it by these words. */
+export const EXPORT_MENU_LABEL = '导出 ▾';
+
 /** What the card names before its first review: the version kind, and a milestone's or a report's own label. */
 export type ExportPendingLabel =
   | { kind: 'current' }
@@ -50,6 +53,7 @@ export function exportCardHeading(target: ManuscriptExportTargetProjection | nul
     return pending.kind === 'current' ? technicalWords('导出 · 当前修订版', '导出 · 当前稿件') : `导出 · 里程碑版本「${pending.label}」`;
   }
   if (target.report !== null) return `导出 · ${technicalWords(reportExportLabel(target.report.runLabel, target.report.version), target.report.runLabel)}`;
+  if (target.kind === 'revision') return `导出 · 稿件版本 ${target.revisionLabel}`;
   if (target.document !== null) return `导出 · ${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
   return target.kind === 'current'
     ? technicalWords(`导出 · 当前修订版 ${target.revisionLabel}`, '导出 · 当前稿件')
@@ -166,6 +170,7 @@ export function exportVersionText(target: ManuscriptExportTargetProjection): str
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
   if (target.document !== null) return `${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
+  if (target.kind === 'revision') return `稿件版本 ${target.revisionLabel}`;
   return target.kind === 'current' ? technicalWords(`修订版 ${target.revisionLabel}`, '当前稿件') : `里程碑版本「${target.milestoneLabel ?? ''}」${technicalWords(` · ${target.revisionLabel}`)}`;
 }
 

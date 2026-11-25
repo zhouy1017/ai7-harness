@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { readersReportPlan, evaluationMaterialPlan } from './task-plan.js';
 import { launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
@@ -124,36 +125,10 @@ export const READERS_REPORT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const READERS_REPORT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(READERS_REPORT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'READERS_REPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'READERS_REPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the two relations, in the exact-schema validator's own spelling. */
-export const READERS_REPORT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  readers_report_tasks: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-  readers_report_drafts: [
-    'analysis_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE',
-    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const READERS_REPORT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  readers_report_tasks: 'READERS_REPORT_LEDGER_IMMUTABLE',
+  readers_report_drafts: 'READERS_REPORT_LEDGER_IMMUTABLE',
+});
 
 export class ReadersReportError extends Error {
   constructor(readonly code: string, message: string) {
@@ -171,23 +146,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 const TASK_SCHEMA = 'ai7.readers-report-task/1';
 const DRAFT_SCHEMA = 'ai7.readers-report-draft/1';
 const CORRUPT = '审稿意见记录已损坏。';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'readers_report_tasks'";
-
-/** Revision 62's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeReadersReportSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(READERS_REPORT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(READERS_REPORT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Readers report schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** Why no 审稿意见 can be drafted while the Book has no 定稿 version. */
 export const READERS_REPORT_NEEDS_FINALIZED = '先定稿一版评估，再从定稿起草审稿意见。' as const;
@@ -674,7 +632,7 @@ function buildReadersReportTask(host: ReadersReportStoreHost, bookId: string, te
   const input = host.readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
   const ledger = readersReportLedger(host, input, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) });
   const latest = latestReadersReport(host, bookId);
-  requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(latest?.projection.run?.state ?? null, READERS_REPORT_KIND));
+  requireStore(createPlan.previewAfterCancellation === true || !runIsActive(latest?.projection.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(latest?.projection.run?.state ?? null, READERS_REPORT_KIND));
   const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
   // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
   const skippedExemplars = [
@@ -881,7 +839,7 @@ export function createReadersReportDraft(host: ReadersReportStoreHost, bookId: s
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertWorking = host.authority.prepare(
-      `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+      `INSERT INTO working_blocks(branch_id, block_id, order_key, kind, level, text, digest, grapheme_length)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     let offset = 0;

@@ -4,6 +4,7 @@ import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js
 import { technicalDisclosure, technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { modelServiceFlow } from './model-service-flow.js';
+import { effortValueLabel } from './model-effort-labels.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -108,7 +109,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
-  const effortDrafts = new Map<string, string>();
+  const flashModelChoices = new Map<ModelServiceChannelId, string>();
+  const effortDrafts = new Map<string, { modelId: string; effort: string }>();
   const modelFilters = new Map<ModelServiceChannelId, string>();
   let favourites: ModelFavourites = {};
   let stopFollow: (() => void) | undefined;
@@ -122,6 +124,26 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   /** The 模型服务 page last mounted; it leaves the document when the editor navigates elsewhere. */
   let mounted: HTMLElement | null = null;
 
+  /** Advanced by every opening of 模型服务 and every action started on it, never reset; `opened` is the last opening's. */
+  let generation = 0;
+  let opened = 0;
+
+  /**
+   * An action's answer is acted on only in the opening it started in, while the page is on screen and shows the channel it
+   * started on (BUG-11). A late answer repaints nothing, says nothing and moves no focus; its data stays in the service and the
+   * page's own reads show it.
+   */
+  function beginRequest(channel: ModelServiceChannelId): () => boolean {
+    const request = ++generation;
+    return () => {
+      if (request < opened || mounted?.isConnected !== true) return false;
+      if (channel === modelServiceChannel) return true;
+      // Same opening, another channel: the busy line this action left ends, unless a later action has said its own since.
+      if (request === generation) setStatus('');
+      return false;
+    };
+  }
+
   /**
    * Repaints 模型服务 with an answer that arrived after an action on it (refresh, save, select, test, proxy, search): only while the
    * page is still on screen (Issue #1445). A late answer never brings the page back after the editor left; its data stays in the
@@ -131,9 +153,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (mounted?.isConnected) paintModelServiceSettings(projection, passive);
   }
 
-  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false): void {
-    const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
-    const previous = document.querySelector<HTMLElement>('.model-service-settings');
+  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false, entry = false): void {
+    const searchHadFocus = !entry && document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
+    // Explicit navigation keeps the shell's top-of-page reset; only updates retain the old interaction.
+    const previous = entry ? null : document.querySelector<HTMLElement>('.model-service-settings');
     const restoreInteraction = previous ? retainPollInteraction(previous, passive) : () => {};
     stopFollow?.();
     const content = panel();
@@ -144,11 +167,13 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     );
     content.append(
       element('h2', undefined, '模型服务'),
-      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
+      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再选择使用的模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
-    content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
-      effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
-      setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
+    content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage, beginRequest,
+      get flashModelId() { return modelServiceChannel === null ? '' : flashModelChoices.get(modelServiceChannel) ?? ''; },
+      chooseFlashModel: (model, channel = modelServiceChannel ?? undefined) => { if (channel !== undefined) flashModelChoices.set(channel, model); },
+      effortDraft: (channel, role, modelId) => { const draft = effortDrafts.get(`${channel}/${role}`); return draft?.modelId === modelId ? draft.effort : undefined; },
+      setEffortDraft: (channel, role, modelId, effort) => { const key = `${channel}/${role}`; if (effort === undefined) effortDrafts.delete(key); else effortDrafts.set(key, { modelId, effort }); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
       get modelId() { return modelServiceChannel === null ? '' : modelChoices.get(modelServiceChannel) ?? ''; },
       chooseModel: (modelId) => { if (modelServiceChannel !== null) modelChoices.set(modelServiceChannel, modelId); },
@@ -163,15 +188,18 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         return favourites;
       } }));
     const currentRoles = element('section', 'model-service-current-roles');
-    currentRoles.setAttribute('aria-label', '当前角色模型');
-    for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
-      const effort = role.binding?.reasoningEffort;
-      const mark = effort === undefined || effort === 'off' ? ' · 服务默认' : `@${effort}`;
-      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}${mark}`} · ${role.statusLabel}`);
-      line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
-      currentRoles.append(line);
+    currentRoles.setAttribute('aria-label', '当前使用的模型');
+    const main = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
+    const name = (role: typeof main): string => role?.binding == null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`;
+    for (const role of projection.modelRoles) {
+      const reason = role.statusDetail?.split('。')[0];
+      if (technicalLayerVisible) {
+        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effortValueLabel(role.binding?.reasoningEffort)} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。` : ''}`);
+        line.dataset['modelRole'] = role.roleId === 'foreground-pro' ? 'main-editorial' : role.roleId === 'foreground-flash' ? 'fast-interaction' : role.roleId; line.dataset['modelRoleStatus'] = role.status;
+        currentRoles.append(line);
+      }
     }
-    content.append(currentRoles);
+    if (technicalLayerVisible) content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');
     unsupported.dataset['unsupportedProviders'] = 'true';
     unsupported.setAttribute('aria-label', '尚未支持的模型服务');
@@ -230,11 +258,15 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     replaceScreen('model-service', content);
     mounted = content;
     restoreInteraction(content);
+    if (entry && document.scrollingElement) document.scrollingElement.scrollTop = 0;
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
-    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
-    content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
-    const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
+    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
+    // An unsaved 思考强度 is a draft like the fields above: a passive read does not repaint the page under it.
+    content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form, .model-service-effort')) draftEdited = true; });
+    // The connection tests too: a result whose answer arrived after the page moved to another channel shows on the next read.
+    const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null,
+      page.routeChoice.routes.map((route) => route.connection?.connectionTests)]);
     const signature = catalogueKey(projection);
     let changedCataloguePolls = 0;
     content.dataset['changedCataloguePolls'] = '0';
@@ -266,8 +298,11 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
     const route = navigation.begin();
     setStatus('正在读取模型服务状态…', 'busy');
+    opened = ++generation;
     modelServiceChannel = null;
     modelChoices.clear();
+    flashModelChoices.clear();
+    effortDrafts.clear();
     modelFilters.clear();
     let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
     try {
@@ -287,7 +322,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const [projection, preferences] = read;
       if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
-      paintModelServiceSettings(projection);
+      paintModelServiceSettings(projection, false, true);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {

@@ -1,4 +1,7 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
+import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { SCOPED_EDIT_AUTHORED_ANSWER, scopedEditJourneyInput } from '../support/scoped-edit.js';
 import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -20,6 +23,7 @@ import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { EditorialStore } from '../../src/service/store.js';
 import type { DevelopmentValidationIntent, FastInteractionRequestProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { MODEL_ROUTE_NOT_SERVED_REASON } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -355,12 +359,102 @@ it('uses Book memory in actual production polish and conflict regeneration', asy
 });
 
 
+it('runs polish, conflict regeneration and a scoped edit on the Pro model when no Flash model is chosen (#1620)', async () => {
+  const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].route;
+  const connection = store.saveModelServiceConnection('只选 Pro 的连接', null, 'ready', route);
+  store.selectMainRoleModel(route, 'pro-only-model');
+  const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('foreground-flash')!;
+  expect(flash).toEqual(main);
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
+  const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference };
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  const calls: StubCall[] = [];
+  let answer = AUTHORED_POLISH_ANSWER;
+  const runtime = { scope: 'ordinary-production' as const, nativeFetch: stubTransport(calls, () => answer) };
+  const secretResolver = { resolve: async () => 'synthetic-pro-only-placeholder' };
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(runtime, () => policy, () => connection.credentialReference, secretResolver) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), frozen => {
+    if (frozen === null) throw new Error('missing scoped binding');
+    return owner.fork(productionFastRoleRoutes(runtime, () => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, frozen),
+      () => frozen.credentialReference, secretResolver));
+  });
+  try {
+    const polish = await settled(fast, fast.polish(book.bookId, { selection: polishSelectionOf(store, book) }).taskId);
+    expect(polish.kind === 'editorial-polish' && polish.polish.state).toBe('suggested');
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    answer = AUTHORED_REGENERATION_ANSWER;
+    const regenerated = await settled(fast, fast.regenerate({ manuscriptId: book.manuscriptId, branchId: book.branchId, markId,
+      basisDigest: conflict.basisDigest, unitIndex: conflictUnitIndex(conflict) }).requestId);
+    expect(regenerated.kind === 'conflict-regenerate' && regenerated.regeneration.outcome).toBe('drafted');
+    answer = SCOPED_EDIT_AUTHORED_ANSWER;
+    const scoped = fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID() });
+    await fast.settled();
+    expect(fast.inspectScopedEdit(book.bookId, scoped.requestId).state).toBe('applied');
+    expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual(Array(3).fill([main.endpoint, 'pro-only-model']));
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
+it('falls back from a remembered per-Task model its channel can no longer send to the role default, with the notice (#1582)', async () => {
+  const go = store.saveModelServiceConnection('记住的选择', null, 'ready', 'opencode-go');
+  // The account catalogue lists the /responses model, so only #1582 rules it out.
+  store.cacheModelServiceModels(go, [{ modelId: 'deepseek-v4.1-flash', modelLabel: 'DeepSeek V4.1 Flash' }, { modelId: 'gpt-5.6-luna', modelLabel: 'GPT 5.6 Luna' }]);
+  const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+    live: { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: go.credentialReference, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  const calls: StubCall[] = [];
+  const runtime = { scope: 'ordinary-production' as const, nativeFetch: stubTransport(calls, () => SCOPED_EDIT_AUTHORED_ANSWER) };
+  const secretResolver = { resolve: async () => 'synthetic-remembered-placeholder' };
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(runtime, () => policy, () => go.credentialReference, secretResolver) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), frozen => {
+    if (frozen === null) throw new Error('missing scoped binding');
+    return owner.fork(productionFastRoleRoutes(runtime, () => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, frozen),
+      () => frozen.credentialReference, secretResolver));
+  });
+  try {
+    const started = fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID(),
+      executionConfig: { modelConnectionId: go.connectionId, modelId: 'gpt-5.6-luna' }, rememberedChoice: true });
+    expect(JSON.stringify(started)).toContain('上次选择的模型已不可用，本次已使用角色默认模型。');
+    await fast.settled();
+    expect(fast.inspectScopedEdit(book.bookId, started.requestId).state).toBe('applied');
+    expect(calls.map((call) => JSON.parse(call.body).model)).toEqual([main.model]);
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
+it('refuses at launch a stored model its channel cannot send, before any transport call (#1582)', async () => {
+  const connection = store.saveModelServiceConnection('0.7.3 的选择', null, 'ready', 'opencode-go');
+  store.close();
+  // A Pro choice 0.7.3 accepted: OpenCode Go declares this model on its /responses route only.
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', connection.connectionId); writeModelRoleChoice(database, 'foreground-pro', { connectionId: connection.connectionId, modelId: 'gpt-5.6-luna' }); } finally { database.close(); }
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, null);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: null });
+  const nativeFetch = vi.fn();
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+    () => policy, () => connection.credentialReference, { resolve: vi.fn(async () => 'synthetic-unserved-placeholder') }) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), () => owner);
+  try {
+    let refused: unknown;
+    try { fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID() }); }
+    catch (error) { refused = error; }
+    expect(refused).toMatchObject({ code: 'MODEL_ROUTE_NOT_SERVED', message: MODEL_ROUTE_NOT_SERVED_REASON });
+    await fast.settled();
+    expect(nativeFetch).not.toHaveBeenCalled();
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
 it('freezes separate scoped launch bindings and replays a command after role settings change (#1455)', async () => {
   const second = await importSample1Book(store, roots.codeRoot, '并行局部修改');
   const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
   const connection = store.saveModelServiceConnection('局部修改连接', null, 'ready', binding.route);
-  store.selectFastRoleModel(binding.route, binding.model, 'medium');
-  const defaults = store.getConfiguredModelRoleBinding('fast-interaction')!;
+  seedModelEfforts(store, binding.route, { 'scoped-choice-one': ['high'], 'scoped-choice-two': ['low'] });
+  store.selectFastRoleModel(binding.route, binding.model, 'low');
+  const defaults = store.getConfiguredModelRoleBinding('foreground-flash')!;
   const configured = { ...binding, credentialReference: connection.credentialReference };
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured, defaults);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
@@ -382,7 +476,7 @@ it('freezes separate scoped launch bindings and replays a command after role set
     const one = fast.scopedEdit(book.bookId, input);
     const two = fast.scopedEdit(second.bookId, { ...scopedEditJourneyInput(store, second, store.inspectAiEditLocks(second).digest),
       clientCommandId: randomUUID(), executionConfig: { modelId: 'scoped-choice-two', reasoningEffort: 'low' } });
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(defaults);
+    expect(store.getConfiguredModelRoleBinding('foreground-flash')).toEqual(defaults);
     store.selectFastRoleModel(binding.route, binding.model, 'off');
     await fast.settled();
     const first = fast.inspectScopedEdit(book.bookId, one.requestId), other = fast.inspectScopedEdit(second.bookId, two.requestId);

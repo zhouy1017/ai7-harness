@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountShell, ShellPreferences } from '../../src/renderer/shell.js';
 import { SHELL_LABELS } from '../../src/renderer/shell-labels.js';
+import { ICON_IDS } from '../../src/renderer/components/icon-sprite.js';
 import { preferenceDefaults, PREFERENCES_NOTICES, type PreferenceValues, type PreferencesRendererApi } from '../../src/shared/preferences.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -184,6 +185,21 @@ describe('sidebar book entries', () => {
     surface.leaveBook();
     expect(sidebar.querySelector<HTMLElement>('.sidebar-books')!.hidden).toBe(false);
     expect(sidebar.querySelector('[data-nav-book="book-a"]')).not.toBeNull();
+  });
+
+  it('gives every drawn sidebar row its own symbol, 更多图书 included (#1554)', async () => {
+    const { sidebar, preferences, surface } = mounted();
+    await preferences.load();
+    for (const [index, bookId] of ['book-a', 'book-b', 'book-c', 'book-d', 'book-e'].entries()) {
+      await preferences.visit({ bookId, title: `第${index + 1}本`, section: 'overview' });
+    }
+    surface.follow('book-overview', { bookId: 'book-e', title: '第5本', section: 'overview' });
+    const more = sidebar.querySelector<HTMLElement>('.sidebar-more-books-summary .icon');
+    expect(more?.dataset['icon']).toBe('i-more');
+    const ids = [...sidebar.querySelectorAll<HTMLElement>('.sidebar-link .icon')].map((node) => node.dataset['icon'] ?? '');
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) expect(ICON_IDS).toContain(id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('remembers collapse through the existing preference store and keeps row tooltips', async () => {

@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { bindEditorialMemory, editorialMemoryDigest } from '../learning/memory-facade.js';
 import type { EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
@@ -5,16 +6,17 @@ import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, developerLiveBindingFor, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import type { EditorialStore } from '../store.js';
 import type { ModelTextAttemptProvenance, FastModelSelectionInput, ModelConnectionTestStatus, LaunchPolicyProjection } from '../../shared/protocol.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRouteRefusal, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
-import { effectiveModelReasoningEffort } from '../provider/model-profile.js';
+import { effectiveModelReasoningEffort, modelProfileFor } from '../provider/model-profile.js';
+import { modelEffortRefusal } from '../provider/model-efforts.js';
+import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -27,6 +29,7 @@ import {
 import { transmitOnce } from '../provider/live-transmission.js';
 import { localFixtureRegisteredProfile, type LocalFixtureExecutionContext, type LocalFixtureRuntimeContext, type ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, ProviderResultCacheError, type ProviderTestItemSlice } from '../provider/provider-result-cache.js';
+import { GUIDELINE_FORMAT_TIMEOUT_MS } from '../../shared/protocol/transport-settings.js';
 import { connectionTestTransport } from '../provider/request-deadlines.js';
 import {
   CONFLICT_REGENERATE_KIND,
@@ -34,8 +37,12 @@ import {
   CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
 } from './conflict-regenerate-contract.js';
 import { FastRoleError } from './fast-role-error.js';
-import { MATERIAL_TRANSLATION_KIND, MATERIAL_TRANSLATION_PROMPT_CONTRACT, MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST } from './material-translation-contract.js';
+import { MATERIAL_TRANSLATION_KIND } from './material-translation-contract.js';
 import { EDITORIAL_POLISH_KIND, EDITORIAL_POLISH_PROMPT_CONTRACT, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST } from './polish-contract.js';
+
+import { FLASH_TASK_REGISTRY, connectionProbe, type ProbeModelEvidence } from './flash-task-registry.js';
+import { runStructuredFlashTask, STRUCTURED_FLASH_TASKS, type FlashTaskContract, type FlashTaskResult } from './flash-task-contract.js';
+import { isSyntheticRecordingInput, SYNTHETIC_FLASH_RECORDING_KINDS } from './recording-inputs.js';
 
 export { FastRoleError };
 
@@ -55,7 +62,7 @@ export { FastRoleError };
  * captured answer and nothing is sent twice; a request whose answer may have been billed and never came back whole is
  * outcome-unknown as `transmitOnce` defines it. Outside one — actual business — the request reaches the transport itself.
  */
-export type FastRoleKindId = typeof EDITORIAL_POLISH_KIND | typeof CONFLICT_REGENERATE_KIND | typeof MATERIAL_TRANSLATION_KIND | typeof CONNECTION_TEST_KIND;
+export type FastRoleKindId = keyof typeof FLASH_TASK_REGISTRY | typeof EDITORIAL_POLISH_KIND | typeof CONFLICT_REGENERATE_KIND;
 
 /**
  * Another frozen contract on a kind's own route (Issue #1412): 就选中部分让 AI 修改 sends the editor's selected words under the
@@ -71,6 +78,7 @@ export interface FastRoleKindDefinition {
   readonly kindId: FastRoleKindId;
   /** The action as the editor names it, which every reason says. */
   readonly label: string;
+  readonly budget?: FlashTaskContract<unknown, unknown>['budget'];
   readonly category: OutboundDataCategory;
   /**
    * The category its words go out under ordinary production when it differs (生成来源译文, Issue #892: a 资料库 item's words
@@ -83,10 +91,8 @@ export interface FastRoleKindDefinition {
 }
 
 export const FAST_ROLE_KINDS: Readonly<Record<FastRoleKindId, FastRoleKindDefinition>> = {
-  [CONNECTION_TEST_KIND]: {
-    kindId: CONNECTION_TEST_KIND, label: '测试文本连接', category: 'public-or-synthetic', slice: 'S80',
-    systemPrompt: CONNECTION_TEST_POLICY.systemPrompt, promptContractDigest: sha256Hex(JSON.stringify(CONNECTION_TEST_POLICY)),
-  },
+  ...Object.fromEntries<FastRoleKindDefinition>((Object.keys(FLASH_TASK_REGISTRY) as (keyof typeof FLASH_TASK_REGISTRY)[]).map(kindId =>
+    [kindId, { ...FLASH_TASK_REGISTRY[kindId], kindId, category: FLASH_TASK_REGISTRY[kindId].outboundCategory }])) as Record<keyof typeof FLASH_TASK_REGISTRY, FastRoleKindDefinition>,
   [EDITORIAL_POLISH_KIND]: {
     kindId: EDITORIAL_POLISH_KIND,
     label: '润色这段',
@@ -103,17 +109,7 @@ export const FAST_ROLE_KINDS: Readonly<Record<FastRoleKindId, FastRoleKindDefini
     systemPrompt: CONFLICT_REGENERATE_PROMPT_CONTRACT.systemPrompt,
     promptContractDigest: CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
   },
-  // 生成来源译文 (Issue #892): a 资料库 item's paragraphs, a bounded batch per request. Under developer-live only an admitted
-  // public original goes (`material-translation-contract.ts`), as public-or-synthetic material.
-  [MATERIAL_TRANSLATION_KIND]: {
-    kindId: MATERIAL_TRANSLATION_KIND,
-    label: '生成来源译文',
-    category: 'public-or-synthetic',
-    productionCategory: 'frozen-material-reference-excerpt',
-    slice: 'S80',
-    systemPrompt: MATERIAL_TRANSLATION_PROMPT_CONTRACT.systemPrompt,
-    promptContractDigest: MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST,
-  },
+
 };
 
 /** The category a kind's words go out under in a live scope. */
@@ -130,7 +126,7 @@ export interface FastRoleLiveRoutes {
   readonly transportSettings?: LaunchPolicyProjection['providerProcessing']['transport'];
   readonly runtime: LiveRuntime;
   readonly broker: CredentialBroker;
-  readonly routes: Readonly<Record<Exclude<FastRoleKindId, typeof CONNECTION_TEST_KIND>, AdmittedFastRoleRoute | null> & Partial<Record<typeof CONNECTION_TEST_KIND, AdmittedFastRoleRoute | null>>>;
+  readonly routes: Readonly<Partial<Record<FastRoleKindId, AdmittedFastRoleRoute | null>>>;
   /** The Credential Reference of the development slot, as the provider configuration names it. */
   readonly credentialReference: string;
   readonly current?: (reference: string, route: AdmittedFastRoleRoute) => boolean;
@@ -139,18 +135,18 @@ export interface FastRoleLiveRoutes {
 
 /** The fast-role routes of a developer-live launch: each kind's route as the verified projection's policy admits it, or none. */
 export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): FastRoleLiveRoutes {
-  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
+    const admitted = admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
+    const { reasoningEffort } = developerLiveBindingFor(runtime.launch, kind.kindId);
+    return admitted === null || reasoningEffort === undefined ? admitted : { ...admitted, reasoningEffort };
+  };
   return {
     runtime,
     transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
-    routes: {
-      [CONNECTION_TEST_KIND]: null,
-      [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]),
-      [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]),
-      [MATERIAL_TRANSLATION_KIND]: route(FAST_ROLE_KINDS[MATERIAL_TRANSLATION_KIND]),
-    },
-    credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    routes: Object.fromEntries(Object.values(FAST_ROLE_KINDS).map(kind =>
+      [kind.kindId, kind.kindId === CONNECTION_TEST_KIND && runtime.launch.recordingProvider === undefined ? null : route(kind)])),
+    credentialReference: developerLiveBindingFor(runtime.launch, CONNECTION_TEST_KIND).credentialReference,
   };
 }
 
@@ -179,12 +175,7 @@ export function productionFastRoleRoutes(
     ...(current === undefined ? {} : { current }),
     ...(credentialGeneration === undefined ? {} : { credentialGeneration }),
     get routes() {
-      return {
-        [CONNECTION_TEST_KIND]: route(FAST_ROLE_KINDS[CONNECTION_TEST_KIND]),
-        [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]),
-        [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]),
-        [MATERIAL_TRANSLATION_KIND]: route(FAST_ROLE_KINDS[MATERIAL_TRANSLATION_KIND]),
-      };
+      return Object.fromEntries(Object.values(FAST_ROLE_KINDS).map(kind => [kind.kindId, route(kind)]));
     },
     get credentialReference() {
       return credentialReference() ?? '';
@@ -221,7 +212,7 @@ export function fastRoleRouteRefusal(deps: Pick<FastRoleExecutionDeps, 'fixture'
     return null;
   }
   // The launch's deterministic fixture answers no 来源译文 (Issue #892): development-ci admits none.
-  if (deps.fixture === null || kindId === MATERIAL_TRANSLATION_KIND) return `当前运行范围未允许${kind.label}：这次启动没有可用的模型。`;
+  if (deps.fixture === null || Object.hasOwn(FLASH_TASK_REGISTRY, kindId)) return `当前运行范围未允许${kind.label}：这次启动没有可用的模型。`;
   return null;
 }
 
@@ -243,7 +234,7 @@ export interface FastRoleBindingFacts {
 export type FastRoleProvenance = ModelTextAttemptProvenance;
 
 export type FastRoleAnswer =
-  | { readonly kind: 'answered'; readonly text: string; readonly binding: FastRoleBindingFacts }
+  | { readonly kind: 'answered'; readonly text: string; readonly binding: FastRoleBindingFacts; readonly probeModel?: ProbeModelEvidence }
   /**
    * Nothing usable came back. `outcomeUnknown`: the request may have been sent and billed and its answer never arrived whole
    * (结果待确认); it is never sent again on its own.
@@ -252,16 +243,19 @@ export type FastRoleAnswer =
 
 const OUTCOME_UNKNOWN_CODES: ReadonlySet<string> = new Set([AI7_FAILURE_CODES.OUTCOME_UNKNOWN, 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN']);
 
-export class FastRoleExecutionOwner {
-  readonly #children = new Set<FastRoleExecutionOwner>();
+export type ExecutedFlashTaskResult<Output> = FlashTaskResult<Output> & { readonly formattingParseFailure?: true };
+
+export class UnderlyingFlashService {
+  readonly #children = new Set<UnderlyingFlashService>();
   #release: (() => void) | null = null;
-  fork(live: FastRoleLiveRoutes | null): FastRoleExecutionOwner {
-    const child = new FastRoleExecutionOwner({ ...this.#deps, live });
+  fork(live: FastRoleLiveRoutes | null): UnderlyingFlashService {
+    const child = new UnderlyingFlashService({ ...this.#deps, live });
     this.#children.add(child); child.#release = () => this.#children.delete(child); return child;
   }
   readonly #deps: FastRoleExecutionDeps;
   #active: PrimaryAgentHarnessHandle | null = null;
-  #inFlight = false;
+  #tail = Promise.resolve();
+  #pending = 0;
   #disposed = false;
   #requestAbort: AbortController | null = null;
 
@@ -269,9 +263,9 @@ export class FastRoleExecutionOwner {
     this.#deps = deps;
   }
 
-  /** Whether a request is in flight; a database replacement waits for it as for a dialogue answer. */
+  /** A database replacement waits for active and queued requests as it waits for a dialogue answer. */
   get busy(): boolean {
-    return this.#inFlight || [...this.#children].some(child => child.busy);
+    return this.#pending > 0 || [...this.#children].some(child => child.busy);
   }
 
   /** Why a kind cannot be asked now, for the surfaces to show before anything is selected; `null` when it can. */
@@ -279,12 +273,14 @@ export class FastRoleExecutionOwner {
     return fastRoleRouteRefusal(this.#deps, kindId, sourceDigest);
   }
 
-  /** Refuse before anything is recorded or sent when the kind has no route here, or another request is in flight. */
+  /** Background work can queue. An interactive request needs an available owner before it is recorded. */
   requireReady(kindId: FastRoleKindId, sourceDigest?: string | null): void {
     const refusal = this.refusal(kindId, sourceDigest);
     if (refusal !== null) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', refusal);
     if (this.#disposed) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
-    if (this.#inFlight) throw new FastRoleError('FAST_ROLE_BUSY', '另一项润色或重新生成正在进行；请等它完成。');
+    if (this.#pending > 0 && !Object.hasOwn(FLASH_TASK_REGISTRY, kindId)) {
+      throw new FastRoleError('FAST_ROLE_BUSY', '这个模型还有其他工作未完成，请稍后重试。');
+    }
   }
 
   /** AI7 is closing: the request in flight is interrupted. */
@@ -300,34 +296,77 @@ export class FastRoleExecutionOwner {
    * Send the one message of a kind and read its answer. `step` names the request inside the development validation; the
    * caller has checked the route with `requireReady` and built `message` from verified words only.
    */
-  async ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
+  async execute<Input, Output>(contract: FlashTaskContract<Input, Output>, source: Input, step: string): Promise<ExecutedFlashTaskResult<Output>> {
+    const kind = contract.kindId as keyof typeof STRUCTURED_FLASH_TASKS;
+    if (kind === 'learning-sample-tidying') throw new FastRoleError('FLASH_LEARNING_SCOPE_REQUIRED', '学习样例需要已启用的学习范围。');
+    let receivedCompleteAnswer = false;
+    const result = await runStructuredFlashTask(contract, source, async message => {
+      try {
+        const answer = await this.#ask(kind, message, step);
+        if (answer.kind === 'failed') return { reason: answer.message, outcomeUnknown: answer.outcomeUnknown };
+        const failure = answer.binding.provenance?.failureCode;
+        if (failure) return { reason: '模型没有返回完整结果。', outcomeUnknown: OUTCOME_UNKNOWN_CODES.has(failure) };
+        receivedCompleteAnswer = true;
+        return answer.text;
+      } catch (error) {
+        if (!(error instanceof FastRoleError)) throw error;
+        return { reason: error.message };
+      }
+    });
+    return receivedCompleteAnswer && result.state === 'fallback' ? { ...result, formattingParseFailure: true } : result;
+  }
+
+  ask(kindId: Exclude<FastRoleKindId, keyof typeof STRUCTURED_FLASH_TASKS>, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
+    return this.#ask(kindId, message, step, readMemory, contract);
+  }
+
+  async #ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
     this.requireReady(kindId);
     if (kindId === CONNECTION_TEST_KIND && message !== CONNECTION_TEST_POLICY.message) throw new FastRoleError('MODEL_CONNECTION_TEST_INVALID', '连接测试只接受固定的公开合成消息。');
-    this.#inFlight = true;
-    const cancellation = new AbortController();
-    this.#requestAbort = cancellation;
+    const live = this.#deps.live;
+    // Pin the admitted binding when the request enters the queue. The send checks that it is still current.
+    const route = live?.routes[kindId] ?? null;
+    const credentialReference = live?.credentialReference ?? '';
+    const credentialGeneration = live?.credentialGeneration?.();
+    const previous = this.#tail;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.#tail = promise;
+    this.#pending++;
+    let operationTimer: ReturnType<typeof setTimeout> | undefined;
     let producer: ModelRequestProducer | null = null;
     try {
+      await previous;
+      if (this.#disposed) throw new FastRoleError('FAST_ROLE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
+      const cancellation = new AbortController();
+      this.#requestAbort = cancellation;
+      if (kindId === 'guideline-clause-formatting') {
+        operationTimer = setTimeout(() => cancellation.abort(new DOMException('规范整理超过时限。', 'TimeoutError')), GUIDELINE_FORMAT_TIMEOUT_MS);
+      }
       if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
         key: `fast-role:${randomUUID()}`, kind: kindId === CONNECTION_TEST_KIND ? 'connection-test' : 'fast-role', lane: 'foreground',
       });
       const kind = FAST_ROLE_KINDS[kindId];
-      return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal, readMemory);
+      return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal,
+        { route, credentialReference, credentialGeneration }, readMemory);
     } finally {
       if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
+      clearTimeout(operationTimer);
       this.#requestAbort = null;
-      this.#inFlight = false;
       this.#active = null;
+      this.#pending--;
+      resolve();
     }
   }
 
-  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
+  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal,
+    { route, credentialReference, credentialGeneration }: { route: AdmittedFastRoleRoute | null; credentialReference: string; credentialGeneration: string | null | undefined },
+    readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
-    const route = live === null ? null : live.routes[kind.kindId] ?? null;
-    // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
-    const credentialReference = live === null ? '' : live.credentialReference;
-    const credentialGeneration = live?.credentialGeneration?.();
-    const memory = route?.providerProcessingVersion === 'v35' && kind.kindId !== CONNECTION_TEST_KIND ? readMemory?.() ?? null : null;
+    const recording = live !== null && !isOrdinaryProductionRuntime(live.runtime) && live.runtime.launch.recordingProvider !== undefined;
+    if (recording && (SYNTHETIC_FLASH_RECORDING_KINDS as readonly string[]).includes(kind.kindId) && !isSyntheticRecordingInput(kind.kindId, message)) {
+      throw new FastRoleError('RECORDING_SOURCE_NOT_ADMITTED', '录制任务只接受固定公开测试材料。');
+    }
+    const memory = supportsEditorialMemoryPolicy(route?.providerProcessingVersion) && kind.kindId !== CONNECTION_TEST_KIND ? readMemory?.() ?? null : null;
     const isCurrent = (): boolean => route === null || live === null ||
       ((live.current?.(credentialReference, route) ?? true) &&
        (memory === null || editorialMemoryDigest(kind.promptContractDigest, readMemory?.()) === editorialMemoryDigest(kind.promptContractDigest, memory)) &&
@@ -364,17 +403,14 @@ export class FastRoleExecutionOwner {
           : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       // The one message this request may send.
       admittedUserMessages: new Set([message]),
+      ...((route?.providerProcessingVersion === 'v36' || recording) && Object.hasOwn(FLASH_TASK_REGISTRY, kind.kindId)
+        ? { structuredTaskMessageDigest: sha256Hex(message) } : {}),
       ...(memory === null ? {} : { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt']) }),
-      // 生成来源译文's production category is not one the route reader carries (Issue #892); its route was admitted only because
-      // the rule names exactly that category, so it is the rule's own, carried for this kind alone.
-      ...(route === null ? {} : {
-        ruleOutboundCategories: kind.kindId === MATERIAL_TRANSLATION_KIND
-          ? new Set([...route.outboundDataCategories, categoryIn(kind, route.operationalScope)])
-          : route.outboundDataCategories,
-      }),
+      ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
     };
     // Ordinary production has no development validation, so no request ever reaches the developer cache or ledger (Issue #811).
     const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
+    let probeModel: ProbeModelEvidence | undefined;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null;
     const provenance = (failureCode: string | null): FastRoleProvenance | undefined => route === null ? undefined : ({
       role: 'Fast Interaction Role', route: executionRoute, model, credentialSlot: route.profile.credentialSlot, endpoint: route.profile.endpoint, credentialReference,
@@ -426,6 +462,11 @@ export class FastRoleExecutionOwner {
             requireRunning(init.signal);
             return nativeFetch(url, init);
           };
+          const bounded = route.providerProcessingVersion === 'v36' || recording ? kind.budget : undefined;
+          const limit = bounded ? Math.min(bounded.maxOutputTokens, route.profile.maxOutputTokens ?? Infinity) : undefined;
+          const profile = limit !== undefined ? { ...route.profile, maxOutputTokens: limit, taskOutputTokenLimit: limit }
+            : kind.kindId === CONNECTION_TEST_KIND ? { ...route.profile, maxOutputTokens: CONNECTION_TEST_POLICY.maxOutputTokens } : route.profile;
+          const deadlines = live.transportSettings;
           adapter = new DeepSeekOpenAiCompatibleAdapter({
             ...effortConfig,
             broker: live.broker,
@@ -434,12 +475,14 @@ export class FastRoleExecutionOwner {
             attribution: () => ({}),
             promptContractDigest,
             codes,
-            profile: kind.kindId === CONNECTION_TEST_KIND ? { ...route.profile, maxOutputTokens: CONNECTION_TEST_POLICY.maxOutputTokens } : route.profile,
+            profile,
             modelProfile: route.modelProfile,
+            ...(kind.kindId === CONNECTION_TEST_KIND ? { onProbeModel: (model, family) => { probeModel = model === undefined ? undefined : { model, family }; } } : {}),
             signal,
             beforeSend: () => requireRunning(signal),
             ...(kind.kindId === CONNECTION_TEST_KIND ? { transportSettings: connectionTestTransport(live.transportSettings) }
-              : live.transportSettings === undefined ? {} : { transportSettings: live.transportSettings }),
+              : deadlines === undefined ? {} : { transportSettings: bounded === undefined ? deadlines : { ...deadlines,
+                firstByteSeconds: Math.min(deadlines.firstByteSeconds, bounded.firstByteSeconds), idleSeconds: Math.min(deadlines.idleSeconds, bounded.idleSeconds) } }),
             sessionId: () => harness.currentSessionId(),
             transport: async (url, init) => {
               requireRunning(init.signal);
@@ -470,7 +513,7 @@ export class FastRoleExecutionOwner {
           // request is within its batch bound (20 paragraphs, 6,000 characters; a job at most 50 requests, each on the live-once
           // ledger), and ordinary production leaves the ceiling to the editor as for a Run without one.
           ...(route === null ? {} : {
-            ceilingState: () => kind.kindId === CONNECTION_TEST_KIND ? 'unset' as const : kind.kindId !== MATERIAL_TRANSLATION_KIND ? 'not-applicable' as const
+            ceilingState: () => !Object.hasOwn(FLASH_TASK_REGISTRY, kind.kindId) ? 'not-applicable' as const
               : route.operationalScope === 'developer-live' ? 'within' as const : 'unset' as const,
           }),
         }),
@@ -516,6 +559,7 @@ export class FastRoleExecutionOwner {
         return {
           kind: 'answered',
           text,
+          ...(probeModel === undefined ? {} : { probeModel }),
           binding: {
             kindId: kind.kindId,
             promptContractDigest,
@@ -553,6 +597,8 @@ export class FastRoleExecutionOwner {
   }
 }
 
+export { UnderlyingFlashService as FastRoleExecutionOwner };
+
 /** Explicit Settings action only. No caller-supplied words or Book material can enter this path. */
 export interface ModelConnectionTestExecution {
   readonly requestGovernor: ModelRequestGovernor;
@@ -560,6 +606,37 @@ export interface ModelConnectionTestExecution {
   readonly signal?: AbortSignal;
   /** The real service supplies its ordinary effect lane for the conditional final write. */
   readonly settle?: <Result>(operation: () => Result | Promise<Result>) => Promise<Result>;
+}
+
+/** One explicit synthetic probe on the recording launch's Underlying Flash binding. */
+export async function recordModelConnectionTest(
+  runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, input: FastModelSelectionInput,
+  secretResolver: SecretResolver, execution: ModelConnectionTestExecution,
+): Promise<ModelConnectionTestStatus> {
+  const selected = developerLiveBindingFor(runtime.launch, CONNECTION_TEST_KIND);
+  if (runtime.launch.recordingProvider === undefined || input.route !== selected.route || input.modelId !== selected.model ||
+      input.reasoningEffort != null && input.reasoningEffort !== selected.reasoningEffort) {
+    throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '连接测试需要本次录制指定的底层 Flash 模型。');
+  }
+  const owner = new UnderlyingFlashService({ requestGovernor: execution.requestGovernor,
+    ...(execution.producer === undefined ? {} : { producer: execution.producer }),
+    fixture: null, live: fastRoleLiveRoutes(runtime, policy, secretResolver) });
+  const stop = (): void => owner.dispose();
+  execution.signal?.addEventListener('abort', stop, { once: true });
+  const testedAt = new Date().toISOString();
+  try {
+    if (execution.signal?.aborted) stop();
+    const answer = await owner.ask(CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY.message, 'explicit-connection-test');
+    const passed = answer.kind === 'answered' && connectionProbe.validateAndTrace(answer.text, {
+      model: selected.model, reported: answer.probeModel,
+    }) !== null;
+    return { modelId: selected.model, credentialUpdatedAt: testedAt, testedAt, verified: 'buffered-text-only',
+      outcome: passed ? 'passed' : answer.kind === 'failed' && answer.outcomeUnknown ? 'outcome-unknown' : 'failed',
+      code: passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' };
+  } finally {
+    execution.signal?.removeEventListener('abort', stop);
+    stop();
+  }
 }
 
 export async function testModelServiceConnection(
@@ -576,12 +653,19 @@ export async function testModelServiceConnection(
   // The channel's model takes its reviewed runtime record — a Zen model its own Zen route (Issue #1225); any other declared model
   // is refused by its named disposition (family not admitted, text untested or unsupported, no runtime record) before any ticket.
   const allowed = modelServiceRuntimeBinding(input.route, input.modelId, 'fast');
+  const unserved = modelServiceRouteRefusal(input.route, input.modelId, 'fast');
+  if (unserved !== null) throw new FastRoleError('MODEL_ROUTE_NOT_SERVED', unserved);
   if (allowed === undefined) {
     const declared = modelServiceChannels().find((channel) => channel.route === input.route)?.models.find((model) => model.modelId === input.modelId);
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', `所选模型不能测试文本连接（${declared?.fast ?? 'not-declared'}）；没有发送任何内容。`);
   }
   if (connection === null || connection.credentialOperationState !== 'ready') {
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '请先保护凭据并选择已准入的文本模型；没有发送任何内容。');
+  }
+  if (sentReasoningEffort(input.reasoningEffort) !== null) {
+    const evidence = store.getModelServiceModels(input.route).find(model => model.modelId === input.modelId);
+    const refusal = modelEffortRefusal(evidence, modelProfileFor(allowed.route, allowed.model), input.reasoningEffort);
+    if (refusal !== null) throw new FastRoleError('MODEL_EFFORT_INVALID', refusal);
   }
   if (cancelled()) {
     const cancelledStatus: ModelConnectionTestStatus = { modelId: input.modelId, credentialUpdatedAt: connection.credentialUpdatedAt,
@@ -595,7 +679,7 @@ export async function testModelServiceConnection(
     const now = store.getModelServiceRouteConnection(input.route);
     return now?.credentialOperationState === 'ready' && now.credentialReference === connection.credentialReference && now.credentialUpdatedAt === connection.credentialUpdatedAt;
   };
-  const owner = new FastRoleExecutionOwner({ requestGovernor: execution.requestGovernor, producer, fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
+  const owner = new UnderlyingFlashService({ requestGovernor: execution.requestGovernor, producer, fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
     () => unchanged() ? connection.credentialReference : null, secretResolver, () => unchanged(),
     () => store.getModelServiceRouteConnection(input.route)?.credentialUpdatedAt ?? null, () => input.reasoningEffort) });
   const stop = (): void => owner.dispose();
@@ -605,16 +689,19 @@ export async function testModelServiceConnection(
   try { answer = await owner.ask(CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY.message, 'explicit-connection-test'); }
   catch { answer = { kind: 'failed', code: cancelled() ? AI7_FAILURE_CODES.INTERRUPTED : 'MODEL_CONNECTION_TEST_UNAVAILABLE', message: '文本连接测试没有发送。', outcomeUnknown: false }; }
   finally { signal?.removeEventListener('abort', stop); owner.dispose(); }
-  const passed = answer.kind === 'answered' && answer.text.trim().length > 0;
-  const code = passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID';
   const facts = answer.kind === 'answered' ? answer.binding.provenance : answer.provenance;
+  const passed = answer.kind === 'answered' && facts?.role === 'Fast Interaction Role' && facts.failureCode === null &&
+    facts.route === allowed.route && facts.credentialReference === connection.credentialReference &&
+    answer.binding.model === input.modelId &&
+    connectionProbe.validateAndTrace(answer.text, { model: input.modelId, reported: answer.probeModel }) !== null;
+  const code = passed ? null : answer.kind === 'failed' ? answer.code : facts?.failureCode ?? 'MODEL_CONNECTION_TEST_RESPONSE_INVALID';
+  const uncertain = answer.kind === 'failed' ? answer.outcomeUnknown : code !== null && OUTCOME_UNKNOWN_CODES.has(code);
   const status: ModelConnectionTestStatus = {
     modelId: input.modelId, credentialUpdatedAt: connection.credentialUpdatedAt, testedAt: new Date().toISOString(),
-    outcome: passed ? 'passed' : answer.kind === 'failed' && answer.outcomeUnknown ? 'outcome-unknown'
-      : cancelled() ? 'cancelled' : 'failed',
+    outcome: passed ? 'passed' : uncertain ? 'outcome-unknown' : cancelled() ? 'cancelled' : 'failed',
     code,
     verified: 'buffered-text-only',
-    ...(answer.kind === 'answered' ? { responseText: answer.text } : {}),
+    ...(answer.kind === 'answered' && code !== 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' ? { responseText: answer.text } : {}),
     ...(facts === undefined ? {} : { provenance: { ...facts, failureCode: code } }),
   };
   await settle(() => store.recordModelConnectionTest(connection, status));

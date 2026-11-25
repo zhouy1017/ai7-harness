@@ -17,6 +17,8 @@ export interface GlobalMemoryItem extends GlobalMemoryPin {
   readonly bookId: string | null;
   readonly state: 'proposed' | 'active' | 'inactive' | 'frozen';
   readonly lineage: ReadonlyArray<GlobalMemoryPin>;
+  /** 审阅偏好's row facts (Issue #1655), on `preference` items of `inspectGlobalAgent` only; never sent with a question. */
+  readonly row?: import('./learning.js').ReviewPreferenceRow;
 }
 export interface RecordLearningSupervisionInput {
   /** Required for memory /2 targets; legacy preference actions keep their historical contract. */
@@ -28,7 +30,11 @@ export interface RecordLearningSupervisionInput {
   readonly categoryId: string;
   readonly effect: 'guide' | 'freeze' | 'correct';
 }
-export interface LearningSupervisionDirective extends RecordLearningSupervisionInput {
+/** A stored directive may also hold 重新启用 / 删除 of one preference line, written only by those requests (Issue #1655). */
+export interface StoredLearningSupervisionInput extends Omit<RecordLearningSupervisionInput, 'operation'> {
+  readonly operation: RecordLearningSupervisionInput['operation'] | 'reactivate' | 'retire';
+}
+export interface LearningSupervisionDirective extends StoredLearningSupervisionInput {
   readonly schema: 'ai7.learning-supervision-directive/1';
   readonly actor: 'editor';
   readonly directiveId: string;

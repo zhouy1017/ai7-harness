@@ -1,13 +1,10 @@
-import { MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_ROW_COLUMNS } from '../../src/service/model-service-connections.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
-import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
 import { MODEL_SERVICE_CHANNELS, modelServiceChannelOf, type ModelServiceConnectionProjection } from '../../src/shared/protocol.js';
-import { asRevision102 } from '../support/structural-revisions.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 
 // Issue #1215: the one Settings flow reads its channels from the generated declarations and the runtime model table, and the
 // choice it makes persists through the existing route and Fast selections. Synthetic connection names; no credential value.
@@ -15,30 +12,53 @@ let store: EditorialStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
 describe('the model-service channel catalogue', () => {
-  it('persists independent models on one channel and across channels, and can set both atomically', async () => {
+  it('persists independent foreground models on one channel and across channels, and can set both atomically', async () => {
     const roots = await createServiceTestRoots('ai7-role-models-');
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
     store.saveModelServiceConnection('Synthetic Gemini', null, 'ready', 'google-gemini');
+    seedModelEfforts(store, 'anthropic-claude', { 'account-opus': ['high'], 'account-haiku': ['low'], 'claude-custom': ['low', 'high'] });
     store.selectMainRoleModel('anthropic-claude', 'account-opus', 'high');
     store.selectFastRoleModel('anthropic-claude', 'account-haiku', 'low');
-    const bindings = () => ['main-editorial', 'fast-interaction'].map((role) => store!.getConfiguredModelRoleBinding(role as 'main-editorial' | 'fast-interaction'));
+    const bindings = () => (['foreground-pro', 'foreground-flash'] as const).map(role => store!.getConfiguredModelRoleBinding(role));
     expect(bindings()).toMatchObject([{ model: 'account-opus', credentialReference: claude.credentialReference }, { model: 'account-haiku', credentialReference: claude.credentialReference }]);
     store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
     expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
     expect(store.getConfiguredModelRoleBinding('main-editorial', { modelConnectionId: claude.connectionId,
-      modelId: 'account-future-model', reasoningEffort: 'vendor-future-level' })).toMatchObject({ model: 'account-future-model', reasoningEffort: 'vendor-future-level' });
+      modelId: 'account-future-model', reasoningEffort: 'vendor-future-level' })).toBeNull();
     expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
     store.selectMainRoleModel('google-gemini', 'gemini-custom');
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['google-gemini', 'gemini-custom'], ['anthropic-claude', 'account-haiku']]);
     store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'high', 'low');
     expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
-    store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'vendor-future-level');
+    expect(() => store!.selectBothRoleModels('anthropic-claude', 'claude-custom', 'low', 'vendor-future-level')).toThrowError(expect.objectContaining({ code: 'MODEL_EFFORT_INVALID' }));
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['anthropic-claude', 'claude-custom'], ['anthropic-claude', 'claude-custom']]);
-    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['vendor-future-level', 'vendor-future-level']);
+    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
     expect(() => store!.selectBothRoleModels('google-gemini', 'invalid model')).toThrow();
     expect(bindings().map((binding) => binding?.model)).toEqual(['claude-custom', 'claude-custom']);
+    const underlying = store.getConfiguredModelRoleBinding('underlying-flash');
+    expect(underlying).toMatchObject({ route: 'anthropic-claude', model: 'claude-haiku-4-5', credentialReference: claude.credentialReference });
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(underlying);
+  });
+
+  it('retains a stale saved effort for display, blocks new roles, and allows an explicit reset', async () => {
+    const roots = await createServiceTestRoots('ai7-stale-effort-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+      const choice = { roleId: 'underlying-pro', route: 'anthropic-claude', modelId: 'claude-opus-5-5' } as const;
+      store.selectUnderlyingModel({ ...choice, reasoningEffort: 'high' });
+      seedModelEfforts(store, 'anthropic-claude', { 'claude-opus-5-5': ['low'] });
+      const reason = '之前选的强度现在不可用，请重新选择。';
+      expect(store.getModelRoles().find(role => role.roleId === choice.roleId)).toMatchObject({
+        status: 'needs-attention', statusDetail: reason, binding: { modelId: choice.modelId, reasoningEffort: 'high' },
+      });
+      expect(() => store!.requireCurrentModelRoleEffort(choice.roleId)).toThrowError(expect.objectContaining({ code: 'MODEL_EFFORT_INVALID', message: reason }));
+      expect(store.getConfiguredModelRoleBinding(choice.roleId)).toBeNull();
+      store.selectUnderlyingModel({ ...choice, reasoningEffort: 'off' });
+      expect(store.getConfiguredModelRoleBinding(choice.roleId)).toMatchObject({ model: choice.modelId, reasoningEffort: 'off' });
+    } finally { store.close(); store = undefined; await roots.dispose(); }
   });
 
   it('offers all catalogue models on admitted channels with protocol capabilities', () => {
@@ -58,7 +78,7 @@ describe('the model-service channel catalogue', () => {
       return store!.saveModelServiceConnection(first.connectionName, first.credentialReference, 'ready', route);
     });
     expect(saved.map((connection) => [connection.connectionId, connection.binding.credentialSlot, connection.selected, connection.fastSelected ?? null]))
-      .toEqual([['opencode-zen', 'opencode-zen', true, true], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
+      .toEqual([['opencode-zen', 'opencode-zen', true, false], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
     expect(saved.every((connection) => /^[0-9a-f-]{36}$/u.test(connection.credentialReference))).toBe(true);
     store.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -81,44 +101,6 @@ describe('the model-service channel catalogue', () => {
     // Credential rotation clears diagnostic status and preserves the channel choice.
     connection = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'openai-platform');
     expect([connection.selected, store.getConfiguredModelRoleBinding('main-editorial')?.route]).toEqual([true, 'openai-platform']);
-  });
-
-  it('opens a genuine revision-102 store at 103 with every connection row copied (#1225)', async () => {
-    const roots = await createServiceTestRoots('ai7-model-channels-');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    for (const route of ['opencode-go', 'openai-platform'] as const) store.saveModelServiceConnection(`Synthetic ${route}`, null, 'ready', route);
-    const before = store.getModelServiceConnections();
-    store.markCleanShutdown(); store.close(); store = undefined;
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try { asRevision102(db); } finally { db.close(); }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getModelServiceConnections()).toEqual(before);
-    const anthropic = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
-    expect(anthropic.binding).toMatchObject({ providerId: 'anthropic-claude', modelId: 'claude-opus-5', credentialSlot: 'anthropic-claude' });
-  });
-  it('migrates the model-restricted schema, preserving references and selections, and keeps a dynamic ID through restart', async () => {
-    const roots = await createServiceTestRoots('ai7-channel-migration-');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const connection = store.saveModelServiceConnection('Synthetic OpenAI', null, 'ready', 'openai-platform');
-    store.selectModelServiceRoute('openai-platform');
-    const before = store.getModelServiceConnections();
-    store.markCleanShutdown(); store.close(); store = undefined;
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      db.exec('BEGIN IMMEDIATE');
-      db.exec('CREATE TEMP TABLE old_channel_rows AS SELECT rowid AS original_rowid, * FROM model_service_connections');
-      db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_103_SQL);
-      db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
-        SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM old_channel_rows`);
-      db.exec('DROP TABLE old_channel_rows; PRAGMA user_version = 104'); db.exec('COMMIT');
-    } finally { db.close(); }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getModelServiceConnections()).toEqual(before);
-    store.selectFastRoleModel('openai-platform', 'account/new-model');
-    store.markCleanShutdown(); store.close(); store = undefined;
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account/new-model', route: 'openai-platform', credentialReference: connection.credentialReference });
-    expect(store.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gpt-5.6-luna');
   });
 
 });

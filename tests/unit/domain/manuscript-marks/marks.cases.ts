@@ -118,11 +118,11 @@ describe('Editorial Marks on a manuscript', () => {
     expect(refusal(() => marks.updateEditorialMark(h, change(at, window, markId, 'convert', { targetKind: 'editor-note', body: '转成备注' })))).toBe('MARK_ANCHOR_CHANGED');
 
     // Undoing that change puts the pinned text back, and the mark is exact again on it.
-    manuscript.undoManuscript(book.manuscriptHost, at.manuscriptId, at.branchId, window.workingDigest);
+    manuscript.undoManuscript(book.manuscriptHost, { manuscriptId: at.manuscriptId, branchId: at.branchId, expectedWorkingDigest: window.workingDigest });
     expect(range()).toEqual([16, 21, 'exact']);
     expect(standsAtRange()).toBe(true);
     const undone = windowOf(book);
-    manuscript.redoManuscript(book.manuscriptHost, at.manuscriptId, at.branchId, undone.workingDigest);
+    manuscript.redoManuscript(book.manuscriptHost, { manuscriptId: at.manuscriptId, branchId: at.branchId, expectedWorkingDigest: undone.workingDigest });
     expect(range()).toEqual([16, 22, 'drifted']);
   });
 
@@ -286,6 +286,6 @@ it('keeps disjoint inline spans separate and removes every card when text return
   const restored = write(changed, 4, 10, parts.slice(4, 12).join(''));
   expect(restored.marks.filter((mark) => mark.inlineRevision)).toHaveLength(0);
   expect(restored.blocks.find((b) => b.blockId === block.blockId)?.text === block.text).toBe(true);
-  manuscript.undoManuscript(m, at.manuscriptId, at.branchId, restored.workingDigest);
+  manuscript.undoManuscript(m, { manuscriptId: at.manuscriptId, branchId: at.branchId, expectedWorkingDigest: restored.workingDigest });
   expect(windowOf(book).marks.filter((mark) => mark.inlineRevision)).toHaveLength(2);
 });

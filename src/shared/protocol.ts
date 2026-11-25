@@ -1,13 +1,16 @@
+import { STANDARD_TABLE_CHANNELS, type StandardTableOperations, type StandardTableRendererApi } from './protocol/standard-tables.js';
+export * from './protocol/standard-tables.js';
+import type { ImportReviewServiceOperations, ReturnImportToEditingProjection } from './protocol/import-intake.js';
+export type { ReturnImportToEditingProjection, ImportEditingChoices } from './protocol/import-intake.js';
 import { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
 export { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
-import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
-export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
-import type { BookFindingsProjection } from './protocol/review.js';
-import type { TransportSettings } from './protocol/transport-settings.js';
-export type { TransportSettings } from './protocol/transport-settings.js';
-import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
+import type { BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput } from './protocol/review.js';
+import type { TransportSettings } from './protocol/transport-settings.js'; export type { TransportSettings } from './protocol/transport-settings.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, TaskLaunchPreviewInput, ReviewExecutionLaunchInput } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
@@ -16,6 +19,8 @@ import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
+import type { BookTasksProjection, TaskOverviewProjection, TaskOverviewCall, TaskOverviewCallResult } from './protocol/task-overview.js';
+import type { BothRoleModelSelectionInput, FastModelSelectionInput, ModelConnectionTestStatus, ModelCredentialOperationState, ModelRoleCardProjection, ModelRoleResolutionProjection, ModelRoleStatus, ModelRoleStatusLabel, ModelServiceConnectionProjection, ModelTierSelectionInput } from './protocol/model-roles.js';
 import type {
   ModelServiceBindingProjection,
   ModelServiceChannelProjection,
@@ -92,7 +97,6 @@ import type {
   RecordSeriesExclusionInput,
   SeriesExclusionResultProjection,
   PriorWorkItemProjection,
-  ManuscriptWindowTarget,
   OutlineProjection,
   SearchResultsProjection,
   ReplacementDismissalProjection,
@@ -161,7 +165,8 @@ import type {
 import type {
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
-  DeactivateEditorialMemoryInput,
+  ReviewPreferenceLifecycleOperations,
+  ReviewPreferenceLifecycleRendererApi,
   EditorialLearningProjection,
   InspectEditorialLearningInput,
   LearningReasonAskInput,
@@ -183,6 +188,11 @@ import type {
   ServiceWireOutput,
 } from './protocol/analysis.js';
 import type {
+  AdmittedFactualClaimStages,
+  AdmittedFactualRecheck,
+  InspectSourceAddressOperation,
+  SourceIdentityInput,
+  SourceOpenedProjection,
   CorrectionProposalDraftProjection,
   CorrectionProposalSavedProjection,
   EvidenceAssuranceLevel,
@@ -223,7 +233,7 @@ import type {
   LibraryMaterialProjection,
   LibraryMaterialsProjection,
   MaterialSegmentsPageProjection,
-  MaterialVectorSearchProjection,
+  MaterialVectorSearchProjection, RetrievalAssistMode,
 } from './protocol/library-materials.js';
 import type {
   BackgroundAnalysisEnrollmentProjection,
@@ -291,9 +301,7 @@ import type {
   KnowledgeProceduresProjection,
   ProcedureRecommendationInput,
   ProcedureRecommendationProjection,
-  ReviewGuidelinePreviewProjection,
-  ReviewGuidelinesPage,
-  ReviewGuidelinesProjection,
+  ReviewGuidelinePreviewProjection, ReviewGuidelinesPage, ReviewGuidelinesProjection,
 } from './protocol/knowledge-base.js';
 import type {
   CapturedProcedureApplicabilityProjection,
@@ -311,13 +319,13 @@ import type {
   SaveDeveloperProposalInput,
 } from './protocol/captured-procedures.js';
 
-import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
+import type { DurableHistoryProjection, EditorHistoryProjection, JournalAcknowledgement, ManuscriptHistoryInput, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
 import type {
   ApplyChangeSuggestionBatchInput, ApplyChangeSuggestionInput, ApplyReceiptProjection, BatchProposalDecisionDraftInput, CreateEditorialMarkInput,
-  EditorialMarkCardProjection, EditorialMarkCommandProjection, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
+  EditorialMarkCardProjection, EditorialMarkCommandProjection, FindPendingMarkInput, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
   PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput, RecordProposalDecisionInput, RecordProposalDecisionReasonInput, ReverseAppliedChangeSuggestionInput,
-  ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput, UpdateEditorialMarkInput,
+  PendingMarkPlace, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput, UpdateEditorialMarkInput,
 } from './protocol/editorial-marks.js';
 import type {
   ProposalConflictBindingInput, ProposalConflictDraftSaveProjection, ProposalConflictKind, ProposalConflictProjection, ProposalConflictRegenerationProjection,
@@ -335,6 +343,7 @@ export * from './protocol/custom-analysis-redo.js';
 export type * from './protocol/selection-span.js';
 export type * from './protocol/global-attention.js';
 export * from './protocol/model-service.js';
+export * from './protocol/model-roles.js';
 export * from './protocol/search-backends.js';
 export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
@@ -357,6 +366,7 @@ export * from './protocol/review-synthesis.js';
 export * from './protocol/evaluation.js';
 export * from './protocol/writing.js';
 export * from './protocol/task-plan.js';
+export * from './protocol/task-overview.js';
 export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
@@ -382,7 +392,7 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
- * Protocol 205 (#1517 R4 closure, 0.7.3): PR #1595 (#1506) adds generateReviewSynthesis (生成统合总结 for a settled
+ * Protocol 206 (#1539/#1540 0.7.9 Alpha closure): standard-tables library IPC, 4-role model matrix, version history & upgrade;
  * Review Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection. It is the round's one
  * protocol change. Schema 116 and Data Version 1 are unchanged; closure adds no migration.
  *
@@ -396,10 +406,10 @@ export * from './protocol/scoped-edit.js';
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 205 as const;
+export const SERVICE_PROTOCOL_VERSION = 206 as const;
 
 export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
-export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
+export type { BookFindingProjection, BookFindingsProjection, BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput, BookFindingsFilters, BookFindingPlace, BookFindingDecision } from './protocol/review.js';
 
 export interface ParagraphAnalysisProjection {
   bookId: string;
@@ -512,6 +522,7 @@ export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const IPC_CHANNELS = {
+  ...STANDARD_TABLE_CHANNELS,
   previewTaskLaunch: 'ai7:j04:preview-task-launch',
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
@@ -521,6 +532,7 @@ export const IPC_CHANNELS = {
   getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageManuscript: 'ai7:j01:select-and-stage-manuscript',
   importBundledSampleBook: 'ai7:onboarding:import-bundled-sample-book',
+  returnImportToEditing: 'ai7:j01:return-import-to-editing',
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
@@ -626,6 +638,7 @@ export const IPC_CHANNELS = {
   saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
   inspectFactualVerification: 'ai7:j04:inspect-factual-verification',
   inspectEvidenceWorkspace: 'ai7:j04:inspect-evidence-workspace',
+  openSourceInBrowser: 'ai7:j04:open-source-in-browser',
   recordVerificationReviewDecision: 'ai7:j04:record-verification-review-decision',
   prepareCorrectionProposal: 'ai7:j04:prepare-correction-proposal',
   saveCorrectionProposal: 'ai7:j04:save-correction-proposal',
@@ -655,7 +668,6 @@ export const IPC_CHANNELS = {
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
-  buildMaterialVectors: 'ai7:j15:build-material-vectors',
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
   searchReferableMaterials: 'ai7:search-referable-materials',
@@ -702,6 +714,8 @@ export const IPC_CHANNELS = {
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
   acceptEditorialMemory: 'ai7:learning:accept-editorial-memory',
   deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
+  reenableReviewPreference: 'ai7:learning:reenable-review-preference',
+  deleteReviewPreference: 'ai7:learning:delete-review-preference',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
   inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
@@ -769,6 +783,7 @@ export const IPC_CHANNELS = {
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
   regenerateProposalConflictUnit: 'ai7:j06:regenerate-proposal-conflict-unit',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
+  findPendingMark: 'ai7:j05:find-pending-mark',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
@@ -783,6 +798,9 @@ export const IPC_CHANNELS = {
   startReplacementCommit: 'ai7:j02:start-replacement-commit',
   commitReplacement: 'ai7:j02:commit-replacement',
   saveMilestone: 'ai7:j02:save-milestone',
+  listBookVersions: 'ai7:j02:list-book-versions',
+  viewBookVersion: 'ai7:j02:view-book-version',
+  restoreBookVersion: 'ai7:j02:restore-book-version',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
@@ -855,6 +873,7 @@ export const IPC_CHANNELS = {
   revealManuscriptExport: 'ai7:j07:reveal-manuscript-export',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
+  inspectEditorHistory: 'ai7:j02:inspect-editor-history',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
   getBookWorkbenchRoute: 'ai7:j12:get-book-workbench-route',
   leaveBookWorkbench: 'ai7:j12:leave-book-workbench',
@@ -865,6 +884,8 @@ export const IPC_CHANNELS = {
   selectFastRoleModel: 'ai7:model-service:select-fast-model',
   selectMainRoleModel: 'ai7:model-service:select-main-model',
   selectBothRoleModels: 'ai7:model-service:select-both-models',
+  selectUnderlyingModel: 'ai7:model-service:select-underlying-model',
+  selectProModel: 'ai7:model-service:select-pro-model', selectFlashModel: 'ai7:model-service:select-flash-model', clearFlashModel: 'ai7:model-service:clear-flash-model',
   refreshModelServiceModels: 'ai7:model-service:refresh-models',
   testModelServiceConnection: 'ai7:model-service:test-connection',
   selectSearchBackend: 'ai7:j12:select-search-backend',
@@ -1108,6 +1129,9 @@ export interface BookManuscriptAnchorProjection {
   };
 }
 
+export interface BookVersionScope { bookId: string; manuscriptId: string; branchId: string }
+export interface BookVersionRow { kind: 'revision' | 'milestone' | 'publication'; label: string; revisionId: string; createdAt: string }
+
 export interface BookWorkOverviewProjection {
   book: {
     bookId: string;
@@ -1225,12 +1249,12 @@ export interface BookSummaryProjection {
   internalNumber: string | null;
   /** 作者, 责编 and 相关人 for the card (Issue #431, S83). */
   people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
+  lastWorkedAt?: string; seriesNames?: ReadonlyArray<string>;
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
-  reimportLineageSourceVersionIds: ReadonlyArray<string>;
+  reimportLineageSourceVersionIds: ReimportLineageSourceVersionPageProjection['items'];
   reimportLineageNextCursor: string | null;
 }
-
 export interface BookSummaryCursor {
   title: string;
   bookId: string;
@@ -1486,72 +1510,6 @@ export interface ProductDataLocationRevealProjection {
   nativeRevealSuppressedForE2e: boolean;
 }
 
-export type ModelRoleId =
-  | 'fast-interaction'
-  | 'main-editorial'
-  | 'difficult-escalation'
-  | 'frontier';
-
-export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention' | 'unavailable';
-
-export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不可用';
-
-export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
-
-export interface ModelServiceConnectionProjection {
-  connectionId: ModelServiceConnectionId;
-  roleId: 'main-editorial';
-  connectionName: string;
-  binding: ModelServiceBindingProjection;
-  fastBinding?: ModelServiceBindingProjection;
-  credentialReference: string;
-  credentialOperationState: ModelCredentialOperationState;
-  createdAt: string;
-  updatedAt: string;
-  credentialUpdatedAt: string;
-  /** Whether the editor chose this route for the Tasks they start from now on (Issue #811). */
-  selected: boolean;
-  /** Independent Fast choice; Main's legacy selected column keeps its meaning. */
-  fastSelected?: boolean;
-  connectionTest?: ModelConnectionTestStatus | null;
-}
-
-/** Exact-binding public text-probe result; only its bounded reply and provenance are retained. */
-export interface ModelConnectionTestStatus {
-  responseText?: string;
-  modelId: string;
-  credentialUpdatedAt: string;
-  testedAt: string;
-  outcome: 'passed' | 'failed' | 'outcome-unknown' | 'cancelled';
-  code: string | null;
-  verified: 'buffered-text-only';
-  provenance?: ModelTextAttemptProvenance;
-}
-
-export interface ModelTextAttemptProvenance {
-  readonly role: 'Fast Interaction Role';
-  readonly route: string;
-  readonly model: string;
-  readonly endpoint: string;
-  readonly credentialSlot: string;
-  readonly credentialReference: string;
-  readonly policyVersion: string;
-  readonly bindingDigest: string;
-  readonly credentialUpdatedAt?: string;
-  readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens?: number; readonly reasoningTokens?: number } | null;
-  readonly failureCode: string | null;
-}
-
-export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'reasoningEffort'> {
-  route: ModelServiceRouteId;
-  modelId: string;
-}
-
-/** Atomic two-role selection carries independent defaults. */
-export interface BothRoleModelSelectionInput extends FastModelSelectionInput {
-  fastReasoningEffort?: RuntimeExecutionConfig['reasoningEffort'];
-}
-
 /**
  * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065, ADR 0046):
  * `development-ci` by default; `developer-live` and `ordinary-production` only through
@@ -1572,10 +1530,14 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
 export type ActivePolicySetVersion = 'no-policy-lock' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+
+export function supportsEditorialMemoryPolicy(version: unknown): version is 'v35' | 'v36' {
+  return version === 'v35' || version === 'v36';
+}
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
@@ -1598,13 +1560,13 @@ export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cef
 export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
   if (scope === 'development-ci') return version === 'v1' || version === 'v29';
   if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
-  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35', 'v36'].some((entry) => entry === version);
   return false;
 }
 
 /** Identity of the actual verified selected documents; this metadata grants no execution authority. */
 export interface SelectedPolicyIdentity {
-  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
   readonly providerProcessingSha256: string;
   readonly activePolicySetVersion: 'no-policy-lock' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
@@ -1659,7 +1621,7 @@ export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
 /** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
 export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
-  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35'].includes(String(value['providerProcessingVersion'])) &&
+  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35', 'v36'].includes(String(value['providerProcessingVersion'])) &&
       value['providerProcessingSha256'] === '0'.repeat(64) && value['activePolicySetSha256'] === '0'.repeat(64))
     return value as unknown as SelectedPolicyIdentity;
   const version = value['providerProcessingVersion'];
@@ -1755,7 +1717,7 @@ const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArr
   'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
     ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26'].map((set) => ['v24', set] as const)],
   'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
-    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26']],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26'], ['v36', 'no-policy-lock']],
 };
 
 /** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
@@ -1960,6 +1922,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * research.
  */
 export type OutboundDataCategoryId =
+  | 'qualified-learning-example-bundle'
   | 'editorial-learning-example'
   | 'editor-task-instruction'
   | 'house-review-guideline-clause'
@@ -1985,52 +1948,6 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
-export interface AdmittedFactualVerificationStage {
-  readonly contractId: 'ai7.factual-claim-verification/1';
-  readonly stageId: 'web-verification';
-  readonly maximumInitialSessionsPerEligibleClaim: number;
-  readonly maximumModelRequestsPerSession: number;
-  readonly maximumPlatformToolRoundsPerSession: number;
-  readonly maximumSearchSubmissionsPerClaim: number;
-  readonly maximumMetadataUtf8Bytes: number;
-  readonly tools: readonly string[];
-  readonly automaticTransportRetryAllowed: false;
-  readonly contractRetryAllowed: false;
-  readonly counterResetOnResumeAllowed: false;
-}
-
-export interface AdmittedFactualClaimStages {
-  readonly taskKind: 'factual-review';
-  readonly taskMode: 'whole-manuscript';
-  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
-  readonly procedureId: string;
-  readonly procedureVersion: number;
-  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
-  readonly claimExtraction: {
-    readonly contractId: 'ai7.factual-claim-extraction/1';
-    readonly stageId: 'claim-extraction';
-    readonly maximumInitialSessionsPerCoverageUnit: number;
-    readonly maximumModelRequestsPerSession: number;
-    readonly maximumAssertionsPerCoverageUnit: number;
-    readonly tools: readonly string[];
-    readonly automaticTransportRetryAllowed: false;
-    readonly contractRetryAllowed: false;
-  };
-  readonly claimVerification: AdmittedFactualVerificationStage;
-}
-
-export interface AdmittedFactualRecheck {
-  readonly maximumClaims: number;
-  readonly maximumAutomaticRunsPerOnceKey: number;
-  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
-  readonly onlyContractId: 'ai7.factual-claim-verification/1';
-  readonly onlyStageId: 'web-verification';
-  readonly verificationContract: AdmittedFactualVerificationStage;
-  readonly onceKeyPersistedBeforeDispatch: true;
-  readonly latestStillCurrentEditorDecisionRequired: true;
-  readonly sameBookActiveMatchingEnrollmentRequired: true;
-}
-
 export interface AdmittedProviderRule {
   readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
   readonly factualRecheck?: AdmittedFactualRecheck;
@@ -2326,6 +2243,8 @@ export interface ModelServiceStoredStateProjection {
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
   connections: readonly ModelServiceConnectionProjection[];
   launchPolicy: LaunchPolicyProjection; channels: readonly ModelServiceChannelProjection[];
+  /** The four roles of ADR 0107 §1 with their effective model and its source (Issue #1620). */
+  modelRoles: readonly ModelRoleResolutionProjection[];
 }
 
 /** One route the Main Editorial Role may be configured to, as 设置 › 模型服务 offers it (Issue #811). */
@@ -2359,17 +2278,6 @@ export const MODEL_SERVICE_SETUP_REQUIRED_REASON =
 /** What 设置 › 模型服务 says about choosing the route (Issue #811). */
 export const MODEL_SERVICE_ROUTE_EFFECT_LABEL = '切换路线只影响之后开始的任务；已在进行的任务保持原有绑定。没有自动备用路线。' as const;
 
-export interface ModelRoleCardProjection {
-  roleId: ModelRoleId;
-  roleLabel: '快速交互角色' | '主编辑角色' | '疑难升级角色' | '前沿模型角色';
-  purposeLabel: string;
-  status: ModelRoleStatus;
-  statusLabel: ModelRoleStatusLabel;
-  statusDetail: string;
-  binding: ModelServiceBindingProjection | null;
-  connection: ModelServiceConnectionProjection | null;
-}
-
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
 export interface ProxyProbeResult {
   status: 'available' | 'https-rejected' | 'connection-refused' | 'authentication-required' | 'unreachable';
@@ -2384,6 +2292,8 @@ export interface ModelServiceSettingsProjection {
   proxy: ModelServiceProxySetting;
   lastProxyProbe?: ProxyProbeResult | null;
   roles: readonly ModelRoleCardProjection[];
+  /** The four roles of ADR 0107 §1 in its order, with their effective model, 思考强度 and source (Issue #1620). */
+  modelRoles: readonly ModelRoleResolutionProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
   routeChoice: {
     routes: readonly ModelServiceRouteOptionProjection[];
@@ -3351,132 +3261,7 @@ export interface GlobalAttentionGroupProjection {
   total: number;
 }
 
-// ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
-
-/**
- * The three groups of a Book's 任务 panel, in their one fixed order (V2-UX-TASK-044): 等你处理 · 进行中 · 最近完成. They are
- * 待我处理's groups for this Book's Tasks: 等你处理 holds its 异常与结果待确认 and 等待你的决定, 进行中 its 运行中与已暂停.
- */
-export type BookTaskGroupKey = 'waiting' | 'running' | 'recent';
-
-export const BOOK_TASK_GROUP_KEYS: readonly BookTaskGroupKey[] = ['waiting', 'running', 'recent'];
-
-/** How many finished Tasks 最近完成 lists, newest first; the panel has no age limit. */
-export const BOOK_TASK_RECENT_LIMIT = 10;
-
-/** What a finished Task's `查看结果` opens (V2-UX-TASK-045): the result it formed, read as its own screen reads it. */
-export type BookTaskResultRef =
-  | { kind: 'analysis-revision'; revisionId: string }
-  | { kind: 'review-run'; reviewRunId: string }
-  // A dialogue Task's `回答` (Issue #52, S17a; TASK-044): its latest answer, read from the Harness Session Ledger.
-  | { kind: 'dialogue'; dialogueId: string };
-
-/** One Task of the Book as the panel shows it: 待我处理's item for it, and the result `查看结果` opens. */
-export interface BookTaskItemProjection {
-  item: GlobalAttentionItemProjection;
-  /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
-  result: BookTaskResultRef | null;
-  /**
-   * The paragraphs a selection Task was started on, by block identity — the first and the last — in the manuscript named
-   * (Issue #423, S77 deferred item d): the card's `跳到所选文字` moves the caret there, or says the paragraph is gone. Absent for
-   * every other Task.
-   */
-  selection?: { manuscriptId: string; fromBlockId: string; toBlockId: string };
-}
-
-export interface BookTaskGroupProjection {
-  key: BookTaskGroupKey;
-  items: ReadonlyArray<BookTaskItemProjection>;
-  /** How many Tasks the group holds; more than `items` when the group is longer than one answer lists. */
-  total: number;
-}
-
-/**
- * The Book's 任务 panel (editor-surfaces §1 任务面; V2-UX-TASK-044): its Tasks — baseline analysis and 审阅 — in the three
- * groups. A read: it records, claims and terminalizes nothing, as 待我处理 does not. The panel lists only this Book's Tasks;
- * work across Books stays in 待我处理.
- */
-export interface BookTasksProjection {
-  bookId: string;
-  /** Always the three groups, in the fixed order. */
-  groups: ReadonlyArray<BookTaskGroupProjection>;
-  /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
-  running: boolean;
-  /** Snapshot-pinned pages retain every card field when a group exceeds the reply budget. */
-  readonly listPages?: TaskPlanProjection['listPages'];
-}
-
-// ---- 任务总览 (Issue #1328, T1 rev 2) ---------------------------------------------------------------
-
-export type TaskOverviewGroupKey = 'running' | 'queued' | 'waiting' | 'paused' | 'recent';
-
-export interface TaskOverviewProgressProjection {
-  readonly done: number;
-  readonly total: number;
-  readonly currentUnitLabel: string | null;
-  readonly elapsedMs: number | null;
-  readonly modelWaiting: boolean;
-}
-
-export interface TaskOverviewItemProjection {
-  readonly itemId: string;
-  readonly bookId: string | null;
-  readonly bookTitle: string | null;
-  readonly taskKind: string;
-  readonly label: string;
-  readonly at: string;
-  readonly detail: string | null;
-  readonly attention: GlobalAttentionItemProjection;
-  readonly selection: BookTaskItemProjection['selection'] | null;
-  readonly plan: { readonly kind: TaskPlanKind; readonly ref: string | null } | null;
-  readonly result: BookTaskResultRef | null;
-  readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
-  readonly progress: TaskOverviewProgressProjection | null;
-  readonly queuePosition: number | null;
-  /** An estimate is deliberately absent until an owner can provide authoritative timing data. */
-  readonly eta: number | null;
-  readonly usage: { readonly calls: number; readonly elapsed: number } | null;
-  readonly nextAction: GlobalAttentionNextStep;
-  readonly runRecordId: string | null;
-  readonly target: GlobalAttentionTarget;
-}
-
-export interface TaskOverviewGroupProjection {
-  readonly key: TaskOverviewGroupKey;
-  readonly items: ReadonlyArray<TaskOverviewItemProjection>;
-  readonly total: number;
-}
-
-export interface TaskOverviewProjection {
-  readonly quickStarts?: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly label: string }>;
-  readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
-  readonly capacity: number;
-  readonly queueFrozen: boolean;
-  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
-  readonly runningCount: number;
-  readonly queuedCount: number;
-  readonly actionableCount: number;
-}
-
-/** Existing Book-owned drawer commands reachable from the cross-Book task page. */
-export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
-  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'answerBaselineAnalysisClarification',
-  'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
-  'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
-  'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
-  'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
-  'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
-  'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
-  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
-  'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
-export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
-export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
-export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
-
-export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
-  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
-} }[LedgerTaskLaunchOperation] };
+export type { TaskLaunchPreviewInput } from './runtime-execution-config.js';
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -3898,7 +3683,7 @@ export interface ServiceJobProjection {
     'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation' | 'writing-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
-  result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
+  result: SearchSummaryProjection | ReplacementPreviewProjection | ReimportResolutionProjection | ReviewBeforeManuscriptReimportProjection |
     ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
     EvaluationWorkspaceProjection | WritingTaskProjection | null;
   failure: null | { code: string; message: string };
@@ -4015,7 +3800,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
+export interface ServiceOperationMap extends StandardTableOperations, GlobalAgentOperations, HouseWordListOperations, ReviewPreferenceLifecycleOperations, ImportReviewServiceOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
@@ -4161,7 +3946,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
   };
-  inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
+  inspectBookFindings: { input: InspectBookFindingsServiceInput; output: BookFindingsReadProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
   launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   previewTaskLaunch: { input: TaskLaunchPreviewInput; output: TaskLaunchPreviewProjection };
@@ -4337,7 +4122,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   /** 导入新版本's reading of the file main's picker returned: nothing is recorded until it is confirmed. */
   previewReviewGuidelineVersion: {
-    input: { documentId: string; path?: string; previewId?: string; clausePage?: number };
+    input: { documentId: string; path?: string; formatConfirmed?: true; previewId?: string; clausePage?: number };
     output: ReviewGuidelinePreviewProjection;
   };
   /** 确认导入: the previewed clauses become the document's next version, issued by the house. */
@@ -4481,6 +4266,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: InspectEvidenceWorkspaceInput;
     output: EvidenceWorkspaceProjection;
   };
+  /** 在浏览器中打开 (Issue #1641): the recorded address of one source named by its identity; read-only. */
+  inspectSourceAddress: InspectSourceAddressOperation;
   /** 记录核查审阅决定 (Issue #901; FREV-006): one immutable Review Decision bound to one result version. */
   recordVerificationReviewDecision: {
     input: RecordVerificationReviewDecisionInput;
@@ -4505,12 +4292,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { materialId: string; from: number };
     output: MaterialSegmentsPageProjection;
   };
-  /** 构建相似索引 (Issue #892): the current build's similarity vectors made on this machine, on request; the item as it now reads. */
-  buildMaterialVectors: {
-    input: { materialId: string };
-    output: LibraryMaterialProjection;
-  };
-  /** 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text, by its built vectors; read-only. */
+  /** 相似段落检索 (Issue #892): an item's paragraphs that best match the editor's words, ranked by words since R5-F2c; read-only. */
   queryMaterialVectors: {
     input: { materialId: string; text: string; k: number };
     output: MaterialVectorSearchProjection;
@@ -4522,7 +4304,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   searchReferableMaterials: {
     input: { bookId: string; query: string; k: number };
-    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection> };
+    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection>; assist: RetrievalAssistMode };
   };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
@@ -4666,8 +4448,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
-  launchReviewRun: { input: PrepareReviewRunInput & TaskExecutionLaunchInput & {
-    evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: ReviewExecutionLaunchInput; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
@@ -4715,48 +4496,6 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
     output: SourceImportCommitProjection;
   };
-  prepareManuscriptReimport: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      target: ManuscriptReimportTargetSelection;
-    };
-    output: ServiceJobProjection;
-  };
-  getReimportMappingPage: {
-    input: { draftId: string; expectedDraftVersion: number; after: number | null };
-    output: ReimportMappingPageProjection;
-  };
-  getReimportLineageSourceVersionPage: {
-    input: { bookId: string; after: string | null };
-    output: ReimportLineageSourceVersionPageProjection;
-  };
-  acceptReimportDegradation: {
-    input: { draftId: string; expectedDraftVersion: number };
-    output: ReviewBeforeManuscriptReimportProjection;
-  };
-  /** One row of the chapter-level comparison resolved by one verb (Issue #412, S63): never preselected, never guessed. */
-  resolveReimportMapping: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      groupId: string;
-      verb: ReimportGroupVerb;
-    };
-    output: ServiceJobProjection;
-  };
-  resolveAcknowledgedManuscriptReimportReplay: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: { draftId: string; commitId: string; bookId: string };
-  };
-  commitManuscriptReimport: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: ServiceJobProjection;
-  };
-  acknowledgeImportCompletion: {
-    input: { commitId: string };
-    output: { state: 'acknowledged' };
-  };
   getManuscriptWindow: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
     output: ManuscriptWindowProjection;
@@ -4787,8 +4526,6 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
-  acceptEditorialMemory: { input: import('./protocol/learning.js').AcceptEditorialMemoryInput; output: EditorialLearningProjection };
-  deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   inspectEditQualitySignals: { input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }; output: EditQualitySignalsProjection };
@@ -4892,6 +4629,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    */
   regenerateProposalConflictUnit: { input: RegenerateProposalConflictUnitInput; output: ProposalConflictRegenerationProjection };
   getManuscriptRail: { input: { manuscriptId: string; branchId: string }; output: ManuscriptRailProjection };
+  findPendingMark: { input: FindPendingMarkInput; output: { mark: PendingMarkPlace | null } };
   /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
    * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
@@ -4903,10 +4641,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: { state: 'recorded' };
   };
   listPriorWork: { input: Record<string, never>; output: ReadonlyArray<PriorWorkItemProjection> };
-  getManuscriptWindowAt: {
-    input: { manuscriptId: string; branchId: string; target: ManuscriptWindowTarget };
-    output: ManuscriptWindowProjection;
-  };
+  getManuscriptWindowAt: { input: ManuscriptWindowAtInput; output: ManuscriptWindowProjection };
   getOutline: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
     output: OutlineProjection;
@@ -4939,6 +4674,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: SaveMilestoneInput;
     output: MilestoneProjection;
   };
+  listBookVersions: { input: BookVersionScope & { offset: number }; output: { rows: BookVersionRow[]; more: boolean; workingDigest: string; baseRevisionId: string } };
+  viewBookVersion: { input: BookVersionScope & { revisionId: string; cursor: string | null }; output: HistoricalRevisionProjection };
+  restoreBookVersion: { input: BookVersionScope & { revisionId: string; expectedDigest: string; expectedBase: string }; output: { stepId: string; revisionId: string } };
   /**
    * ⑥ 交付物 · 发稿 (Issue #414, plan slice S65), Book-scoped. The read lists the Manuscript's milestones and
    * designations; 设为发稿版本 is one deterministic local command that answers with the 交付物 as they stand.
@@ -5048,14 +4786,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   inspectManuscriptExportReceipt: { input: InspectManuscriptExportReceiptInput; output: ManuscriptExportReceiptProjection };
   /** Main-only (Issue #500, S64b): stage a prepared PDF's page for the main process to print before it approves. */
   stageManuscriptExport: { input: StageManuscriptExportInput; output: ManuscriptExportStageProjection };
-  undoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
-  redoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
+  undoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  redoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  inspectEditorHistory: { input: { manuscriptId: string; branchId: string }; output: EditorHistoryProjection };
   resolveBookWorkbenchRoute: {
     input: BookWorkbenchRoute;
     output: ResolvedBookWorkbenchRoute;
@@ -5067,6 +4800,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
   selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
+  selectUnderlyingModel: { input: import('./protocol/model-roles.js').UnderlyingModelSelection; output: void };
+  selectProModel: { input: ModelTierSelectionInput; output: void }; selectFlashModel: { input: ModelTierSelectionInput; output: void }; clearFlashModel: { input: Record<string, never>; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
@@ -5143,7 +4878,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
+export interface RendererApi extends StandardTableRendererApi, GlobalAgentRendererApi, HouseWordListApi, ReviewPreferenceLifecycleRendererApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: string; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
@@ -5158,6 +4893,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectAndStageManuscript(): Promise<PickerStageResult>;
   stageDroppedManuscript(file: File): Promise<PickerStageResult>;
   importBundledSampleBook(): Promise<PickerStageResult>;
+  returnImportToEditing(input: ServiceOperationMap['returnImportToEditing']['input']): Promise<ServiceWireOutput<ReturnImportToEditingProjection>>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
     draftId: string;
@@ -5191,7 +4927,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   getAnalysisRunReportRows(input: Omit<ServiceOperationMap['getAnalysisRunReportRows']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRunReportRows']['output']>;
   getBaselineAnalysisRangePlan(input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>): Promise<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisWireProjection>;
-  inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
+  inspectBookFindings(input?: InspectBookFindingsInput): Promise<BookFindingsReadProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
   launchBaselineAnalysis(input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   previewTaskLaunch(input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<TaskLaunchPreviewProjection>;
@@ -5315,14 +5051,14 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   inspectFactualVerification(input: InspectFactualVerificationInput): Promise<FactualVerificationLensProjection>;
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): Promise<EvidenceWorkspaceProjection>;
+  /** 在浏览器中打开 (Issue #1641): the system browser gets the address the service recorded for this source, if the rule admits it. */
+  openSourceInBrowser(input: SourceIdentityInput): Promise<SourceOpenedProjection>;
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): Promise<VerificationReviewDecisionRecordedProjection>;
   prepareCorrectionProposal(input: PrepareCorrectionProposalInput): Promise<CorrectionProposalDraftProjection>;
   saveCorrectionProposal(input: SaveCorrectionProposalInput): Promise<CorrectionProposalSavedProjection>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
-  /** 构建相似索引: made on this machine; nothing is sent. */
-  buildMaterialVectors(input: ServiceOperationMap['buildMaterialVectors']['input']): Promise<LibraryMaterialProjection>;
   /** 相似段落检索 in 查看索引: read-only. */
   queryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection>;
   /** 生成来源译文: refused unless the selected policy's rule names it. */
@@ -5420,8 +5156,6 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   recordLearningReasonAsk(input: LearningReasonAskInput): Promise<LearningReasonAskProjection | null>;
   changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
   createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
-  acceptEditorialMemory(input: import('./protocol/learning.js').AcceptEditorialMemoryInput): Promise<EditorialLearningProjection>;
-  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;
@@ -5482,7 +5216,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
   prepareDatabaseMerge(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
-  quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
+  quitApplication(action?: 'rollback-upgrade'): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
@@ -5504,6 +5238,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 基于当前稿件重新生成建议 for one conflict unit (Issue #842); it saves a Resolution Draft at most and writes no manuscript. */
   regenerateProposalConflictUnit(input: RegenerateProposalConflictUnitInput): Promise<ProposalConflictRegenerationProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;
+  findPendingMark(input: FindPendingMarkInput): Promise<{ mark: PendingMarkPlace | null }>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
   recordManuscriptEntryPosition(
@@ -5522,6 +5257,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']): Promise<ServiceOperationMap['listBookVersions']['output']>;
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']): Promise<ServiceOperationMap['viewBookVersion']['output']>;
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']): Promise<ServiceOperationMap['restoreBookVersion']['output']>;
   /** 交付物 of the Book the window is showing (Issue #414): its Manuscript's milestones and Publication Versions. */
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
@@ -5568,7 +5306,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
-  taskOverviewCall(input: TaskOverviewCall): Promise<ServiceWireOutput<TaskOverviewCallResult>>;
+  taskOverviewCall<C extends TaskOverviewCall>(input: C): Promise<ServiceWireOutput<TaskOverviewCallResult<C>>>;
   controlAllTasks(input: { action: 'pause' | 'resume' }): Promise<TaskOverviewProjection>;
   inspectTaskOverview(): Promise<TaskOverviewProjection>;
   reorderQueuedRun(input: { runRecordId: string; position: number }): Promise<TaskOverviewProjection>;
@@ -5623,6 +5361,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
+  inspectEditorHistory(input: ServiceOperationMap['inspectEditorHistory']['input']): Promise<EditorHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchOpenInput): Promise<BookWorkbenchOpenProjection>;
   getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
   leaveBookWorkbench(): Promise<{ state: 'library' }>;
@@ -5634,6 +5373,10 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectUnderlyingModel(input: import('./protocol/model-roles.js').UnderlyingModelSelection): Promise<ModelServiceSettingsProjection>;
+  selectProModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectFlashModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
+  clearFlashModel(): Promise<ModelServiceSettingsProjection>;
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;

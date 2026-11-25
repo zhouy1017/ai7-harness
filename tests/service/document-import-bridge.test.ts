@@ -1,3 +1,4 @@
+import type { IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -13,6 +14,7 @@ vi.mock('electron', () => ({
   },
 }));
 
+import { ServiceCallError } from '../../src/main/service-client.js';
 import { registerRendererHandlers } from '../../src/main/application.js';
 import type { ApplicationAuthorityClaims, OwnedRendererWindow } from '../../src/main/application-types.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -101,3 +103,70 @@ describe('same-page document import main boundary', () => {
     }
   });
 });
+
+function returnBridge(store: EditorialStore, owned: OwnedRendererWindow, other: OwnedRendererWindow) {
+  const operations = {
+    returnImportToEditing: (input: ServiceOperationMap['returnImportToEditing']['input']) => store.returnImportToEditing(input.draftId, input.expectedDraftVersion),
+    prepareSourceImportReview: (input: ServiceOperationMap['prepareSourceImportReview']['input']) => store.prepareSourceImportReview(input.draftId, input.expectedDraftVersion, input.target),
+    commitSourceImport: (input: ServiceOperationMap['commitSourceImport']['input']) => store.commitSourceImport(input),
+  };
+  const calls = vi.fn(async (op: keyof typeof operations, input: unknown) => operations[op](input as never));
+  const claims = {
+    requireDraft: (owner: OwnedRendererWindow, draftId: string) => {
+      if (!owner.importDraftIds.has(draftId)) throw new ServiceCallError('AI7_IMPORT_DRAFT_CAPABILITY_INVALID', '当前窗口没有这次导入。');
+    },
+    claimImportState(owner: OwnedRendererWindow, draftId: string) { owner.importDraftIds.add(draftId); },
+    claimCommit(owner: OwnedRendererWindow, commitId: string) { owner.importCommitIds.add(commitId); },
+    releaseCommit(owner: OwnedRendererWindow, commitId: string) { owner.importCommitIds.delete(commitId); },
+  } as unknown as ApplicationAuthorityClaims;
+  const open = vi.fn(async () => ({ target: 'existing-window', route: other.route }));
+  const unused = () => { throw new Error('Unexpected application effect'); };
+  const args = [
+    { call: calls }, (event: IpcMainInvokeEvent) => event.sender.id === 1 ? owned : other, () => true, unused, open,
+    (effect: () => Promise<unknown>) => effect(), claims,
+    (owner: OwnedRendererWindow, bookId: string) => {
+      if (owner.bookId !== null && owner.bookId !== bookId) throw new ServiceCallError('AI7_WORKBENCH_BOOK_CONFLICT', 'Conflict');
+      owner.bookId = bookId;
+    },
+    (owner: OwnedRendererWindow) => { owner.bookId = null; owner.route = null; owner.routeGeneration += 1; },
+    unused, unused, unused, unused, unused, unused, {}, {}, () => false, () => undefined, unused, () => undefined,
+    unused, () => false, { read: () => ({ values: { 'appearance.theme': 'system', 'onboarding.state': 'skipped' } }) }, () => [], () => [], false,
+  ] as unknown as Parameters<typeof registerRendererHandlers>;
+  return { dispose: registerRendererHandlers(...args), calls, open };
+}
+
+it.each([[false, false], [true, false], [false, true]])('returns source details without reserving Book X (other=%s, current=%s) (#1638)', async (otherHoldsX, currentHoldsX) => {
+  const roots = await createServiceTestRoots();
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let bridge: ReturnType<typeof returnBridge> | undefined;
+  try {
+    const original = await store.stageSelectedManuscript(randomUUID(), admittedSourcePath(ADMITTED_BASELINE_DOCX));
+    const reviewed = store.prepareNewBookReview(original.draftId, original.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '目标图书' }, false);
+    const book = await store.commitNewBookImport({ draftId: original.draftId, expectedDraftVersion: reviewed.draftVersion, reviewDigest: reviewed.reviewDigest!, commitId: randomUUID() });
+    const path = join(roots.inputRoot, 'source.pdf'); // Container signature only; no manuscript content.
+    await writeFile(path, '%PDF-1.7\n%%EOF\n');
+    const staged = await store.stageSelectedManuscript(randomUUID(), path);
+    const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, { kind: 'existing-book', bookId: book.bookId, relationship: 'source-only', reuseSourceVersionId: null });
+    const frame = {}; const otherFrame = {};
+    const makeWindow = (id: number, mainFrame: object) => ({ window: { isDestroyed: () => false, webContents: { id, mainFrame } }, bookId: null, route: null,
+      routeGeneration: 1, routeRequestSequence: 1, importDraftIds: new Set(), importCommitIds: new Set(), importTargets: new Map(), commitBindings: new Map(), manuscriptCapabilities: new Map(), editorResourceCapabilities: new Map() }) as unknown as OwnedRendererWindow;
+    const owned = makeWindow(1, frame); const other = makeWindow(2, otherFrame);
+    if (otherHoldsX) other.bookId = book.bookId;
+    else if (currentHoldsX) owned.bookId = book.bookId; // A previously occupied workbench must also be released.
+    owned.importDraftIds.add(staged.draftId);
+    owned.importTargets.set(staged.draftId, { kind: 'existing-book', mutation: 'source-import', bookId: book.bookId });
+    bridge = returnBridge(store, owned, other);
+    const input = { draftId: staged.draftId, expectedDraftVersion: review.draftVersion };
+    await expect(handlers.get(IPC_CHANNELS.returnImportToEditing)!({ sender: { id: 2 }, senderFrame: otherFrame }, input)).resolves.toMatchObject({ ok: false, error: { code: 'AI7_IMPORT_DRAFT_CAPABILITY_INVALID' } });
+    expect(bridge.calls).not.toHaveBeenCalled();
+    const event = { sender: { id: 1 }, senderFrame: frame };
+    const returned = await handlers.get(IPC_CHANNELS.returnImportToEditing)!(event, input) as RendererCallResult<ServiceOperationMap['returnImportToEditing']['output']>;
+    expect(returned.ok).toBe(true); if (!returned.ok || returned.result.state !== 'staged') throw new Error('Expected staged');
+    expect(owned.bookId).toBeNull(); expect(bridge.open).not.toHaveBeenCalled();
+    expect(other.bookId).toBe(otherHoldsX ? book.bookId : null);
+    const again = await handlers.get(IPC_CHANNELS.prepareSourceImportReview)!(event, { draftId: staged.draftId, expectedDraftVersion: returned.result.draftVersion, target: { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '新目标', relationship: 'source-only' } }) as RendererCallResult<ServiceOperationMap['prepareSourceImportReview']['output']>;
+    expect(again.ok).toBe(true); if (!again.ok) throw new Error('Expected prepared source');
+    await expect(handlers.get(IPC_CHANNELS.commitSourceImport)!(event, { draftId: staged.draftId, expectedDraftVersion: again.result.draftVersion, reviewDigest: again.result.reviewDigest, commitAttemptId: null })).resolves.toMatchObject({ ok: true, result: { completionLabel: '来源材料已导入' } });
+    store.markCleanShutdown();
+  } finally { bridge?.dispose(); handlers.clear(); store.close(); await roots.dispose(); }
+}, 180_000);

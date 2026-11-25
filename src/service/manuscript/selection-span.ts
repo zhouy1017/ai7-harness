@@ -10,6 +10,7 @@ import {
   selectionSpanStale,
 } from '../../shared/selection-span.js';
 import { StoreError } from '../store-records.js';
+import { workingBlock } from './working-positions.js';
 import { BLOCK_PATTERN, DIGEST_PATTERN, asNumber, asString, type SqlRow } from './bounded-kernel.js';
 
 /**
@@ -68,20 +69,19 @@ function readWorkingSpan(db: DatabaseSync, branchId: string, range: PinnedSpanRa
   const blocks: WorkingSpanBlock[] = [];
   for (const [index, pin] of range.span.entries()) {
     const stale = { ok: false, code: 'SELECTION_SPAN_STALE', message: selectionSpanStale(index + 1) } as const;
-    const row = db.prepare('SELECT position, kind, text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?')
-      .get(branchId, pin.blockId) as SqlRow | undefined;
-    if (row === undefined || (byDigest && asString(row.digest) !== pin.blockDigest)) return stale;
-    if (asString(row.kind) === 'note') return { ok: false, code: 'SELECTION_SPAN_NOTE', message: SELECTION_SPAN_NOTE };
-    const text = asString(row.text);
+    const row = workingBlock(db, branchId, pin.blockId);
+    if (row === undefined || (byDigest && row.digest !== pin.blockDigest)) return stale;
+    if (row.kind === 'note') return { ok: false, code: 'SELECTION_SPAN_NOTE', message: SELECTION_SPAN_NOTE };
+    const text = row.text;
     const parts = graphemesOf(text);
     const shaped = index === 0 ? pin.fromGrapheme < pin.toGrapheme && pin.toGrapheme === parts.length
       : index === last ? pin.fromGrapheme === 0 && pin.toGrapheme > 0 && pin.toGrapheme <= parts.length
         : pin.fromGrapheme === 0 && pin.toGrapheme === parts.length;
     const part = parts.slice(pin.fromGrapheme, pin.toGrapheme).join('');
     if (!shaped || part !== pieces[index]) return byDigest ? invalid : stale;
-    const position = asNumber(row.position);
+    const position = row.position;
     if (index > 0 && position !== blocks[index - 1]!.position + 1) return stale;
-    blocks.push({ pin, position, text, part, digest: asString(row.digest) });
+    blocks.push({ pin, position, text, part, digest: row.digest });
   }
   return { ok: true, blocks };
 }

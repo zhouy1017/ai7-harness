@@ -1,12 +1,147 @@
-# AI7 development plan — #1516 · R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.8.0
+# AI7 development plan — #1516 · R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.7.9
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `790acbcbde8ca268217b152194f83241d1f13d10` (0.7.2 Alpha, #1496, PR #1515). The Owner's 2026-11-16 / 17 decisions in [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) replaced the earlier order: R4 → 0.7.3 Alpha, the interface and pages round → 0.7.4 Alpha, R5 → 0.8.0 Alpha, and one human test after all of it with no human test between rounds. R4 is in closure with candidate 0.7.3 Alpha: every slice of its two lanes — interface `codex/integration-0.7.3` (wave [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517)) and service `codex/integration-0.7.3-service` — is merged on `codex/integration-0.7.3`. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
+
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `3031f87a1b7cf01899ff25e99fba94867d4ad31c` (0.7.3 Alpha, #1517, PR #1619). The Owner's 2026-11-16 / 17 decisions in [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) replaced the earlier order: R4 → 0.7.3 Alpha, the interface and pages round → 0.7.4 Alpha, R5 → 0.8.0 Alpha, and one human test after all of it with no human test between rounds. R4 is delivered as 0.7.3 Alpha. The interface and pages round ([#1539](https://github.com/zhouy1017/ai7-harness/issues/1539)) on `codex/integration-0.7.4` and R5 ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)) on `codex/integration-0.8.0` were developed side by side under the schedule the Owner approved on 2026-11-20. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## R4 → 0.7.3 Alpha (#1517) — closure candidate
+## After 0.7.3: the combined 0.7.9 Alpha delivery (#1516, #1539, #1540)
 
-Every R4 slice of both lanes is merged into `codex/integration-0.7.3`, based on delivered `dev@790acbcb` (0.7.2 Alpha). The interface lane ran on that branch; the service lane ran on `codex/integration-0.7.3-service` and joined it three times (`cef864f1`, `52f1cde3`, `e878be99`). Candidate 0.7.3 Alpha uses protocol 205, schema 116 and Data Version 1: [#1506](https://github.com/zhouy1017/ai7-harness/issues/1506) is the round's one interface change, and no slice adds a migration. Closure requires the final exact-head ladder with all 15 Journeys in the hosted Gate's window and the hosted Full Gate on the wave pull request, then the dev merge and the fixed human-test refresh; no 0.7.3 dev delivery, tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint, the defects found on the way and the remaining risks.
+The interface and pages round integrated under its 0.7.4 identifier. The combined 0.7.9 Alpha delivery includes that round, R5, reasoning-effort discovery, multi-query retrieval and the unified recording. Closure includes the guest ladder, the hosted Full Gate, integration into `dev`, the fixed human-test folder refresh and data-retention check, and the PROGRESS and plan updates.
+
+| Round | Version | Scope | Issues |
+| --- | --- | --- | --- |
+| R4 | 0.7.3 Alpha — delivered | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement). [Delivered below](#delivered-r4--073-alpha-1517) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
+| Interface and pages round | 0.7.4 Alpha — integrated into the 0.7.9 candidate | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set; and, carried or brought forward on 2026-11-20, #1604, #1616, the four-role interface M1 and the test-speed slice T1 | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
+| R5 | 0.7.9 Alpha — in progress | The storage rearrangement and the in-app upgrade tool, trustworthy undo and the real version list ([ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md)); the 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)); the Underlying Flash Service and lightweight hybrid retrieval ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)); #1598 and #1585 | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) |
+| One human test | — | Arranged by the Owner after 0.7.9 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
+
+R5-7 closes the combined 0.7.9 delivery. The sections below retain the slice order, batches and dependencies. The wave Issues carry the per-slice Issue numbers and records. [PROGRESS](../../PROGRESS.md) owns what is delivered.
+
+### Working rules (Owner, 2026-11-17 and 2026-11-20)
+
+These are the Owner's session rules for the two rounds; they take precedence over the repository defaults of [Orca dispatch](../agents/orca-dispatch.md) where they differ.
+
+- **One Commander** runs both rounds and merges both integration branches. It writes each slice's Issue with a code guide before the slice is dispatched.
+- **Coding agents.** Claude Opus for service, protocol, storage, main-process and hard slices; Claude Sonnet for standard interface and test slices; DeepSeek v4.1 flash, one at a time, only for single-file renderer slices that add no Journey stage. ChatGPT stays paused. Each slice's actual agent, model and review rounds are recorded on its wave Issue.
+- **Review of every pull request.** A blind review by a separate Fable 5.2 session that did not write the change. T3 slices — M1, R5-2, R5-3 + R5-4, R5-6, R5-F1, R5-L2 — get a second reviewer on Opus.
+- **Stage acceptance of interface work.** At the merged tip of each interface batch of 0.7.4, a Fable 5.2 reviewer accepts the batch as a whole: real clicks against every item the batch covers, at the window sizes of [CI and test boundaries](../agents/ci-test-boundaries.md#where-the-ladder-runs) — since the Owner's decision of 2026-11-25 a 1080p screen with the window at full size and with an ordinary window, the hosted Gate's 1008×681 as the compatibility form (before that: 1164×781 and 1008×681). Rework is sent back and re-checked; the next interface batch starts only after the batch is accepted. Service-only slices are not held by it.
+- **Verification.** [CI and test boundaries](../agents/ci-test-boundaries.md) owns the ladder. A slice's final evidence includes one run at each window size; merges go in batches of three or four followed by one lane verification; the full ladder and the hosted Full Gate run at each round's closure.
+- **Live model calls.** None in 0.7.4. R5 has one developer-live session (batch E) that needs the Owner's authorization at that time.
+
+### Coordination between the two rounds
+
+- **Model Roles ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)) are built in two steps, with nothing built twice.** Model choice is stored today in two fixed column groups of a connection, one for the main model and one for the fast model, each with its 思考强度. **M1** (0.7.4, batch 1) brings the four role ids, their labels and projection, the cascading defaults, the legacy aliases, the recommended Pro / Flash model records in the provider configuration (records, never source constants) and the local refusal of [#1582](https://github.com/zhouy1017/ai7-harness/issues/1582) onto those two groups: the Pro tier is the main group, the Flash tier is the fast group, and a Flash role without a Flash model falls back to the Pro tier. M1 changes no schema, and a store whose models are already chosen sends every task to the same model as before. **#1547** then builds the settings page once on M1. Storage of its own for 前台 Flash and 底层 Pro enters only with revision 117 on the R5-2 train, and R5-6 maps the two old groups onto it. **R5-F1** keeps the `FlashTaskContract` registry, the six underlying task kinds, two-stage learning, the policy successor that admits the new task kinds, and the advanced per-role binding added to #1547's page.
+- **One protocol bump.** The 0.7.4 closure slice raises the protocol once, 205 → 206. The interface changes of M1, #1604 with 一·3, I-7 (13.3), I-12 (5.8) and S-imp (11.2, 11.4) all ride it; no slice raises the version itself.
+- **One schema revision.** 0.7.4 adds none. Revision 117 (Data Version 2) is R5's only one and carries three things in final form: the 字表与词表 relations (R5-L1), the removal of `material_index_vectors` (R5-F2) and the four-role storage (R5-F1).
+- **Merge direction.** `codex/integration-0.8.0` merges `codex/integration-0.7.4` after each 0.7.4 batch lands.
+- **Shared code, in order.** Marks: #1604 lands in 0.7.4 and is merged over before R5-3 + R5-4 start rewriting how marks follow the text. Learning: #1549 and I-7 land before R5-F1's two-stage learning. 知识库: #1552 lands before R5-L4 adds the 字表与词表 category.
+- **No overlap.** R5-1 changes the service's split and join; 0.7.4's N.1 changes the shared inline-revision diff and the renderer's edit cards. R5-F2a changes retrieval, which 0.7.4 does not touch.
+- **Model requests.** 0.7.4 changes nothing that is sent to a model: role names are neither in request content nor in cache keys.
+
+## The interface and pages round (0.7.4 Alpha, #1539)
+
+0.7.4 builds on `codex/integration-0.7.4`, cut from delivered `dev@3031f87a`. Its scope is the 26 review items and the review's additions listed in [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) (item numbers below are that Issue's), plus [#1604](https://github.com/zhouy1017/ai7-harness/issues/1604), [#1616](https://github.com/zhouy1017/ai7-harness/issues/1616), M1 and T1. Interface changes are allowed and ride the one closure bump; nothing sent to a model changes; no schema revision is added. Hub files do not grow. Each interface batch ends with its stage acceptance before the next begins.
+
+| Batch | Slice | Covers | Owner files | Lane | Depends on / relay |
+| --- | --- | --- | --- | --- | --- |
+| 0 | Opening documents | 0.7.3 recorded as delivered; this schedule; the new Issues and code guides | PROGRESS, this plan, the version ledger, #1539, #1540, #1608 | Commander | — |
+| 0 | #1551, #1553 catch-up | 10.3, 13.6 | The two parked branches: [PR #1588](https://github.com/zhouy1017/ai7-harness/pull/1588) merges 0.7.3's final tip without conflict; [PR #1590](https://github.com/zhouy1017/ai7-harness/pull/1590) has three conflicts to resolve (`global-agent.ts`, its test, J-16). Each reruns its Journeys at both window sizes | interface | — |
+| 1 | **M1** — four-role interface and cascading defaults, with #1582 | The interface part of 7.2 | `shared/protocol.ts` (roles and selection), `service/model-search-settings.ts`, `service/launch-policy.ts`, the role ids in `service/fast-role/*`, `config/providers/*.json` and its generated file, the main-process preload and application, the `e2e/run-j01` allowlist | service | none |
+| 1 | #1604 service half, with 一·3 | #1604, 一·3 | `service/editorial-marks.ts`, `service/bounded-manuscript.ts`, `shared/protocol/editorial-marks.ts` | service | none |
+| 1 | **T1** — service-test speed | The #1537 / #1033 remainder | `vitest.config.ts`, `tests/service/*` and its helpers; the guests' scheduling weights stay outside the repository | service | none |
+| 1 | #1548 — help and F1 | 7.3 | `settings-screens.ts`, `commands.ts`, `help.ts`, `help-text.ts` | interface | none |
+| 1 | #1549 — 学习回溯 | 一·2 | `learning-audit*.ts` | interface | none |
+| 1 | #1554 — icon set | Icons | `shell.ts`, the icons, their documents | interface | none |
+| 2 | #1547 — 模型服务 | 7.2, N.3 | `model-service-flow.ts`, `model-service-settings.ts`, `search-backend-settings.ts` | interface | **M1** |
+| 2 | #1604 interface half | #1604, 一·3 | The renderer's `editorial-marks.ts`, `manuscript-screen.ts` | interface | The service half; both halves merge in one batch |
+| 2 | #1550 — 交付物, with its service sub-slice | 11.6, N.4 | `deliverables.ts`; `service/book-delivery-packages.ts`; the main-process `saveMilestone` | interface + service | none |
+| 2 | #1552 — 知识库 | 13.4 | `knowledge-base*.ts` | interface | none |
+| 2 | I-5a — main-process "open external link" | The main-process part of 12.1 | `main/application.ts`, `preload.ts`; http / https only | interface | Serial, alone |
+| 3 | I-1a — mark drafts and the context menu | 2.6, 8.6 | The renderer's `editorial-marks.ts` | interface | Relay on the #1604 interface half |
+| 3 | I-3 — task cards and 待我处理 | 5.6, 8.2, 8.5 | `task-drawer.ts`, `tasks-overview.ts`, `global-attention.ts`, `components/dispatch-chooser.ts` | interface | M1 |
+| 3 | I-2 — 新建审阅 | 6.2 | The review launch panel | interface | none |
+| 3 | S-imp — import re-review (service) | 11.2, 11.4 | The service's import-review operations and `#invalidateReview`, where #1535 left them | service | none |
+| 3 | I-4a — the 导入新版本 entry and the import page | 11.1, 11.3, N.5, N.10 | `import-review.ts`, `import-fidelity-labels.ts`, the drop on `manuscript-switcher.ts` | interface | none |
+| 3 | I-5b — factual-check sources and cards | 12.1, 12.2 | `research-evidence.ts`, the fact cards of `review-workspace.ts` | interface | I-5a |
+| 3 | I-7 — 审阅偏好 re-enable and delete | 13.3 | `service/learning/ledger.ts`, `shared/protocol/learning.ts`, `knowledge-base-memory.ts` | service + interface | Relay on #1549 |
+| 4 | I-1b — the AI entries gathered | 8.4 | The renderer's `editorial-marks.ts`, `scoped-ai-edit.ts` | interface | I-1a, M1 |
+| 4 | I-12 — the cost statement | 5.8 | `service/task-plan.ts`, the task card | service + interface | Relay on I-3 |
+| 4 | I-4b — import re-review interface | 11.2, 11.4 | `import-review.ts` | interface | S-imp, I-4a |
+| 4 | I-6 — the 评估 and 分析 pages | 13.1, 13.2 | `evaluation.ts`, `baseline-analysis-card.ts` | interface | none |
+| 4 | I-8 — 书库 | 8.3 | `library-screen.ts` | interface | none |
+| 4 | I-9 — the 衍生稿件 page | 10.2 | `manuscript-switcher.ts`, `writing-task.ts` | interface | #1551 |
+| 4 | I-10 — other trims | 13.8 | `data-storage.ts`, `proposal-conflict.ts`, the batch workspace | interface | none |
+| 4 | I-11 — 待办汇总 | The second half of 6.5, N.6 | `findings-center.ts`; the service's cross-run de-duplication and incremental reads | service + interface | none |
+| 5 | N.1 — adjacent edits as one card | N.1 | `shared/inline-revision-diff.ts`, the edit cards | interface | Reproduced on a test guest first; relay on I-1b |
+| 5 | #1616 — service sentences reworded | #1616 | `service-wording.ts` and its test | interface | M1, #1547, I-3 |
+| 5 | Closure | Protocol 205 → 206; every item of #1539 reconciled as done, moved or dropped with its reason | The documents, the wave pull request | Commander | Everything |
+
+Closure needs the full ladder with all 15 Journeys at both window sizes and the hosted Full Gate, then the merge into `dev` and the human-test refresh. No human test is arranged.
+
+## R5 → 0.7.9 Alpha (#1540, ADR 0105, 0106, 0107)
+
+The storage design of [#1555](https://github.com/zhouy1017/ai7-harness/issues/1555) is accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md). The Owner answered all 13 of its decisions as recommended: 「R5按照推荐」, 2026-11-18, recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540#issuecomment-6975379870).
+
+0.7.9 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.7.9 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
+
+R5 builds on `codex/integration-0.8.0`, cut from delivered `dev@3031f87a`, and merges `codex/integration-0.7.4` after each 0.7.4 batch. R5-2 through R5-6 travel as one train, so the fold never lands without its converter.
+
+| Batch | Slices | When |
+| --- | --- | --- |
+| A | R5-1, [#1598](https://github.com/zhouy1017/ai7-harness/issues/1598), [#1585](https://github.com/zhouy1017/ai7-harness/issues/1585), R5-F2a | Beside 0.7.4's batch 1; none of them depends on storage |
+| B — the train, serial | R5-2 → R5-L1 → R5-3 + R5-4 → R5-5 → R5-6 | R5-3 + R5-4 start after R5-1 and after #1604 has landed in 0.7.4 and been merged over. The train lands whole when R5-6 merges |
+| C | R5-F1, R5-L3, R5-L5 | After the train lands; R5-F1 also after 0.7.4's #1547 |
+| D | R5-L2, R5-F2b, R5-L4 | After R5-F1; R5-L4 after R5-L2 and R5-L3 |
+| E | One developer-live session | After R5-F1, R5-F2b and R5-L2; needs the Owner's authorization at that time |
+| F | R5-7 → 0.7.9 | After the 0.7.4 interface round is integrated and everything above |
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-1 | A suggestion moved whole by 分段 / 合段 keeps its 撤销本次修改 | Batch A |
+| #1598 | (internal) Recorded answers that contain tool calls convert into test model answers, keyed by the tool exchange inside the answer instead of the turn's position, because R5-F2 changes the tool | Batch A; code only, no live call |
+| #1585 | (internal) Re-recording only a final result no longer fails on changed block identities: identities are normalised in developer-live replay only and the product is unchanged (the Owner's option 1, 2026-11-20). The slice writes the amendment to [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) and takes the three items carried from the #1583 review | Batch A; before the live session |
+| R5-2 | (internal) One baseline at revision 117 / Data Version 2, with the 字表与词表 relations, without `material_index_vectors` and with the four-role storage in final form; the migration chain and its old-revision tests are deleted; the 0.7.1 review compatibility store is rebuilt at 0.7.2 or becomes a refusal case | First on the train |
+| R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
+| R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
+| R5-6 | One-click upgrade to 0.7.9 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly. The converter installs the pre-installed tables, maps the two old model column groups onto the four roles and treats the vector table as an expected difference; each converter test file builds its store once | After R5-5 and #1556; lands the train |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; the closing service-test measurement as interleaved pairs; 0.7.9 | Batch F |
+
+Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
+- a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
+- reads stay within 10 % of the baseline;
+- undoing a 2,000-place replace-all holds the write lock at most 2 s.
+
+The live session of batch E takes what needs a real service in one sitting: the recordings [#1538](https://github.com/zhouy1017/ai7-harness/issues/1538) left, the proof of the Responses route of [#1582](https://github.com/zhouy1017/ai7-harness/issues/1582), the first recordings of the Underlying Flash task kinds, and the two classical Public SampleBooks that [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) could not measure before #1599. The real-editor half of #1074 stays with the single human test.
+
+### The 字表与词表 library (#1152, ADR 0106)
+
+The Owner's three directions of 2026-11-19 replace the hard-coded standards tables with a library in 知识库 › 字表与词表. An editor imports, updates, disables or deletes 字表 and 词表 there, and 规范用语核查 reads the enabled ones, pinned by version. A corrected or newer standard needs no program release. Pre-installed: 《通用规范汉字表》, its 附表1, GF 1001-2001 and, as the default 常用词表, 《现代汉语常用词表（第2版）》 (the Owner's later directions of the same day). Other dictionary tables are imported by the house.
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-L1 | (internal) The library's relations in the revision-117 baseline; the four pre-installed tables in every new and every upgraded store: the three national ones with content equal to today's, and the default 常用词表 (words and ranks); inventory and merge class | Batch B, on the train after R5-2; R5-6 calls its install function |
+| R5-L2 | Import any table file: the AI7 format and regular tables convert directly; anything else with text is formatted by the Underlying Flash Service (`standards-table-formatting`, [ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), R5-F1) after a usage estimate and confirmation, every entry traced to the file and doubtful rows held for confirmation; a new version shows what changed; delete removes the source and its data together | Batch D, after R5-F1 |
+| R5-L3 | 规范用语核查 checks against the enabled tables, says each suggestion's strength (国家规范 / 辞书推荐 / 本社要求) and basis, shows disagreeing tables instead of choosing, notes a possibly uncommon spelling 「可能是不常用的写法，请核对」 from the 常用词表, and keeps past results readable with 「依据的字表已删除」 | Batch C, after the train lands |
+| R5-L4 | 知识库 › 字表与词表: one item per imported table with its conversion and application status, open to view, confirm and edit rows, 导入新版本, 删除, 恢复预装字表 | Batch D, after R5-L2, R5-L3 and 0.7.4's #1552 |
+| R5-L5 | (internal) The tables leave the program code; the pre-installed seed is their only copy | Batch C, after R5-L3; before R5-7 |
+
+### The Underlying Flash Service and lightweight hybrid retrieval (#1608, ADR 0107; superseding #1027)
+
+The Owner's directions of 2026-11-19 ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608)) close [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) and retire the local ONNX embedding candidate, replace the four legacy Model Roles with the 2×2 matrix 前台 Pro / 前台 Flash / 底层 Pro / 底层 Flash, and put every low-level, non-user-facing, deterministically verified model call behind one extensible `FlashTaskContract` registry. ADR 0107 owns the roles, the task kinds and their checks. The role ids, cascading defaults and recommended-model records are brought forward to 0.7.4 as M1 (see the coordination rules above); R5 keeps the rest, and R5-F2 is split so that its local half does not wait for storage.
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-F1 | Underlying work runs on the Underlying Flash Service through the `FlashTaskContract` registry with its six task kinds (`standards-table-formatting`, `learning-sample-tidying`, `retrieval-query-expansion` and `retrieval-rerank`, `material-translation`, `guideline-clause-formatting`, `model-connection-test`); learning runs in two stages, samples tidied on 底层 Flash before 底层 Pro proposes 审阅偏好; the policy successor admits the new task kinds; advanced mode binds each of the four roles on its own, on the storage revision 117 gives them | Batch C, after the train lands and after 0.7.4's #1547, #1549 and I-7 |
+| R5-F2a | Search across manuscripts, materials and retained sources finds synonyms, shared-morpheme phrases, supplementary-plane Han characters and the baseline's character and term aliases with no local vector index: word, bigram and single-morpheme tokens under `NFKC`, alias expansion, several queries fused in one `retrieve` call, and ranked manuscript search (`service/retrieval/index.ts`, `service/provider/platform-tool-session.ts`) | Batch A; does not depend on storage |
+| R5-F2b | 底层 Flash widens a search query and reranks the candidates, with the local search as the fallback when it is unconfigured or offline | Batch D, after R5-F1 |
+
+`StubEmbeddingProvider` and `material_index_vectors` leave with the revision-117 baseline on the train (R5-2, with the R5-6 converter and the inventory), together with the 构建相似索引 step.
+
+## Delivered R4 → 0.7.3 Alpha (#1517)
+
+R4 is delivered at `dev@3031f87a` through [PR #1619](https://github.com/zhouy1017/ai7-harness/pull/1619), on top of `dev@790acbcb` (0.7.2 Alpha): protocol 205, schema 116, Data Version 1. The interface lane ran on `codex/integration-0.7.3`; the service lane ran on `codex/integration-0.7.3-service` and joined it three times (`cef864f1`, `52f1cde3`, `e878be99`). [#1506](https://github.com/zhouy1017/ai7-harness/issues/1506) is the round's one interface change, and no slice adds a migration. That pull request records the final exact-head ladder at the closure tip `1b16f224`, the hosted controls and the dev merge; no tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint, the defects found on the way and the remaining risks.
 
 | Slice | What the editor can newly do / closure result | Merged PR / integration commit |
 | --- | --- | --- |
@@ -37,17 +172,22 @@ Every R4 slice of both lanes is merged into `codex/integration-0.7.3`, based on 
 | #1556, #1557 | (internal, prepared for R5) A read-only inventory of every business entity of a store; a large-manuscript read and write baseline on `SampleBooks/` | [#1581](https://github.com/zhouy1017/ai7-harness/pull/1581), [#1591](https://github.com/zhouy1017/ai7-harness/pull/1591) / `71b48498`, `a11eec59` |
 | #1518, #1544, #1545, #1546 | (internal) The owners record 0.7.2 and the R4 vocabulary; `index.ts` is split into page modules; the launch bar is a component; `words:report` lists banned ordinary-mode terms | [#1559](https://github.com/zhouy1017/ai7-harness/pull/1559), [#1563](https://github.com/zhouy1017/ai7-harness/pull/1563), [#1560](https://github.com/zhouy1017/ai7-harness/pull/1560), [#1574](https://github.com/zhouy1017/ai7-harness/pull/1574) / `e2d43e4a`, `79b70a24`, `76bbba5a`, `a6ef7710` |
 | Verification (#1602, #1614) | (internal) Any test guest can run a Journey in the hosted Gate's 1008×681 window (`AI7_E2E_WINDOW`); the type check of `check` and `build` has an explicit heap limit, after the project outgrew the default of the 4 GB guests | [#1603](https://github.com/zhouy1017/ai7-harness/pull/1603), [#1615](https://github.com/zhouy1017/ai7-harness/pull/1615) / `f1e0c52f`, `54ed6def` |
-| ADR 0105, 0106, 0107 | (documents) Accepted designs — the storage rearrangement and in-app upgrade, the 字表与词表 library, the Model Role matrix. None of them is implemented in 0.7.3; their plan sections are the service lane's | [#1580](https://github.com/zhouy1017/ai7-harness/pull/1580), [#1607](https://github.com/zhouy1017/ai7-harness/pull/1607), [#1610](https://github.com/zhouy1017/ai7-harness/pull/1610), [#1609](https://github.com/zhouy1017/ai7-harness/pull/1609), [#1611](https://github.com/zhouy1017/ai7-harness/pull/1611) / `8844d036`, `a3781499`, `02bc0264`, `f08c4cc9`, `3c814e21` |
+| ADR 0105, 0106, 0107 | (documents) Accepted designs — the storage rearrangement and in-app upgrade, the 字表与词表 library, the Model Role matrix. None of them is implemented in 0.7.3; their slices are scheduled in the two open rounds above | [#1580](https://github.com/zhouy1017/ai7-harness/pull/1580), [#1607](https://github.com/zhouy1017/ai7-harness/pull/1607), [#1610](https://github.com/zhouy1017/ai7-harness/pull/1610), [#1609](https://github.com/zhouy1017/ai7-harness/pull/1609), [#1611](https://github.com/zhouy1017/ai7-harness/pull/1611) / `8844d036`, `a3781499`, `02bc0264`, `f08c4cc9`, `3c814e21` |
 
-Carried out of R4:
+Carried out of R4, with the disposition the Owner approved on 2026-11-20:
 
 | Item | Disposition |
 | --- | --- |
-| Service-test time | The `service` layer's median fell from 833 s to 731 s (12 %); the 25 % target of [#1033](https://github.com/zhouy1017/ai7-harness/issues/1033) is not met ([measurement](https://github.com/zhouy1017/ai7-harness/issues/1517#issuecomment-6999453925)). |
-| [#1604](https://github.com/zhouy1017/ai7-harness/issues/1604) | More than 400 marks in one stretch of text: 0.7.4, a service half and an interface half merged together. |
-| [#1616](https://github.com/zhouy1017/ai7-harness/issues/1616) | Service-authored sentences still shown in technical words: 0.7.4. |
-| #1551, #1553 | Early 0.7.4 slices, finished and parked ([PR #1588](https://github.com/zhouy1017/ai7-harness/pull/1588), [PR #1590](https://github.com/zhouy1017/ai7-harness/pull/1590)); they move to `codex/integration-0.7.4` after the delivery. |
-| #1074 real-editor half | Waits for the single human test after 0.8.0. |
+| Service-test time ([#1537](https://github.com/zhouy1017/ai7-harness/issues/1537), the [#1033](https://github.com/zhouy1017/ai7-harness/issues/1033) remainder) | Measured in R4: the `service` layer's median fell from 833 s to 731 s (12 %); the 25 % target is not met ([measurement](https://github.com/zhouy1017/ai7-harness/issues/1517#issuecomment-6999453925)). **0.7.4, slice T1** (tests and `vitest.config.ts` only): the slowest files run first and the three shards are cut by duration; `review-fixture-generator` checks the committed entries in one pass, with the full four-pass derivation behind an explicit switch (its reviewer confirms both prove the same thing); a pre-built store with `sample1` imported is copied per case for five slow files; `task-dispatch-launch` is split and each 2,001-edit case gets its own file. **R5**: R5-2 deletes `interrupted-upgrade` and the old-revision cases of `database-replacement` with the fold, R5-6 bounds its converter tests, and R5-7 measures. `task-plan-wire` is profiled, not cut. Estimates, not measurements: about 590 s after T1 (about 29 % under 0.7.2's 833 s) and about 480 s after the R5 fold. |
+| [#1604](https://github.com/zhouy1017/ai7-harness/issues/1604) | More than 400 marks in one stretch of text. 0.7.4: the service half (batch 1) is merged with the review addition 一·3, which changes the same whole-book mark reads of `service/editorial-marks.ts` and shares its one interface change; the interface half (batch 2) follows the paging of #1592 (「已显示 N / M 条」, 显示更多). The two halves merge in one batch. |
+| [#1616](https://github.com/zhouy1017/ai7-harness/issues/1616) | Service-authored sentences still shown in technical words. 0.7.4, batch 5: after M1, #1547 and I-3 have changed the role names and task-state sentences it rewords. Display-layer rewording and its test only; `KNOWN_RAW` becomes empty. |
+| #1551, #1553 | The two parked early slices land in 0.7.4's batch 0 ([PR #1588](https://github.com/zhouy1017/ai7-harness/pull/1588) without conflict, [PR #1590](https://github.com/zhouy1017/ai7-harness/pull/1590) after three conflicts are resolved). #1553's assertion that ordinary mode has no 学习回溯 button is flipped by #1549, which merges later. |
+| #1547 – #1550, #1552, #1554 | The early 0.7.4 slices that were not dispatched: their R4 prerequisites are all merged; only #1547 now waits for M1. |
+| [#1579](https://github.com/zhouy1017/ai7-harness/issues/1579) | The one intermittent hosted J-08 failure: closes with the delivered R4 Issues — ten hosted first runs passed after the fix. |
+| [#1598](https://github.com/zhouy1017/ai7-harness/issues/1598) | Tool-turn captures as model fixtures: R5 batch A. |
+| [#1585](https://github.com/zhouy1017/ai7-harness/issues/1585) | Final-only re-recording blocked by changed identities: R5 batch A, the Owner's option 1, with the three items carried from the #1583 review. |
+| [#1582](https://github.com/zhouy1017/ai7-harness/issues/1582) | OpenCode Go Responses models sent to Chat Completions: the local refusal before sending is part of M1 (0.7.4); the proof on the real service is in R5's live session (batch E). |
+| The recordings #1538 left, the measurements #1074 left | R5's live session (batch E). The real-editor half of #1074 waits for the single human test after 0.7.9. |
 
 ## Delivered R3 → 0.7.2 Alpha (#1496)
 
@@ -63,17 +203,17 @@ R3 is delivered at `dev@790acbcb` through [PR #1515](https://github.com/zhouy101
 | #1510 | A finished task no longer opens its result window over the page the editor is working on; automatic results remain on task overview, the matching Book task panel or the completing task's own drawer | [#1514](https://github.com/zhouy1017/ai7-harness/pull/1514) / `4eef1df7` |
 | #1498 | Existing memory behaviour stays the same; editorial memory and 本社审阅偏好 use one internal read/write facade for the R4 split | [#1511](https://github.com/zhouy1017/ai7-harness/pull/1511) / `b00b194d` |
 | #1508 | Two heavy Word-manifest tests have 300-second headroom; their cost is retained for R4 #1033 | [#1509](https://github.com/zhouy1017/ai7-harness/pull/1509) / `89f757a2` |
-| #1147 / opening docs | Offline validation is closed: batched inference failed the numerical tolerance; no local embedding product is claimed and #1027 remains a separate Owner decision | [#1499](https://github.com/zhouy1017/ai7-harness/pull/1499) / `5a06c848` |
+| #1147 / opening docs | Offline validation is closed: batched inference failed the numerical tolerance; no local embedding product is claimed (the Owner closed #1027 on 2026-11-19; #1608 replaces it) | [#1499](https://github.com/zhouy1017/ai7-harness/pull/1499) / `5a06c848` |
 
 The Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6870691052) remain in force: keep SampleBook-based samples without new fixture fingerprints, use real ordinary-production captured transports, and preserve the independent safety boundaries. No live model call was made in R3; the invalidated recordings and the carried R2 lists are re-recorded in R4 by the Owner-authorized networking session ([#1538](https://github.com/zhouy1017/ai7-harness/issues/1538), then the [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) re-measurement).
 
-**R4 is the closure candidate above**; it ran on its two lanes under plan [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) §7 and the wave [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) batches and merge order.
+R4 followed on its two lanes and is delivered above. What R3 carried forward:
 
 | Carried special item | Disposition |
 | --- | --- |
 | #1147 / #1027 → #1608 | #1147 offline validation is closed (batched inference failed the numerical tolerance). On 2026-11-19 the Owner closed [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) (retiring the local ONNX `multilingual-e5-small` route) and superseded it with [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)) in R5 (`R5-F1`, `R5-F2`). |
-| #1152 | The bounded R4 audit of the standards tables is merged ([#1593](https://github.com/zhouy1017/ai7-harness/pull/1593): four wrong character-form targets removed). The importable library is the service lane's ADR 0106 section below. |
-| #1074 | The R4 quality re-measurement is recorded ([#1600](https://github.com/zhouy1017/ai7-harness/pull/1600), after the #1538 re-recording in [#1583](https://github.com/zhouy1017/ai7-harness/pull/1583)); its real-editor half waits for the single human test after 0.8.0. |
+| #1152 | The bounded R4 audit of the standards tables is merged ([#1593](https://github.com/zhouy1017/ai7-harness/pull/1593): four wrong character-form targets removed). The importable library is R5's ADR 0106 section above. |
+| #1074 | The R4 quality re-measurement is recorded ([#1600](https://github.com/zhouy1017/ai7-harness/pull/1600), after the #1538 re-recording in [#1583](https://github.com/zhouy1017/ai7-harness/pull/1583)); its real-editor half waits for the single human test after 0.7.9. |
 
 ## Delivered R2 → 0.7.1 Alpha (#1472)
 
@@ -90,63 +230,6 @@ R1 is delivered as `dev@2026a9ee` through [PR #1468](https://github.com/zhouy101
 | 2 (renderer) | [#1452](https://github.com/zhouy1017/ai7-harness/issues/1452) | One 改稿方式 control, icon 撤销 / 重做, one 衍生稿件 menu; the toolbar fits on one row and wraps instead of clipping in a narrow shell | `ae444945`, `e903fa28` (#1460, #1465) |
 | 3 (service) | [#1435](https://github.com/zhouy1017/ai7-harness/issues/1435) | Repeated or punctuation-variant quotations keep their replacement; guessed locations keep one-click 接受 and stay out of bulk apply | `106a47e5` (#1462) |
 | repair | [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) | The 批注栏 works in the 1008×681 overlay form and a click on a mark is no longer dropped; found by the hosted Gate | `bedddbca` (#1469) |
-
-
-## After R3: R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.8.0 (#1516)
-
-The Owner's 2026-11-16 / 17 decisions moved the programme to this order and put one human test after all of it; no human test sits between rounds. Each round runs as usual — the test guest's full ladder, the hosted Full Gate, the merge into `dev`, the fixed human-test folder refresh and data-retention check, and the PROGRESS and plan updates.
-
-| Round | Version | Scope | Issues |
-| --- | --- | --- | --- |
-| R4 | 0.7.3 Alpha | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
-| Interface and pages round | 0.7.4 Alpha | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
-| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list. Design accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md) (#1555; the Owner’s 「R5按照推荐」, 2026-11-18); no code started. Slices R5-1 … R5-7 below start after 0.7.3 is delivered. The 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md), #1152; the Owner, 2026-11-19) joins R5 as R5-L1 … R5-L5. The Underlying Flash Service and lightweight hybrid retrieval ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608); superseding closed [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027)) joins R5 as R5-F1 … R5-F2 | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608) |
-| One human test | — | Arranged by the Owner after 0.8.0 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
-
-The three rounds overlap in development and keep this delivery order. The [wave Issue #1517](https://github.com/zhouy1017/ai7-harness/issues/1517) owns the R4 batches, file ownership and merge order; [PROGRESS](../../PROGRESS.md) owns what is delivered.
-
-## R5 → 0.8.0 Alpha: accepted design (#1540, ADR 0105)
-
-The storage design of [#1555](https://github.com/zhouy1017/ai7-harness/issues/1555) is accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md). The Owner answered all 13 of its decisions as recommended: 「R5按照推荐」, 2026-11-18, recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540#issuecomment-6975379870).
-
-0.8.0 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.8.0 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
-
-R5 builds on `codex/integration-0.8.0`. R5-2 through R5-6 travel as one train, so the fold never lands without its converter.
-
-| Slice | What the editor can newly do | Order |
-| --- | --- | --- |
-| R5-1 | A suggestion moved whole by 分段 / 合段 keeps its 撤销本次修改 | After #1536 merges; beside 0.7.4 |
-| R5-2 | (internal) One baseline at revision 117 / Data Version 2; the migration chain is deleted | First on the train |
-| R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
-| R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
-| R5-6 | One-click upgrade to 0.8.0 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly | After R5-5 and #1556; lands the train |
-| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; 0.8.0 | After the train, R5-L2 … R5-L5, R5-F1 … R5-F2 and 0.7.4 |
-
-Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
-- a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
-- reads stay within 10 % of the baseline;
-- undoing a 2,000-place replace-all holds the write lock at most 2 s.
-
-### The 字表与词表 library (#1152, ADR 0106)
-
-The Owner's three directions of 2026-11-19 replace the hard-coded standards tables with a library in 知识库 › 字表与词表. An editor imports, updates, disables or deletes 字表 and 词表 there, and 规范用语核查 reads the enabled ones, pinned by version. A corrected or newer standard needs no program release. Pre-installed: 《通用规范汉字表》, its 附表1, GF 1001-2001 and, as the default 常用词表, 《现代汉语常用词表（第2版）》 (the Owner's later directions of the same day). Other dictionary tables are imported by the house.
-
-| Slice | What the editor can newly do | Order |
-| --- | --- | --- |
-| R5-L1 | (internal) The library's relations in the revision-117 baseline; the four pre-installed tables in every new and every upgraded store: the three national ones with content equal to today's, and the default 常用词表 (words and ranks); inventory and merge class | On the train with R5-2; R5-6 calls its install function |
-| R5-L2 | Import any table file: the AI7 format and regular tables convert directly; anything else with text is formatted by the Underlying Flash Service (`standards-table-formatting`, [ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), R5-F1) after a usage estimate and confirmation, every entry traced to the file and doubtful rows held for confirmation; a new version shows what changed; delete removes the source and its data together | After the train and R5-F1 land |
-| R5-L3 | 规范用语核查 checks against the enabled tables, says each suggestion's strength (国家规范 / 辞书推荐 / 本社要求) and basis, shows disagreeing tables instead of choosing, notes a possibly uncommon spelling 「可能是不常用的写法，请核对」 from the 常用词表, and keeps past results readable with 「依据的字表已删除」 | After the train lands; beside R5-L2 |
-| R5-L4 | 知识库 › 字表与词表: one item per imported table with its conversion and application status, open to view, confirm and edit rows, 导入新版本, 删除, 恢复预装字表 | After R5-L2 and R5-L3 |
-| R5-L5 | (internal) The tables leave the program code; the pre-installed seed is their only copy | After R5-L3; before R5-7 |
-
-### The Underlying Flash Service and lightweight hybrid retrieval (#1608, ADR 0107; superseding #1027)
-
-The Owner's directions of 2026-11-19 ([ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), [#1608](https://github.com/zhouy1017/ai7-harness/issues/1608)) close [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) (retiring the local ONNX `multilingual-e5-small` candidate), replace the four legacy Model Roles with the 2×2 role matrix **`Foreground Pro Role / 前台 Pro 角色`**, **`Foreground Flash Role / 前台 Flash 角色`**, **`Underlying Pro Role / 底层 Pro 角色`** (dedicated to autonomous learning rule synthesis, configurable to a stronger reasoning model), and **`Underlying Flash Role / 底层 Flash 角色`** (`Pro` and `Flash` denoting capability tiers rather than model branding), and unify all low-level, non-user-facing, deterministically verified model calls (`standards-table-formatting` for #1152 R5-L2, `learning-sample-tidying`, `retrieval-query-expansion` & `retrieval-rerank`, `material-translation`, `guideline-clause-formatting`, and `model-connection-test`) behind an extensible `FlashTaskContract` registry.
-
-| Slice | What the editor can newly do | Order |
-| --- | --- | --- |
-| R5-F1 | Configure or inherit the 2×2 four-role bindings (`前台 Pro`, `前台 Flash`, `底层 Pro` for autonomous learning rule synthesis, `底层 Flash` for low-level conversion/tidying/retrieval); raw learning signals are pre-tidied on `底层 Flash` (`learning-sample-tidying`) before `底层 Pro` synthesizes `审阅偏好` proposals (`learning-curation`); low-level tasks (`standards-table-formatting`, `learning-sample-tidying`, `material-translation`, `guideline-clause-formatting`, `model-connection-test`, retrieval assist) run on the Underlying Flash Service through the extensible `FlashTaskContract` registry | After the train lands; before or alongside R5-L2 |
-| R5-F2 | Search across manuscripts, materials and retained sources finds synonyms, shared-morpheme phrases, supplementary-plane Han characters (`U+20BB7`) and baseline character/term aliases without building local vector indexes, using Node `Intl.Segmenter` + bigrams + weighted unigram morphemes + `NFKC`, multi-query `retrieve(queries[])` with RRF, and optional Underlying Flash query expansion and Top-K candidate reranking (with negation-distractor filtering and lexical fallback); `StubEmbeddingProvider` (`ai7-embedding/stub-1`) and `material_index_vectors` are removed in revision 117 | Schema drop on the R5-2 train; retrieval and Flash rerank after R5-F1 and before R5-7 |
 
 ## Delivered #1444 (0.6.5 Beta)
 

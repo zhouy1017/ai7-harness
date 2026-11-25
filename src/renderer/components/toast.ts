@@ -3,6 +3,7 @@ let host: HTMLElement | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let remaining = TOAST_MS;
 let since = 0;
+let said = '';
 
 /** All transient messages replace one capsule, including completion notices. */
 export function showToast(message: string, options: { tone?: string; action?: { label: string; run(): void } } = {}): void {
@@ -21,6 +22,7 @@ export function showToast(message: string, options: { tone?: string; action?: { 
   clearTimeout(timer);
   const text = document.createElement('span');
   text.textContent = message;
+  said = message;
   host.replaceChildren(text);
   host.dataset['tone'] = options.tone ?? 'neutral';
   if (options.action) {
@@ -38,11 +40,12 @@ export function showToast(message: string, options: { tone?: string; action?: { 
   resume();
 }
 
-export function hideToast(): void { clearTimeout(timer); if (host) host.hidden = true; }
+/** Takes the capsule away; with `message`, only while that is still what it says, so a later notice is left alone. */
+export function hideToast(message?: string): void { if (message !== undefined && message !== said) return; clearTimeout(timer); if (host) host.hidden = true; }
 function pause(): void { if (since) remaining = Math.max(0, remaining - (Date.now() - since)); since = 0; clearTimeout(timer); }
 function resume(): void {
   clearTimeout(timer);
   if (!host || host.hidden || host.matches(':hover') || host.contains(document.activeElement)) return;
   since = Date.now();
-  timer = setTimeout(hideToast, remaining);
+  timer = setTimeout(() => hideToast(), remaining);
 }

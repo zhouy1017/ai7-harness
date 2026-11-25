@@ -1,6 +1,9 @@
+import { readBookFindingsInRoute } from './book-findings.js';
+import { registerImportEditingHandlers } from './import-editing-handlers.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { registerProductionAndPackageHandlers, registerDeliverablesHandlers } from './deliverables-handlers.js';
+import { registerMilestoneHandlers } from './milestone-handlers.js';
 import { registerReviewHandlers } from './review-handlers.js';
 import { registerReviewGuidelineVersionHandlers, registerKnowledgeBaseHandlers } from './knowledge-base-handlers.js';
 import { registerLearningDecisionHandlers, registerLibraryLearningHandlers } from './library-learning-handlers.js';
@@ -8,10 +11,13 @@ import { registerDataVersionHandler, registerDataStorageHandlers } from './data-
 import { registerSeriesKnowledgeHandlers, registerSeriesHandlers } from './series-handlers.js';
 import { registerEvaluationHandlers } from './evaluation-handlers.js';
 import { createFilePickers } from './file-pickers.js';
+import { createSourceOpener, lockWindowNavigation, registerSourceBrowserHandler, type SourceOpener } from './source-browser.js';
 import { randomUUID } from 'node:crypto';
 import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
+import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
+import { e2eWindowSize, maximizeE2eWindow } from './e2e-window.js';
 import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   app,
   BrowserWindow,
@@ -61,15 +67,9 @@ import {
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
   type ModelServiceSettingsProjection,
-  modelServiceModels,
   type ModelServiceConnectionProjection,
   type ModelServiceCredentialInput,
   type ModelServiceRouteId,
-  type ModelServiceUnsupportedProviderProjection,
-  type ModelRoleStatus,
-  type ModelRoleStatusLabel,
-  MODEL_SERVICE_ROUTE_BINDINGS,
-  MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   MODEL_SERVICE_ROUTES,
   type PickerReselectResult,
   type PickerStageResult,
@@ -84,7 +84,6 @@ import {
 } from '../shared/protocol.js';
 import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
 import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
-import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyClose, journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import {
   DATA_VERSION_STARTUP_CLOSE,
@@ -122,7 +121,7 @@ import {
   requireStartupChoiceOutsideDataRoot,
   storeStartupDataChoice,
 } from '../shared/data-root.js';
-import { UUID_PATTERN, envelope, requireDesktop } from './handler-guards.js';
+import { UUID_PATTERN, envelope, requireDesktop, takeOnce } from './handler-guards.js';
 import type {
   ApplicationAuthorityClaims,
   EditorResourceCapability,
@@ -155,8 +154,7 @@ async function printStagedPage(stagingRoot: string, printSession: Session, pageP
       webgl: false,
     },
   });
-  printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  printer.webContents.on('will-navigate', (event) => event.preventDefault());
+  lockWindowNavigation(printer.webContents);
   try {
     await printer.loadFile(pagePath);
     const pdf = await printer.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true });
@@ -182,6 +180,9 @@ async function announceProductReadiness(): Promise<void> {
   });
 }
 
+import { createApplicationQuit, type RestoreOnQuit } from './application-quit.js';
+import { prepareUpgradeRollback, resumeStorageUpgrade, offerStorageUpgrade } from './storage-upgrade-ui.js';
+
 export function registerRendererHandlers(
   service: ServiceClient,
   getOwnedWindow: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow,
@@ -205,7 +206,8 @@ export function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'selectMainRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels'> & {
+  modelOps: Pick<RendererApi, 'refreshModelServiceModels'> & {
+    select(op: (typeof MODEL_SELECTION_OPERATIONS)[number], input: unknown): Promise<ModelServiceSettingsProjection>;
     startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
     connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
   },
@@ -214,13 +216,15 @@ export function registerRendererHandlers(
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
   consumeInjectedFolderPath: () => string | undefined,
-  quitApplication: () => 'quitting' | 'blocked',
+  quitApplication: (restore?: RestoreOnQuit) => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
   preferences: PreferenceStore,
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
   journalFaultArmed: boolean,
   navigationAnswerHoldPath?: string,
+  sourceOpener: SourceOpener = (address) => shell.openExternal(address),
+  rollbackUpgrade?: () => Promise<RestoreOnQuit | undefined>,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -754,6 +758,7 @@ export function registerRendererHandlers(
       expectedDraftVersion: input.expectedDraftVersion,
       reviewDigest: input.reviewDigest,
       commitId: input.commitAttemptId,
+      ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }),
     });
     if (
       proof.draftId !== input.draftId ||
@@ -1361,44 +1366,9 @@ export function registerRendererHandlers(
         return result;
       }),
   );
-  ipcMain.handle(
-    IPC_CHANNELS.acceptReimportDegradation,
-    (event, input: ServiceOperationMap['acceptReimportDegradation']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('acceptReimportDegradation', input);
-          captureImportReviewTarget(owned, result);
-          return result;
-        });
-      }),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.resolveReimportMapping,
-    (event, input: ServiceOperationMap['resolveReimportMapping']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('resolveReimportMapping', input);
-          rememberJobResources(owned, result, {
-            operation: 'reimport',
-            bookId: target.bookId,
-            manuscriptId: null,
-            branchId: null,
-          });
-          captureReimportJob(owned, result);
-          return result;
-        });
-      }),
-  );
+  registerImportEditingHandlers({ requireSender, requireAuthority, serializeEffect, requireImportDraft,
+    requireImportTarget, reserveExistingImportTarget, captureImportReviewTarget, rememberJobResources,
+    captureReimportJob, releaseCommitBinding, leaveBookWorkbench, service });
   ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -1413,7 +1383,7 @@ export function registerRendererHandlers(
         claims.claimCommit(owned, commit.commitId);
         let result: ServiceOperationMap['commitManuscriptReimport']['output'];
         try {
-          result = await service.call('commitManuscriptReimport', commit);
+          result = await service.call('commitManuscriptReimport', { ...commit, ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }) });
         } catch (error) {
           const deterministic = releaseNewCommitClaimAfterDeterministicFailure(
             owned,
@@ -1799,12 +1769,12 @@ export function registerRendererHandlers(
       });
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.getManuscriptRail, (event, input: ServiceOperationMap['getManuscriptRail']['input']) =>
+  for (const op of ['getManuscriptRail', 'findPendingMark'] as const) ipcMain.handle(IPC_CHANNELS[op], (event, input: ServiceOperationMap[typeof op]['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       requireManuscriptCapability(owned, input);
-      return service.call('getManuscriptRail', input);
+      return service.call(op, input as never);
     }),
   );
   // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
@@ -1970,10 +1940,10 @@ export function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel', 'selectMainRoleModel', 'selectBothRoleModels'] as const) {
-    ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
+  for (const op of MODEL_SELECTION_OPERATIONS) {
+    ipcMain.handle(IPC_CHANNELS[op], (event, input: unknown) => envelope(async () => {
       requireSender(event); requireAuthority();
-      return serializeEffect(() => modelOps[op](input));
+      return serializeEffect(() => modelOps.select(op, input ?? {}));
     }));
   }
   ipcMain.handle(IPC_CHANNELS.refreshModelServiceModels, (event, input: { route: ModelServiceRouteId }) => envelope(async () => {
@@ -2243,17 +2213,16 @@ export function registerRendererHandlers(
         });
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: { offset: number }) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: Parameters<RendererApi['inspectBookFindings']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const generation = owned.routeGeneration;
       const sequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBookFindings', { bookId: route.bookId, offset: input?.offset ?? 0 });
-      requireCurrentRouteReadEpoch(owned, generation, sequence);
-      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
-      return result;
+      return readBookFindingsInRoute(input, route.bookId,
+        (request) => service.call('inspectBookFindings', { ...request, bookId: route.bookId }),
+        () => requireCurrentRouteReadEpoch(owned, generation, sequence));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectParagraphAnalysis, (event, input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
@@ -2857,8 +2826,9 @@ export function registerRendererHandlers(
   registerKnowledgeBaseHandlers({ chooseDeveloperProposalFile, requireSender, requireAuthority, service, serializeEffect, requireCurrentBookRoute, requireCurrentRouteReadEpoch, requireCurrentRouteGeneration });
   registerEvaluationHandlers({ requireSender, requireAuthority, service, requireCurrentBookRoute, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, rememberEditorResource });
   registerLibraryLearningHandlers({ chooseLibraryMaterialFile, requireSender, requireAuthority, service, serializeEffect, preferences });
+  registerSourceBrowserHandler({ requireSender, requireAuthority, requireCurrentBookRoute, requireCurrentRouteGeneration, service, opener: sourceOpener });
   registerSeriesHandlers({ requireSender, requireAuthority, service, serializeEffect });
-  registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication });
+  registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication, rollbackUpgrade });
   registerSeriesKnowledgeHandlers({ requireSender, serializeEffect, requireAuthority, requireManuscriptCapability, service });
   registerDataVersionHandler({ requireSender, requireAuthority, service });
   registerLearningDecisionHandlers({ requireSender, requireAuthority, service, serializeEffect });
@@ -3447,46 +3417,23 @@ export function registerRendererHandlers(
       });
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.saveMilestone, (event, input: ServiceOperationMap['saveMilestone']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        const capability = requireManuscriptCapability(owned, input);
-        const result = await service.call('saveMilestone', input);
-        requireResourceIdentity(capability, result);
-        return result;
-      });
-    }),
-  );
-  ipcMain.handle(IPC_CHANNELS.undoManuscript, (event, input: ServiceOperationMap['undoManuscript']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        requireManuscriptCapability(owned, input);
-        const result = await service.call('undoManuscript', input);
-        if (result.branchId !== input.branchId) {
-          throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '撤销结果不属于当前稿件分支。');
-        }
-        return result;
-      });
-    }),
-  );
-  ipcMain.handle(IPC_CHANNELS.redoManuscript, (event, input: ServiceOperationMap['redoManuscript']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        requireManuscriptCapability(owned, input);
-        const result = await service.call('redoManuscript', input);
-        if (result.branchId !== input.branchId) {
-          throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '重做结果不属于当前稿件分支。');
-        }
-        return result;
-      });
-    }),
-  );
+  registerMilestoneHandlers({ requireSender, requireAuthority, requireCurrentBookRoute, requireManuscriptCapability, rememberManuscriptCapability, requireResourceIdentity, service, serializeEffect });
+  // Ctrl+Z, redo, and the steps they would take next (Issue #1654): each bound to the window's own manuscript branch.
+  for (const [operation, refusal] of [['undoManuscript', '撤销结果不属于当前稿件分支。'], ['redoManuscript', '重做结果不属于当前稿件分支。'],
+    ['inspectEditorHistory', '撤销记录不属于当前稿件分支。']] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          const result = await (service.call as (op: typeof operation, value: typeof input) => Promise<{ branchId: string }>)(operation, input);
+          if (result.branchId !== input.branchId) throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', refusal);
+          return result;
+        });
+      }),
+    );
+  }
   // 保存人员 (Issue #431, S83): a Book's 作者, 责编 and 相关人 on its 工作概览 — the Book this window shows, or none yet.
   ipcMain.handle(IPC_CHANNELS.updateBookPeople, (event, input: Parameters<RendererApi['updateBookPeople']>[0]) =>
     envelope(async () => {
@@ -3562,6 +3509,7 @@ export async function runApplication(): Promise<void> {
   let unregisterHandlers: (() => void) | undefined;
   let launcherLease: NodeJS.Timeout | undefined;
   const ownedWindows = new Map<number, OwnedRendererWindow>();
+  const applicationQuit = createApplicationQuit(() => ownedWindows.values(), () => app.quit());
   const bookWindows = new Map<string, OwnedRendererWindow>();
   // #1504: a renderer leave parks that window's own job/search/preview grants for its Book. Only the same window's next
   // non-activating re-acquire of that Book, with no route of its own and no other holder in between, takes them back.
@@ -3710,7 +3658,7 @@ export async function runApplication(): Promise<void> {
     for (const attentionId of owned.recoveryAttentionIds) claims.releaseAttention(owned, attentionId);
     for (const commitId of owned.importCommitIds) claims.releaseCommit(owned, commitId);
   };
-  const stop = (): Promise<void> =>
+  const stop = (restore?: RestoreOnQuit): Promise<void> =>
     (shutdown ??= (async () => {
       journeyClose('stop-entry');
       if (launcherLease) clearInterval(launcherLease);
@@ -3718,6 +3666,7 @@ export async function runApplication(): Promise<void> {
       unregisterHandlers?.();
       unregisterHandlers = undefined;
       await service?.stop();
+      await restore?.();
       quitReady = true;
       journeyClose('stop-complete');
     })());
@@ -3737,12 +3686,8 @@ export async function runApplication(): Promise<void> {
       return;
     }
     event.preventDefault();
-    const riskyWindows = [...ownedWindows.values()].filter(
-      (owned) => owned.closeRisk && !owned.window.isDestroyed(),
-    );
-    if (!quitting && riskyWindows.length > 0) {
+    if (!quitting && applicationQuit.blocked()) {
       journeyClose('close-risk-blocked');
-      for (const owned of riskyWindows) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
       return;
     }
     // The existing guard allowed this close, including a quit already in progress.
@@ -3752,7 +3697,7 @@ export async function runApplication(): Promise<void> {
       return;
     }
     quitting = true;
-    void stop().then(() => {
+    void stop(applicationQuit.takeRestore()).then(() => {
       journeyClose('app-quit');
       app.quit();
     }, () => {
@@ -3777,7 +3722,7 @@ export async function runApplication(): Promise<void> {
     if (packaged !== null) {
       launch = {
         dataRoot: undefined, allowFirstRunChooser: false, launchForm: packaged.launchForm,
-        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined,
+        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined, browserRecord: false,
         injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
         recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
         answerHoldPath: undefined, navigationAnswerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
@@ -3873,7 +3818,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 116, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 117, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -3900,7 +3845,7 @@ export async function runApplication(): Promise<void> {
     const exportStagingRoot = await ensureCanonicalDataDirectory(dataRoot, 'export-staging');
     startupLocation = reachStartup('service-ready');
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
-    service = await ServiceClient.start(
+    const startService = () => ServiceClient.start(
       process.execPath,
       serviceEntry,
       dataRoot,
@@ -3918,6 +3863,16 @@ export async function runApplication(): Promise<void> {
       launch.calibrationMinBooks,
       launch.journalFaultArmed,
     );
+    if (!(await resumeStorageUpgrade(serviceEntry, dataRoot, shellRoot))) {
+      app.quit();
+      return;
+    }
+    try { service = await startService(); }
+    catch (error) {
+      if (!(error instanceof ServiceCallError && error.code === 'DATA_VERSION_OLDER')) throw error;
+      if (!(await offerStorageUpgrade(serviceEntry, dataRoot))) { app.quit(); return; }
+      service = await startService();
+    }
     service.onUnexpectedExit(() => {
       crashHook(crashes, 'service-exit', () => undefined)({ reason: 'abnormal-exit' });
       serviceInterrupted = true;
@@ -4007,11 +3962,8 @@ export async function runApplication(): Promise<void> {
       injectedPickerPath: string | undefined,
       revealAndFocus: boolean,
     ): Promise<OwnedRendererWindow> => {
-      const e2eWindow = process.env.AI7_E2E_JOURNEY
-        ? /^([1-9]\d*)x([1-9]\d*)$/.exec(process.env.AI7_E2E_WINDOW ?? '') : null;
       const window = new BrowserWindow({
-        width: e2eWindow ? Number(e2eWindow[1]) : 1180,
-        height: e2eWindow ? Number(e2eWindow[2]) : 820,
+        ...e2eWindowSize({ width: 1180, height: 820 }),
         minWidth: 920,
         minHeight: 680,
         show: false,
@@ -4051,9 +4003,7 @@ export async function runApplication(): Promise<void> {
         requireDesktop(!bookWindows.has(route.bookId), 'AI7_WORKBENCH_DUPLICATE_BOOK');
         assignRoute(owned, route);
       }
-      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      window.webContents.on('will-navigate', (event) => event.preventDefault());
-      window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+      lockWindowNavigation(window.webContents);
       window.webContents.on('render-process-gone', (_event, detail) =>
         crashHook(crashes, 'render-process-gone', terminate)(detail));
       window.on('close', (event: ElectronEvent) => {
@@ -4077,6 +4027,7 @@ export async function runApplication(): Promise<void> {
         });
       });
       await Promise.all([window.loadFile(resolve(__dirname, '..', 'renderer', 'index.html')), firstPaint]);
+      if (revealAndFocus) maximizeE2eWindow(window);
       if (productReady) window.webContents.send(MAIN_EVENTS.productReady);
       if (revealAndFocus) focusOwnedWindow(owned);
       return owned;
@@ -4280,112 +4231,9 @@ export async function runApplication(): Promise<void> {
     const settingsProjection = async (): Promise<ModelServiceSettingsProjection> => {
       const state = await service!.call('getModelServiceStoredState', {});
       const connections = await Promise.all(state.connections.map(confirmedConnection));
-      const connectionOf = (route: ModelServiceRouteId): ModelServiceConnectionProjection | null =>
-        connections.find((connection) => connection.binding.providerId === route) ?? null;
-      const statusOf = (connection: ModelServiceConnectionProjection | null): ModelRoleStatus => protectedSecretStore === undefined
-        ? 'unavailable'
-        : connection === null || connection.credentialOperationState === 'missing'
-          ? 'setup-required'
-          : connection.credentialOperationState === 'ready' ? 'available' : 'needs-attention';
-      const labelOf = (status: ModelRoleStatus): ModelRoleStatusLabel => status === 'available' ? '可用'
-        : status === 'setup-required' ? '需设置' : status === 'needs-attention' ? '需处理' : '不可用';
-      // The route new Tasks use (Issue #811): the editor's choice, else the default Go route once its credential is ready.
-      const selected = connections.find((connection) => connection.selected) ?? null;
-      const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
-        (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
-      const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
-      const mainStatus = statusOf(connection);
-      const mainStatusLabel = labelOf(mainStatus);
-      const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
-      const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
-      const fastStatus = statusOf(fastConnection);
-      const fastBinding = fastConnection?.fastBinding ?? fastConnection?.binding ?? null;
-      const mainStatusDetail = protectedSecretStore === undefined
-        ? '当前操作系统安全凭据库不可用；未启用替代存储。'
-        : mainStatus === 'available'
-          ? '连接名称与凭据已由操作系统安全凭据库保护。'
-          : mainStatus === 'needs-attention'
-            ? '凭据状态无法确认；请重新输入或移除。'
-            : '请输入连接名称与凭据。';
-      const unconfigured = (
-        roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
-        roleLabel: '快速交互角色' | '疑难升级角色' | '前沿模型角色',
-        purposeLabel: string,
-      ) => ({
-        roleId,
-        roleLabel,
-        purposeLabel,
-        status: 'setup-required' as const,
-        statusLabel: '需设置' as const,
-        statusDetail: '当前版本未配置此角色的模型服务绑定。',
-        binding: null,
-        connection: null,
-      });
-      // Under ordinary-production the Fast Interaction Role takes the one route the editor chose, as the main role does.
-      const fastInteraction = fastConnection !== null
-        ? {
-            roleId: 'fast-interaction' as const,
-            roleLabel: '快速交互角色' as const,
-            purposeLabel: '快速交互与低风险候选生成',
-            status: fastStatus,
-            statusLabel: labelOf(fastStatus),
-            statusDetail: '独立保存快速交互模型；主编辑角色的切换不会改变此选择。',
-            binding: fastBinding,
-            connection: fastConnection,
-          }
-        : unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成');
-      const supportedLabels = new Set(MODEL_SERVICE_ROUTES.map((route) => CONFIGURED_PROVIDER_LABELS[route]));
-      const unsupportedProviders: ModelServiceUnsupportedProviderProjection[] = [];
-      for (const route of CONFIGURED_ROUTE_IDS) {
-        const providerLabel = CONFIGURED_PROVIDER_LABELS[route];
-        if (supportedLabels.has(providerLabel) || unsupportedProviders.some((provider) => provider.providerLabel === providerLabel)) continue;
-        unsupportedProviders.push({ providerId: route, providerLabel, statusLabel: '尚未支持' });
-      }
-      return {
-        searchBackends: await service!.call('getSearchBackendSettings', {}),
-        proxy: state.proxy,
-        lastProxyProbe: state.lastProxyProbe ?? null,
-        roles: [
-          fastInteraction,
-          {
-            roleId: 'main-editorial',
-            roleLabel: '主编辑角色',
-            purposeLabel: '中文长篇写作、编辑建议与复杂指令处理',
-            status: mainStatus,
-            statusLabel: mainStatusLabel,
-            statusDetail: mainStatusDetail,
-            binding: mainBinding,
-            connection,
-          },
-          unconfigured('difficult-escalation', '疑难升级角色', '疑难或高后果工作升级'),
-          unconfigured('frontier', '前沿模型角色', '挑战性或明确授权的高后果工作'),
-        ],
-        routeChoice: {
-          routes: MODEL_SERVICE_ROUTES.map((route) => {
-            const routeConnection = connectionOf(route);
-            const status = statusOf(routeConnection);
-            return {
-              route,
-              binding: routeConnection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[route],
-              models: state.channels.find((channel) => channel.route === route)?.models.map(({ modelId, modelLabel }) => ({ ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel })) ?? modelServiceModels(route),
-              isDefault: route === 'opencode-go',
-              inUse: route === inUseRoute,
-              status,
-              statusLabel: labelOf(status),
-              connection: routeConnection,
-            };
-          }),
-          unsupportedProviders,
-          effectLabel: MODEL_SERVICE_ROUTE_EFFECT_LABEL,
-        },
-        protectedSecretStore: {
-          backend: process.platform === 'win32' ? 'windows-credential-manager' : 'macos-keychain',
-          label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
-          availability: protectedSecretStore === undefined ? 'unavailable' : 'available',
-        },
-        launchPolicy: state.launchPolicy, channels: state.channels,
-        authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
-      };
+      // A connection confirmed absent from the secret store changed in the service; its roles are read again.
+      const roles = connections.some((connection, index) => connection !== state.connections[index]) ? (await service!.call('getModelServiceStoredState', {})).modelRoles : state.modelRoles;
+      return modelServiceSettingsProjection({ ...state, modelRoles: roles }, connections, await service!.call('getSearchBackendSettings', {}), protectedSecretStore !== undefined, process.platform);
     };
     const routeOf = (value: unknown): ModelServiceRouteId => {
       if (!MODEL_SERVICE_ROUTES.includes(value as ModelServiceRouteId)) {
@@ -4524,13 +4372,11 @@ export async function runApplication(): Promise<void> {
       saveModelServiceCredential,
       removeModelServiceCredential,
       {
-        selectMainRoleModel: async (input) => { await service!.call('selectMainRoleModel', input); return settingsProjection(); },
-        selectBothRoleModels: async (input) => { await service!.call('selectBothRoleModels', input); return settingsProjection(); },
+        select: async (op, input) => { await service!.call(op, input as never); return settingsProjection(); },
         refreshModelServiceModels: async (input) => {
           const modelDiscovery = await service!.call('refreshModelServiceModels', input);
           return { ...(await settingsProjection()), modelDiscovery };
         },
-        selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
         startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
         connectionTestSettings: settingsProjection,
       },
@@ -4544,41 +4390,19 @@ export async function runApplication(): Promise<void> {
         };
       })(),
       // J-07's Save-dialog answer is single-use, like the picker's: every later choice is the platform's own.
-      (() => {
-        let pending = launch.injectedSavePath;
-        return (): string | undefined => {
-          const path = pending;
-          pending = undefined;
-          return path;
-        };
-      })(),
+      takeOnce(launch.injectedSavePath),
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
       // J-07's folder-dialog answer for a package export (Issue #416, S67b) is single-use too.
-      (() => {
-        let pending = launch.injectedFolderPath;
-        return (): string | undefined => {
-          const path = pending;
-          pending = undefined;
-          return path;
-        };
-      })(),
-      // 现在关闭 AI7 (Issue #434, S86c): a window still holding changes not yet saved keeps AI7 open and says so, as when the
-      // editor closes AI7 themselves; otherwise AI7 closes once the answer is on its way.
-      () => {
-        const risky = [...ownedWindows.values()].filter((owned) => owned.closeRisk && !owned.window.isDestroyed());
-        if (risky.length > 0) {
-          for (const owned of risky) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
-          return 'blocked';
-        }
-        setImmediate(() => app.quit());
-        return 'quitting';
-      },
+      takeOnce(launch.injectedFolderPath),
+      applicationQuit.request,
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
       preferenceStore,
       () => ownedWindows.values(),
       () => [...ownedWindows.values()],
       launch.journalFaultArmed,
       launch.navigationAnswerHoldPath,
+      await createSourceOpener(dataRoot, launch.browserRecord),
+      () => prepareUpgradeRollback(serviceEntry, dataRoot, applicationQuit.blocked),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

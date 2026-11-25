@@ -15,12 +15,12 @@ const button = (label: string, className: string, action: () => void | Promise<v
   const node = element('button', className, label); node.addEventListener('click', () => void action()); return node;
 };
 
-function mount(readFails: boolean) {
+function mount(readFails: boolean, extra: Partial<Parameters<typeof createSettingsScreens>[0]> = {}) {
   const root = element('main'); miniDocument.body.append(root as never);
   const settings = createSettingsScreens({ setStatus: vi.fn(), panel: () => element('section'), element, button, replaceScreen: vi.fn(), api: {} as never,
     rendererErrorMessage: (_error, fallback) => fallback, screen: root, renderRunReport: vi.fn() as never, applyKeyboardBindings: vi.fn(), keyboardSettingsOff: undefined,
     renderModelServiceSettings: vi.fn(async () => undefined), renderDataAndStorage: vi.fn(async () => undefined), renderDiagnostics: vi.fn(),
-    appearance: {} as never, viewPreferences: {} as never });
+    appearance: {} as never, viewPreferences: {} as never, commands: { run: vi.fn(), usable: () => true }, ...extra });
   vi.stubGlobal('window', { ai7: { getModelServiceSettings: async () => { throw new Error(readFails ? 'unreadable' : 'unused'); }, getPreferences: async () => ({ values: { 'model.favourites': [] } }) }, setInterval: () => 0, clearInterval: () => undefined });
   const modelService = createModelServiceSettings({ element, button, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (state, content) => root.replaceChildren(settings.settingsLayout(state, content)) });
@@ -45,4 +45,32 @@ it('has no page of its own for 设置, lays a settings page with its navigation 
   expect(settings.settingsLayout('help', element('section')).className).toBe('settings-layout');
   const other = element('section');
   expect(settings.settingsLayout('landing', other)).toBe(other);
+});
+
+it('opens a settings page at the top of the window when it follows another screen and keeps the place on a repaint (#1548)', () => {
+  const { settings } = mount(false);
+  const page = { scrollTop: 300 };
+  Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: page });
+  const lay = (state: string, offset: number): number => { page.scrollTop = offset; settings.settingsLayout(state, element('section')); return page.scrollTop; };
+  try {
+    expect(lay('help', 300)).toBe(0); // from another screen
+    expect(lay('help', 300)).toBe(300); // a repaint of the same page
+    expect(lay('appearance', 300)).toBe(0); // a switch to another settings page
+    expect(lay('book-review', 300)).toBe(300); // any other screen keeps its own
+    expect(lay('appearance', 300)).toBe(0); // back to a settings page
+  } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
+});
+
+it('opens 帮助 on 第一次审稿 with its heading focused, and a step button runs its registry command (#1548)', () => {
+  const run = vi.fn();
+  let shown: MiniElement | null = null;
+  const { settings } = mount(false, {
+    api: { inspectDataVersion: async () => ({ softwareVersion: '0.0.0', dataVersion: 1, frozen: false }) } as never,
+    commands: { run, usable: () => true },
+    replaceScreen: (_state, content) => { shown = content as unknown as MiniElement; },
+  });
+  settings.renderHelp('first-review');
+  expect(miniDocument.activeElement).toBe(shown!.querySelector('[data-help-section="first-review"] h4'));
+  shown!.querySelector('[data-help-step-go="review"]')!.click();
+  expect(run).toHaveBeenCalledWith('review.new');
 });

@@ -1,8 +1,8 @@
 {
   "name": "ai7-harness",
-  "version": "0.7.3",
+  "version": "0.7.9",
   "ai7": {
-    "dataVersion": 1
+    "dataVersion": 2
   },
   "private": true,
   "description": "AI7 Chinese-first editorial desktop application",
@@ -21,7 +21,8 @@
     "docs:check": "node tools/check-docs.mjs",
     "words:report": "node tools/words-report.mjs",
     "test": "vitest run tests/unit",
-    "test:service": "vitest run tests/service",
+    "test:service": "vitest run tests/service --maxWorkers=3",
+    "test:service:weights": "node tools/refresh-service-weights.mjs",
     "build": "node tools/build-controller.mjs",
     "version:identity": "node tools/build-identity.mjs",
     "inspect": "node tools/inspect.mjs",

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { builderConfiguration, copyRuntimeClosure, packagerArtifacts, plannedOutputs, selfCheckEnvironment } from '../../tools/package.mjs';
 
-const identity = { schema: 1, softwareVersion: '0.4.1', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
+const identity = { schema: 1, softwareVersion: '0.4.1', dataVersion: 2, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
 
 describe('host-native offline package inputs', () => {
   it('passes only OS prerequisites to the installed-product self-check', () => {

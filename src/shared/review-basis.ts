@@ -11,6 +11,26 @@ export function reviewFindingHasGuessedAnchor(note: string): boolean {
   return findingNote.startsWith(REVIEW_GUESSED_ANCHOR_NOTE_PREFIX);
 }
 
+type BatchFinding = Pick<import('./protocol/review-runs.js').ReviewFindingProjection,
+  'note' | 'markId' | 'markStatus' | 'anchorState' | 'replacement' | 'blockId' | 'fromGrapheme' | 'toGrapheme'>;
+
+/** The preview counts and Apply select the same standing, non-overlapping local suggestions. */
+export function standingBatchSuggestions<T extends BatchFinding>(suggestions: readonly T[], local: boolean): T[] {
+  const exact = suggestions.filter(f => !reviewFindingHasGuessedAnchor(f.note) && f.markId !== null && f.markStatus === 'open'
+    && f.anchorState === 'exact' && f.replacement !== null);
+  if (!local) return exact;
+  const ordered = [...exact].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.toGrapheme - b.toGrapheme);
+  const overlaps = new Set<T>();
+  let block = '', end = -1;
+  for (const [i, current] of ordered.entries()) {
+    if (block !== current.blockId) { block = current.blockId; end = -1; }
+    const next = ordered[i + 1];
+    if (current.fromGrapheme < end || (next?.blockId === block && next.fromGrapheme < current.toGrapheme)) overlaps.add(current);
+    end = Math.max(end, current.toGrapheme);
+  }
+  return exact.filter(f => !overlaps.has(f));
+}
+
 /** Structured review basis. Historical snapshots/report records retain their original text. */
 export interface ReviewCategoryBasis {
   readonly categoryId: string;

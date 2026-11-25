@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -198,10 +199,20 @@ async function createRendererManager(browser) {
 }
 
 async function waitFor(renderer, expression, name, timeout = 60_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  const deadline = performance.now() + timeout;
+  let timer;
+  const expired = new Promise(resolve => { timer = setTimeout(resolve, timeout, false); });
+  try {
+    while (performance.now() < deadline) {
+      const predicate = renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false);
+      const matched = await Promise.race([predicate, expired]);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) break;
+      if (matched) return;
+      await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)));
+    }
+  } finally {
+    clearTimeout(timer);
   }
   throw journeyCheckFailure('J-13', name);
 }
@@ -392,8 +403,7 @@ async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -966,7 +976,7 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'library-find');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'series' && ${notice} === '已列出找到的图书'`, 'library-found');
     const found = await renderer.evaluate(`[document.querySelector('.book-filter-line')?.textContent ?? null, Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item button[data-book-id]'), (button) => button.dataset.bookId)]`);
-    requireJourney(JSON.stringify(found) === JSON.stringify([`按书系查找「${SERIES}」`, [first, second]]), 'library-found-words', found);
+    requireJourney(found[0] === `按书系查找「${SERIES}」` && JSON.stringify([...found[1]].sort()) === JSON.stringify([first, second].sort()), 'library-found-words', found);
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'library-clear');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="landing"] article.book-summary-item').length === 3`, 'library-cleared');
 
@@ -2086,13 +2096,10 @@ async function main() {
     await leaveReviewToLibrary(renderer, 'series-sheet-leave');
 
     at('procedure-selection-run');
-    // The house's 可复用工序 on a selection (Issue #423, S77 deferred item a): in the member's manuscript the selection menu's AI7 任务
-    // group lists 《书系复核》 — 《体例复核》, every version stopped, is listed nowhere — while 润色这段 is enabled, this launch binding
-    // a model fixture (Issue #842), and 再选一段加入 is refused in words. Its entry opens the 就这段发起任务 composer with it held; 书系一致性 is unticked and
-    // the editor's (S31b's reading, ruling 3): left unticked, 准备任务 prepares nothing and says so; ticked, it prepares a 当前选区
-    // Run pinned to version 1 with nothing left out, whose plan opens beside the manuscript. Its card in 任务 names the paragraph
-    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. Under the matching retained Series fixture,
-    // this stage intentionally leaves the Run prepared and claims no selection execution.
+    // The house's 可复用工序 on a selection (Issue #423, S77 deferred item a): I-1b keeps three AI entries in the menu, with
+    // saved procedures in 就这段发起任务's composer. It offers 《书系复核》, while 《体例复核》, every version stopped, is absent.
+    // 书系一致性 remains the editor's to tick (S31b's reading, ruling 3): unticked, nothing starts; ticked, the selection Run
+    // starts pinned to version 1 with nothing left out. Its card names the paragraph and 跳到所选文字 returns the caret there.
     await fill(renderer, '#book-filter-text', MEMBER, 'selection-procedure-find-text');
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'selection-procedure-find');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'selection-procedure-found');
@@ -2104,9 +2111,12 @@ async function main() {
     requireJourney(/^blk_[0-9a-f]{24}$/.test(selectionBlock ?? ''), 'selection-procedure-paragraph');
     const procedureAction = `procedure:${seriesProcedureId}`;
     await openSelectionMenu(renderer, selectionBlock, 2, 8, 'selection-procedure-menu');
-    // The group lists the house's procedures once the editor's read of them answers, and is drawn again then: wait for it.
-    await waitFor(renderer, `(() => { const item = window.__j13.item(${JSON.stringify(procedureAction)}); const polish = window.__j13.item('preset-polish'); const note = window.__j13.menu()?.textContent ?? ''; return item instanceof HTMLButtonElement && !item.disabled && item.textContent.includes(${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)}) && item.textContent.includes('可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选') && window.__j13.item(${JSON.stringify(`procedure:${procedureId}`)}) === null && polish instanceof HTMLButtonElement && !polish.disabled && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null && note.includes('要再选一段加入，请在任务草稿中操作。') && !note.includes('本社还没有启用的可复用工序'); })()`, 'selection-procedure-menu-words', 15_000);
-    await assertRenderer(renderer, `(() => { window.__j13.item(${JSON.stringify(procedureAction)}).click(); return true; })()`, 'selection-procedure-choose');
+    await waitFor(renderer, `(() => { const group = window.__j13.menu()?.querySelector('[role="group"][aria-label="AI7 任务"]'); const items = Array.from(group?.querySelectorAll('button[data-mark-action]') ?? []); return JSON.stringify(items.map(item => item.dataset.markAction)) === JSON.stringify(['scoped-ai-edit', 'task-on-selection', 'ask-on-selection']) && items.every(item => !item.disabled) && items[0].textContent.includes('让 AI 修改') && items[0].textContent.includes('润色、改写或按要求修改选中文字。') && items[1].textContent.includes('就这段发起任务') && items[1].textContent.includes('默认审阅，也可改为分析、事实核查或写作。') && items[2].textContent.includes('问 AI 助手') && items[2].textContent.includes('带着选中文字提问或讨论，不直接改稿。') && window.__j13.item('preset-polish') === null && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null; })()`, 'selection-procedure-menu-words', 15_000);
+    await assertRenderer(renderer, `(() => { window.__j13.item('task-on-selection').click(); return true; })()`, 'selection-procedure-open-composer');
+    await waitFor(renderer, `(() => { const composer = document.querySelector('.task-composer[data-task-composer="new"]'); const procedures = composer?.querySelector('[data-task-composer-action="procedures"]'); return composer?.dataset.taskComposerBook === ${JSON.stringify(member)} && composer.querySelector('[data-task-composer-field="target-ranges"]')?.checked && !composer.querySelector('[data-task-composer-field="target-book"]')?.checked && composer.querySelectorAll('.task-composer-range').length === 1 && procedures instanceof HTMLButtonElement && !procedures.disabled && procedures.textContent === '按现成工序准备…'; })()`, 'selection-procedure-draft-range');
+    await clickSelector(renderer, '.task-composer [data-task-composer-action="procedures"]', 'selection-procedure-open-saved');
+    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && Array.from(window.__j13.composer().querySelectorAll('select[data-mark-field="procedure"] option')).some(option => option.value === ${JSON.stringify(procedureAction)} && option.textContent === ${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)})`, 'selection-procedure-offered', 30_000);
+    await choose(renderer, '[data-mark-composer="task-on-selection"] select[data-mark-field="procedure"]', procedureAction, 'selection-procedure-choose');
     await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && window.__j13.composer().querySelector('select[data-mark-field="procedure"]')?.value === ${JSON.stringify(procedureAction)}`, 'selection-procedure-composer', 30_000);
     const READ_APART = `(() => { const composer = window.__j13.composer(); const set = composer?.querySelector('fieldset[data-mark-field="chosenApart"]'); const box = set?.querySelector('input[data-mark-checkbox="series-consistency"]'); if (!(set instanceof HTMLElement) || !(box instanceof HTMLInputElement)) return null; return { legend: set.querySelector('legend')?.textContent ?? null, shown: !set.hidden && box.closest('label')?.hidden === false, checked: box.checked, words: box.nextElementSibling?.textContent ?? null, hint: box.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(composer.querySelectorAll('select[data-mark-field="procedure"] option'), (option) => option.value) }; })()`;
     const apart = await renderer.evaluate(READ_APART);

@@ -7,6 +7,7 @@ import type {
   RunBudgetCeilingState,
   TaskPlanKind,
   TaskPlanProjection,
+  TaskWorkProjection,
   TaskPlanRunControlProjection,
   ResumableStopReason,
   TaskPlanStartReadiness,
@@ -15,6 +16,7 @@ import type {
   UnconfirmedStageId,
 } from '../shared/protocol.js';
 import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
 import { RUN_LIVENESS_STAGE_LABELS, attemptStateLabel, elapsedLabel, localInstantLabel, runStepIsStale } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
@@ -42,6 +44,13 @@ export const TASK_DRAWER_LOADING = '正在读取任务计划…';
 export const TASK_DRAWER_UNAVAILABLE = '无法读取这项任务的计划。';
 /** V2-UX-PLAN-007: the plan surface says, whatever else it shows, that the plan itself authorizes nothing. */
 export const TASK_DRAWER_FOOTER = '计划说明，不是运行授权';
+/**
+ * PLAN-007's line as the mode on show reads it (stage re-check, 0.7.9): developer mode keeps the sentence; an ordinary editor is told
+ * what a plan is while the Task has not started, and nothing once it has. `null` draws no line.
+ */
+export function taskDrawerFooter(started: boolean): string | null {
+  return technicalLayerVisible ? TASK_DRAWER_FOOTER : started ? null : '这里只是计划；开始任务之后才会运行。';
+}
 /** The entry each surface that raises a Task offers beside its one-line summary (S72 D4). */
 export const TASK_PLAN_OPEN = '查看计划';
 /**
@@ -154,7 +163,7 @@ export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 export function taskPlanCeilingLine(plan: TaskPlanProjection): string | null {
   // The ceiling's figure, read in the service's words or as serviceWords shows them.
   const ceiling = plan.service.usage.match(/(?:达到|至多) ([\d,]+)/u)?.[1];
-  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} 后不再发送`);
+  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, '已设用量上限，用到上限时任务会暂停');
 }
 
 /**
@@ -181,7 +190,8 @@ export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<rea
     .replace(/^不/u, '')).join('、').replace('抄范例、抄资料', '抄范例资料');
   return [
     ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
-    ['发送', `${sends ? '发往模型，' : '不发送，'}${usage}。`],
+    ['发送', technicalLayerVisible ? `${sends ? '发往模型，' : '不发送，'}${usage}。` : sends ? '发往本次选择的模型。' : '只在本机处理。'],
+    ...(plan.estimate === undefined ? [] : [['预计', plan.estimate.sentence] as const]),
     ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
     ...(technicalLayerVisible ? [['不会', `不${nonEffects}。`] as const] : []),
     ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
@@ -203,10 +213,10 @@ export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
     ...(plan.runOutcome === undefined ? {} : { runOutcome: { ...plan.runOutcome, reason: serviceWords(plan.runOutcome.reason) } }),
     scope: { ...plan.scope, process: serviceWords(plan.scope.process),
       reference: plan.wording?.reference?.map((parts) => serviceWords(words(parts, ''))) ?? all(plan.scope.reference),
-      send: serviceWords(words(plan.wording?.scopeSend, plan.scope.send)) },
-    steps: plan.steps.map((step) => ({ ...step, label: serviceWords(step.label) })),
+      send: modelEffortWords(serviceWords(words(plan.wording?.scopeSend, plan.scope.send))) },
+    steps: plan.steps.map((step) => ({ ...step, label: serviceWords(step.label), result: serviceWords(step.result) })),
     participation: { during: serviceWords(plan.participation.during), after: serviceWords(plan.participation.after) },
-    service: { ...plan.service, send: serviceWords(words(plan.wording?.serviceSend, plan.service.send)), usage: serviceWords(plan.service.usage),
+    service: { ...plan.service, send: modelEffortWords(serviceWords(words(plan.wording?.serviceSend, plan.service.send))), usage: serviceWords(plan.service.usage),
       budgetCeiling: serviceWords(plan.service.budgetCeiling) },
     outcomes: plan.wording?.outcomes?.map((parts) => words(parts, '')) ?? all(plan.outcomes),
     notDo: { ...plan.notDo, editorial: all(plan.notDo.editorial) },
@@ -251,6 +261,8 @@ export const TASK_PLAN_LOCKED_NOTE = '标「固定」的由授权规则固定，
  */
 export const TASK_PLAN_DEFAULT_RULE = '设为快速开始默认';
 export const TASK_PLAN_DEFAULT_RULE_HEADING = '这条默认规则会绑定的内容';
+/** The disclosure under 设为快速开始默认, in the words of the mode on show. */
+export const taskPlanDefaultRuleHeading = (): string => technicalWords(TASK_PLAN_DEFAULT_RULE_HEADING, '设为默认后会沿用哪些设置');
 /** What setting the rule means, above the rows it binds: a rule never starts anything by itself (TASK-028). */
 export const TASK_PLAN_DEFAULT_RULE_LEAD =
   '以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';
@@ -411,6 +423,11 @@ export function taskBarResumableStatement(reason: ResumableStopReason): string {
 export function taskBarResumableStatus(reason: ResumableStopReason): string {
   return `任务已中断 · ${resumableStopReasonLabel(reason)}`;
 }
+export const RESTART_PAUSED_REASON = 'AI7 关闭时这项任务还没有做完；已完成的部分都已保存，继续时接着处理，也可以取消它。';
+export const RESTART_QUEUED_REASON = 'AI7 关闭时这项任务还在排队，没有开始，也没有发送任何内容。';
+export function taskBarRestartStatement(state: TaskPlanProjection['state']): string | null {
+  return state.stopReason !== 'shutdown' ? null : state.key === 'paused' ? RESTART_PAUSED_REASON : state.key === 'blocked' ? RESTART_QUEUED_REASON : null;
+}
 export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: boolean): { message: string; tone: 'success' | 'error' } {
   return repeated
     ? { message: `继续后仍然 ${resumableStopReasonLabel(reason)}；没有发送任何书稿内容`, tone: 'error' }
@@ -425,8 +442,8 @@ export const TASK_BAR_RECONFIRM_AND_START = '确认新计划并开始';
  */
 export const TASK_BAR_REPREPARE = '另做一份计划';
 export const TASK_BAR_REPREPARE_FAILED = '无法另做一份计划。';
-export function taskBarReprepareNote(reason: string): string {
-  return `${reason}「另做一份计划」按同样的目标和范围做一份新计划；看过之后再开始任务。`;
+export function taskBarReprepareNote(reason: string, relaunch = false): string {
+  return relaunch ? `${reason}「重新开始…」按同样的目标和范围开始一项新任务。` : `${reason}可以另做一份计划。`;
 }
 /** Every place of the governor taken (S74a A2; Issue #49, S14): a Review Run's approval is refused with this reason. */
 export const TASK_BAR_SLOT_BUSY = '现在不能开始：正在运行的任务结束后再开始';
@@ -443,7 +460,7 @@ export const TASK_BAR_START_WHEN_ONLINE = '联网后开始任务';
 /** §6 离线: the draft action in the words OFF-004 gives it beside 联网后开始任务. Neither of the two is preselected. */
 export const TASK_BAR_SAVE_DRAFT_ONLY = '仅保存任务草稿';
 /** §6 AUTH-007 `等待网络`（取消）: a waiting Run's one direct control (OFF-010) — nothing ran, so nothing to weigh first. */
-export const TASK_BAR_CANCEL_WAIT = '取消';
+export const TASK_BAR_CANCEL_WAIT = '取消任务';
 /** A cancelled wait, as the status line states it: nothing was sent. */
 export const TASK_BAR_CANCELLED = '已取消 · 未发送任何内容';
 /** The sentence beside 取消 on a Run that never started (Issue #764): blocked after it waited, so nothing ran or was sent. */
@@ -451,6 +468,11 @@ export const TASK_BAR_BLOCKED_CANCEL_NOTE = '这项任务没有开始，也没�
 /** A kind whose blocked Run the bar can cancel: a ledger kind's, which no other surface may be able to prepare again (Issue #764). */
 function blockedRunCancellable(plan: TaskPlanProjection): boolean {
   return plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite' || plan.kind === 'writing';
+}
+/** 重新开始… wherever the plan offers a relaunch (Issue #1680), or — without one — the legacy redo it still offers; else nothing. */
+function relaunchActions(plan: TaskPlanProjection, tone: TaskBarAction['tone'] = 'secondary'): TaskBarAction[] {
+  return plan.relaunch != null ? [{ name: 'redo', label: TASK_BAR_REDO, tone, disabledReason: null }]
+    : plan.redo != null ? [{ name: 'redo', label: '调整原计划', tone, disabledReason: null }] : [];
 }
 /** The fallback when 取消 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
@@ -476,21 +498,21 @@ export const TASK_BAR_YIELDED_NOTE = '下次空闲后接着处理；运行授权
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '取消任务';
-export const TASK_BAR_REDO = '重新开始';
+export const TASK_BAR_REDO = '重新开始…';
 /**
  * 改计划重做 on a stopped Run (Issue #422, S76c; AUTH-010): its summary says, before anything is recorded, what stops,
  * what is kept and what the new Task does; its confirmation cancels the Run, and the new Task is prepared once it has.
  */
 export const TASK_BAR_REDO_HEADING = '重新开始摘要';
 export const TASK_BAR_REDO_CONFIRM = '确认重新开始';
-export const TASK_BAR_REDO_KEEP = '先不重做';
+export const TASK_BAR_REDO_KEEP = '收起';
 /** While the Run stops for the redo, the bar says what comes next. */
 export const TASK_BAR_REDOING_NOTE = '已记下重新开始：这次运行正在取消，取消完成后准备新任务';
 export const TASK_BAR_REDO_FAILED = '无法重新开始。';
 /** CTRL-004: 取消任务 opens this summary inline, and only its confirmation records anything. */
 export const TASK_BAR_CANCEL_IMPACT_HEADING = '取消影响摘要';
 export const TASK_BAR_CANCEL_CONFIRM = '确认取消任务';
-export const TASK_BAR_CANCEL_KEEP = '继续运行';
+export const TASK_BAR_CANCEL_KEEP = '不取消';
 /** The fallback when 取消任务 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
 /** CTRL-005: what 正在取消 says beside itself until the Run has stopped — never a spinner, never 已取消 early. */
@@ -509,7 +531,7 @@ export const TASK_BAR_RESUME_FAILED = '无法继续这项任务。';
  * 已停止 · 预算已达上限 (Issue #51, S16a; §6 授权后: `调整预算并重做` / `查看部分结果`; MODEL-016, MODEL-017): the way on is a new
  * Task under a ceiling raised or removed, and the partial results are ②A's to show. No 续行 and no 重试.
  */
-export const TASK_BAR_ADJUST_BUDGET_REDO = '调整预算并重做';
+export const TASK_BAR_ADJUST_BUDGET_REDO = TASK_BAR_REDO;
 /** Under developer-live the launch sets the ceiling (ADR 0070): the plan cannot raise it, so the redo is 改计划重做's. */
 export const TASK_BAR_BUDGET_LAUNCH_NOTE = '预算上限由开发者实时启动参数决定：以更高的 --run-budget-ceiling 重新启动后再重做，新任务才会用新的上限';
 export const TASK_BAR_VIEW_PARTIAL = '查看部分结果';
@@ -795,6 +817,11 @@ function openQuestions(plan: TaskPlanProjection): { count: number; more: boolean
   return { count, more: plan.listPages?.['clarifications']?.nextOrdinal != null && count === plan.clarifications.length };
 }
 
+/** Superseded reviews can still continue or be cancelled. This plan state is the service's canContinue result. */
+export function betweenReviewCategories(plan: TaskPlanProjection): boolean {
+  return plan.kind === 'review-run' && plan.runControl === null && plan.state.key === 'stopped' && plan.state.label === '中途停止 · 可继续审阅';
+}
+
 export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
@@ -891,7 +918,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           status: asked.count === 0 ? stateWords(plan.state) : TASK_BAR_AWAITING_ANSWER,
           actions: [
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             runLink,
           ],
         };
@@ -936,7 +963,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
             { name: 'connect', label: TASK_BAR_RESOLVE_MODEL_SERVICE, tone: 'secondary', disabledReason: null },
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             ...unconfirmedLink,
             runLink,
           ],
@@ -953,15 +980,15 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         return {
           readiness,
           summary,
-          statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
+          statement: taskBarRestartStatement(plan.state) ?? (control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason)),
           note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
-          status: control.stopReason === undefined ? stateWords(plan.state) : taskBarResumableStatus(control.stopReason),
+          status: plan.state.key === 'paused' || control.stopReason === undefined ? stateWords(plan.state) : taskBarResumableStatus(control.stopReason),
           actions: [
             ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
               ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...relaunchActions(plan),
             ...unconfirmedLink,
             runLink,
           ],
@@ -978,7 +1005,6 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         actions: [
           { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },
           { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-          { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
           runLink,
         ],
       };
@@ -990,9 +1016,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: taskBarReprepareNote(plan.reprepare.reason),
+        note: taskBarReprepareNote(plan.reprepare.reason, plan.relaunch != null),
         status: stateWords(plan.state),
-        actions: [{ name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
+        actions: [plan.relaunch != null ? { name: 'redo', label: TASK_BAR_REDO, tone: 'primary', disabledReason: null } : { name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, { name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
     // The same for a kind whose drawer prepares nothing (Issue #760, S74c): what moved, and where its own surface prepares it
@@ -1004,18 +1030,18 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         statement: null,
         note: `${plan.planMovedReason ?? `${stateWords(plan.state)}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
         status: stateWords(plan.state),
-        actions: blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink] : [runLink],
+        actions: [...(blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null } as const] : []), ...relaunchActions(plan), runLink],
       };
     }
     // 派发前已阻止 of a ledger kind (Issue #764): it never started; 取消 ends it and takes its item out of 待我处理.
-    if (plan.state.key === 'blocked' && blockedRunCancellable(plan)) {
+    if (plan.state.key === 'blocked' && (blockedRunCancellable(plan) || plan.kind === 'baseline-analysis')) {
       return {
         readiness,
         summary,
-        statement: null,
+        statement: taskBarRestartStatement(plan.state),
         note: TASK_BAR_BLOCKED_CANCEL_NOTE,
         status: stateWords(plan.state),
-        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
+        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, ...relaunchActions(plan), runLink],
       };
     }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
@@ -1027,9 +1053,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         note: plan.budgetStop.launchSetsCeiling ? `${taskBarBudgetStopNote(plan.budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}` : taskBarBudgetStopNote(plan.budgetStop),
         status: stateWords(plan.state),
         actions: [
-          ...(plan.redo === null ? [] : [{
-            name: 'redo', label: plan.budgetStop.launchSetsCeiling ? TASK_BAR_REDO : TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null,
-          } as const]),
+          ...relaunchActions(plan, 'primary'),
           { name: 'run-link', label: TASK_BAR_VIEW_PARTIAL, tone: 'secondary', disabledReason: null },
         ],
       };
@@ -1037,11 +1061,11 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     return {
       readiness,
       summary,
-      statement: null,
+      statement: taskBarRestartStatement(plan.state),
       note: null,
       status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : stateWords(plan.state),
       // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.
-      actions: plan.redo === null ? [runLink] : [{ name: 'redo', label: TASK_BAR_REDO, tone: 'secondary', disabledReason: null }, runLink],
+      actions: [...relaunchActions(plan), ...(betweenReviewCategories(plan) ? [{ name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: null } as const] : []), runLink],
     };
   }
   if (readiness === 'offline') {
@@ -1217,14 +1241,20 @@ export function taskStatusDuration(elapsedMs: number): string {
   return minutes < 60 ? `${minutes} 分 ${seconds % 60} 秒` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
 }
 
+/** The same working stretches and completion count in the drawer, Book panel and overview (I-12). */
+export function taskWorkLine(work: TaskWorkProjection | null | undefined, nowMs: number): string | null {
+  if (work == null) return null;
+  const elapsed = work.workedMs + (work.workingSince === null ? 0 : Math.max(0, nowMs - Date.parse(work.workingSince)));
+  const requests = work.finished?.requests;
+  return `用时 ${taskStatusDuration(elapsed)}${requests == null ? '' : ` · ${groupedCount(requests)} 次模型调用`}`;
+}
+
 /**
- * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and thinking effort, the processing time
- * its Run Report measured once it ended, and what it formed. `outcome` is `null` until that row was read.
+ * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and what it formed.
+ * Working time and completion counts come directly from the plan. `outcome` is `null` until the row was read.
  */
 export interface TaskStatusFacts {
   readonly modelLabel: string | null;
-  /** The Run Report's processing time of a Task that ended; `null` when the Task has no report. */
-  readonly processedMs: number | null;
   readonly outcome: null | { readonly kind: 'result'; readonly what: string } | { readonly kind: 'none'; readonly reason: string | null };
 }
 
@@ -1264,29 +1294,14 @@ export interface TaskStatusLines {
   readonly sentence: string | null;
   /** LIVE-003's warning, present only while the step in flight has run longer than this Run's own steps did. */
   readonly stale: string | null;
-  /** The stage while the Run is under way; the processing time of a Task that ended. */
+  /** The working time and completion count, alongside the stage while running. */
   readonly line: string | null;
   /** What the Run Budget Ceiling does, when the plan froze one and the Run is not over. */
   readonly ceiling: string | null;
-  /** `模型 名称@思考强度`. */
+  /** `模型 名称@思考强度`, the level in the editor's word (developer mode: the record's own level name). */
   readonly model: string | null;
   /** Whether 查看结果 has a result to open: the Task ended and formed one. */
   readonly resultReady: boolean;
-}
-
-/**
- * 处理用时, the finished card's time (Issue #1527): the processing time the Run Report measured — the sum of its stages' wall time. It is
- * not elapsed time: work done in parallel counts more than once and gaps between steps are left out, so the label says 处理用时 and not
- * 用时. A Task without a report shows no figure.
- *
- * The running card shows no time, because no fact the plan or the 任务总览 carries is the start of the stretch a Run is executing now:
- * the row's `at` of an executing Run is when the Run was recorded, and `activity.lastTransitionAt` moves with every request the Run
- * admits, not only with its entry into executing; a review run carries no activity at all. The liveness warning and the step's own
- * time in the 计划 view say whether it moves. One measure of working time for both states needs the projection to carry accumulated
- * working time — round #1539.
- */
-export function taskStatusProcessed(ended: boolean, facts: TaskStatusFacts): string | null {
-  return ended && facts.processedMs !== null ? `处理用时 ${taskStatusDuration(facts.processedMs)}` : null;
 }
 
 /** The one sentence of a Task that ended: what it formed when its row says, otherwise only that it ended. */
@@ -1296,7 +1311,7 @@ function taskStatusSentence(plan: TaskPlanProjection, facts: TaskStatusFacts): s
     case 'settled':
       if (facts.outcome === null) return '已完成。';
       return facts.outcome.kind === 'result' ? `已完成，得到${facts.outcome.what}。`
-        : `已完成，没有可以查看的结果${facts.outcome.reason === null ? '。' : `：${facts.outcome.reason}`}`;
+        : `已完成，没有可以查看的结果${facts.outcome.reason === null ? '。' : `：${serviceWords(facts.outcome.reason)}`}`;
     case 'recorded': return `${TASK_BAR_RECORDED}。`;
     case 'cancelled': return `${TASK_BAR_CANCELLED}。`;
     case 'cancelled-after-start': return `${TASK_BAR_CANCELLED_NOTE}。`;
@@ -1313,14 +1328,16 @@ function taskStatusSentence(plan: TaskPlanProjection, facts: TaskStatusFacts): s
 export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts, nowMs: number): TaskStatusLines {
   const control = plan.runControl;
   const activity = control?.activity ?? null;
-  const model = facts.modelLabel === null ? null : `模型 ${facts.modelLabel}`;
+  const modelLabel = plan.work?.finished ? plan.work.finished.modelLabel : facts.modelLabel;
+  const model = modelLabel === null ? null : `模型 ${modelEffortWords(modelLabel)}`;
+  const work = taskWorkLine(plan.work, nowMs);
   const ceiling = taskPlanCeilingLine(plan);
   const share = (settled: number, total: number): string => `已完成约 ${total === 0 ? 0 : Math.floor((settled / total) * 100)}%`;
   if (activity !== null) {
     return {
       progress: { settled: activity.unitsSettled, total: activity.unitsTotal, text: activity.stage === 'units' ? share(activity.unitsSettled, activity.unitsTotal) : '正在整理结果' },
       sentence: null, stale: taskPlanActivityIsStale(activity, nowMs) ? TASK_PLAN_ACTIVITY_STALE : null,
-      line: RUN_LIVENESS_STAGE_LABELS[activity.stage], ceiling, model, resultReady: false,
+      line: [RUN_LIVENESS_STAGE_LABELS[activity.stage], work].filter(Boolean).join(' · '), ceiling, model, resultReady: false,
     };
   }
   const kept = control?.continuation ?? plan.budgetStop;
@@ -1328,11 +1345,11 @@ export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts
   const progress = settled === null || kept === null ? null : { settled, total: kept.unitsTotal, text: share(settled, kept.unitsTotal) };
   if (control !== null) {
     // A Run no execution holds says so; every other stopped Run leaves its sentence to the bar's note.
-    return { progress, sentence: control.continuation === null && taskBarView(plan).note === null ? TASK_PLAN_ACTIVITY_UNREPORTED : null, stale: null, line: null, ceiling, model, resultReady: false };
+    return { progress, sentence: control.continuation === null && taskBarView(plan).note === null ? TASK_PLAN_ACTIVITY_UNREPORTED : null, stale: null, line: work, ceiling, model, resultReady: false };
   }
   const ended = taskStatusEnded(plan);
   return {
-    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: taskStatusProcessed(ended, facts), ceiling: ended ? null : ceiling, model,
+    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: work, ceiling: ended ? null : ceiling, model,
     resultReady: ended && facts.outcome?.kind === 'result',
   };
 }

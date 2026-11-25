@@ -1,6 +1,7 @@
 import { windowStep } from './components/controls.js';
 import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
+import { serviceGoalWords } from './service-wording.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
   GUIDELINE_CANCEL,
@@ -87,7 +88,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     node.dataset['guidelineVersion'] = String(document.currentOrdinal);
     node.dataset['guidelineUse'] = document.use;
     const heading = el('div', 'guideline-heading');
-    const title = el('h3', undefined, document.title);
+    const title = el('h3', undefined, serviceGoalWords(document.title));
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
     heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));
@@ -104,7 +105,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);
-    if (fixed !== null) more.append(el('p', 'guideline-fixed', fixed));
+    if (fixed !== null) node.append(el('p', 'guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
@@ -189,7 +190,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');
-      more.append(note);
+      node.append(note);
     }
     if (preview?.documentId === document.documentId) node.append(previewSection(preview));
     else if (fixed === null) {
@@ -197,7 +198,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       const start = action(GUIDELINE_IMPORT, 'secondary', 'import', () => void choose(document.documentId));
       start.disabled = busy || preview !== null;
       actions.append(start);
-      more.append(actions);
+      node.append(actions);
     }
     if (preview?.documentId === document.documentId || refusal?.documentId === document.documentId) more.open = true;
     node.append(more);
@@ -325,7 +326,11 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       // The file chosen in the system's own dialog is the import (Issue #1410 item 25): the service checks it, and it is
       // recorded as the next version at once; a refusal says why and records nothing.
       busy = false;
-      await commit(read);
+      if (read.modelFormatted) {
+        preview = read;
+        setStatus('请核对整理后的条款。', 'success');
+        paint('[data-guideline-action="confirm"]');
+      } else await commit(read);
     } catch (error) {
       busy = false;
       const message = errorMessage(error, GUIDELINE_STATUS.failed);

@@ -81,16 +81,25 @@ function legacyFrozenModel(source: ModelLabels): MarkModelBinding | null {
   return model ? { route: channel?.providerId ?? provider, model } : null;
 }
 
+/**
+ * The labels an AI7 mark froze, when they name its model by themselves — no record needs reading; `null` when an older writer
+ * froze only a provider (or nothing) and the producing record answers. Depends on the frozen labels alone.
+ */
+export function frozenModelLabels(frozen: ModelLabels | undefined): ModelLabels | null {
+  const providerOnly = frozen?.modelLabel === 'AI7' || Object.values(MODEL_SERVICE_ROUTE_BINDINGS)
+    .some(({ providerLabel }) => frozen?.modelLabel === providerLabel || frozen?.modelLabel?.startsWith(`${providerLabel} · `));
+  return frozen?.modelLabel && legacyFrozenModel(frozen) === null && !providerOnly ? frozen : null;
+}
+
 /** A conversion is not a generation. Legacy arrays resolve through the original mark and exact dialogue conversion. */
 export function historicalMarkModelLabels(db: DatabaseSync, markId: string): ModelLabels {
   const mark = db.prepare(`SELECT source_kind, source_task_id, created_at, basis_json, converted_from_mark_id
     FROM editorial_marks WHERE mark_id = ?`).get(markId);
   if (!mark || mark.source_kind !== 'ai7') return {};
   const frozen = readMarkEvidence(String(mark.basis_json)).source;
+  const named = frozenModelLabels(frozen);
+  if (named !== null) return named;
   const legacy = frozen === undefined ? null : legacyFrozenModel(frozen);
-  const providerOnly = frozen?.modelLabel === 'AI7' || Object.values(MODEL_SERVICE_ROUTE_BINDINGS)
-    .some(({ providerLabel }) => frozen?.modelLabel === providerLabel || frozen?.modelLabel?.startsWith(`${providerLabel} · `));
-  if (frozen?.modelLabel && legacy === null && !providerOnly) return frozen;
   if (mark.converted_from_mark_id !== null) return historicalMarkModelLabels(db, String(mark.converted_from_mark_id));
   const conversion = db.prepare('SELECT attempt_id FROM dialogue_conversions WHERE mark_id = ?').get(markId);
   const recorded = mark.source_task_id === null ? null : recordedMarkModel(db, String(mark.source_task_id), String(mark.created_at),

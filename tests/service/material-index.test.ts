@@ -1,32 +1,35 @@
 import { setLibraryDecision } from '../support/library-materials.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
-import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
+import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL } from '../../src/service/background-analysis-enrollments.js';
 import { replacementBlockedBy } from '../../src/service/replacement-gate.js';
-import { LATEST_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
-import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
+import { retrieveWithFlash } from '../../src/service/retrieval/flash-assist.js';
+import { queryExpansion, retrievalRerank, runStructuredFlashTask } from '../../src/service/fast-role/flash-task-contract.js';
+import { UnderlyingFlashService } from '../../src/service/fast-role/fast-role-execution.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
 // SampleBook — and every other file is the suite's own synthetic words, never a manuscript. The Owner's option 乙
-// (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states similarity
-// vectors, recognition and machine 来源译文 as not provided. A Task reads the index read-only, only within its plan boundary.
+// (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states recognition
+// and machine 来源译文 as not provided; 相似段落检索 ranks the segments by words with nothing built (R5-F2c). A Task reads the index read-only, only within its plan boundary.
 
 /** An archive as every writer in the product writes one: at the fixed archive time (#611). */
 const archive = (files: Zippable): Uint8Array => zipSync(files, { mtime: fixedArchiveTime() });
@@ -99,6 +102,152 @@ function dataRootFiles(): string[] {
 
 const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
 
+async function withSearchMaterial(paragraphs: readonly string[], run: (store: EditorialStore, bookId: string, materialId: string) => Promise<void>): Promise<void> {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const bookId = emptyBook(store, '合成检索回归');
+    const item = await put(store, file('flash-search.txt', paragraphs.join('\n\n')), '合成检索词表');
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    store.startMaterialIndexing(); await store.settleMaterialIndexing();
+    await run(store, bookId, item.materialId);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+}
+
+describe('optional underlying Flash material search (R5-F2b)', () => {
+  it('finds a synonym with no shared surface word, bounds the expansion, and assists the library search too', async () => {
+    await withSearchMaterial(['愉悦。', '舒畅。'], async (store, bookId, materialId) => {
+      const input = { bookId, query: '快乐', k: 8 };
+      expect(await store.searchReferableMaterials(input)).toEqual({ candidates: [], assist: 'local' });
+      const expand = vi.fn((query: string) => runStructuredFlashTask(queryExpansion, query,
+        async () => '{"items":["喜悦","欢欣","愉悦","高兴","舒畅"]}'));
+      store.useRetrievalAssist({ expand });
+      const answer = await store.searchReferableMaterials(input);
+      // The answer itself says the fast model shaped it (0.7.9 review 2.3).
+      expect(answer.assist).toBe('fast-model');
+      const found = answer.candidates;
+      expect(found.map(candidate => candidate.preview)).toEqual(['愉悦。']);
+      expect(found[0]!.revisionOrIndexDigest).toBe(store.pinMaterialReference(bookId, materialId).indexDigest);
+      const library = await store.searchLibraryMaterialVectors({ materialId, text: input.query, k: 8 });
+      expect([library.assist, library.candidates.map(candidate => candidate.preview)]).toEqual(['fast-model', ['愉悦。']]);
+      expect(expand).toHaveBeenCalledTimes(2);
+      expect(expand).toHaveBeenCalledWith(input.query);
+    });
+  });
+
+  it('reranks a bounded pool before slicing k and filters Q09 without changing pinned candidates', async () => {
+    await withSearchMaterial(['违约责任。', 'Q09：双方并没有违约，无须承担违约责任。', '甲方违约责任及赔偿。', '乙方违约责任及补救。'], async (store, bookId) => {
+      const local = (await store.searchReferableMaterials({ bookId, query: '违约责任', k: 8 })).candidates;
+      const pool = local.slice(0, 4);
+      expect(pool).toHaveLength(4);
+      expect(pool.some(candidate => candidate.preview.includes('Q09'))).toBe(true);
+      const expected = pool.filter(candidate => !candidate.preview.includes('Q09')).reverse();
+      const rerank = vi.fn((source: Parameters<typeof retrievalRerank.message>[0]) => runStructuredFlashTask(retrievalRerank, source,
+        async () => JSON.stringify({ items: expected.map(candidate => candidate.candidateId) })));
+      store.useRetrievalAssist({ rerank });
+      const result = await store.searchReferableMaterials({ bookId, query: '违约责任', k: 2 });
+      expect(result.candidates).toEqual(expected.slice(0, 2));
+      expect(rerank).toHaveBeenCalledExactlyOnceWith({ query: '违约责任', candidates: pool.map(candidate => ({ id: candidate.candidateId, preview: candidate.preview })) });
+    });
+  });
+
+  it('honors checked empty reranks in both searches and skips reranking an empty local pool', async () => {
+    await withSearchMaterial(['Q09：双方并没有违约，无须承担违约责任。'], async (store, bookId, materialId) => {
+      const rerank = vi.fn((source: Parameters<typeof retrievalRerank.message>[0]) => runStructuredFlashTask(retrievalRerank, source, async () => '{"items":[]}'));
+      store.useRetrievalAssist({ rerank });
+      expect((await store.searchReferableMaterials({ bookId, query: '违约责任', k: 1 })).candidates).toEqual([]);
+      expect((await store.searchLibraryMaterialVectors({ materialId, text: '违约责任', k: 1 })).candidates).toEqual([]);
+      expect((await store.searchReferableMaterials({ bookId, query: 'astronomy', k: 1 })).candidates).toEqual([]);
+      expect(rerank).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it.each(['{"items":["unknown"]}', '{"items":', '{"items":["duplicate","duplicate"]}'])(
+    'falls back to exact local candidates after rejected model output: %s', async raw => {
+      await withSearchMaterial(['alpha beta', 'alpha gamma'], async (store, bookId, materialId) => {
+        const input = { bookId, query: 'alpha', k: 1 };
+        const local = await store.searchReferableMaterials(input);
+        const libraryInput = { materialId, text: input.query, k: input.k };
+        const libraryLocal = await store.searchLibraryMaterialVectors(libraryInput);
+        store.useRetrievalAssist({
+          expand: query => runStructuredFlashTask(queryExpansion, query, async () => raw),
+          rerank: source => runStructuredFlashTask(retrievalRerank, source, async () => raw),
+        });
+        // The words were sent and nothing usable came back: the same local candidates, never called local.
+        expect([local.assist, libraryLocal.assist]).toEqual(['local', 'local']);
+        expect(await store.searchReferableMaterials(input)).toEqual({ ...local, assist: 'fast-model-unused' });
+        expect(await store.searchLibraryMaterialVectors(libraryInput)).toEqual({ ...libraryLocal, assist: 'fast-model-unused' });
+      });
+    },
+  );
+
+  it.each(['fallback', 'outcome-unknown', 'throw', 'not-asked'] as const)('uses lexical results without retry when Flash returns %s', async state => {
+    await withSearchMaterial(['alpha beta', 'alpha gamma'], async (store, bookId) => {
+      const input = { bookId, query: 'alpha', k: 1 };
+      const local = await store.searchReferableMaterials(input);
+      const unavailable = vi.fn(async () => {
+        if (state === 'throw') throw new Error('synthetic offline transport');
+        return state === 'not-asked' ? null : { state, value: [], reason: 'synthetic unavailable' };
+      });
+      store.useRetrievalAssist({ expand: unavailable, rerank: unavailable });
+      // Only an executor that did not ask the model leaves the search local; an answer or a throw means the words were sent.
+      expect(await store.searchReferableMaterials(input)).toEqual({ ...local, assist: state === 'not-asked' ? 'local' : 'fast-model-unused' });
+      expect(unavailable).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('keeps supplementary-plane Han searchable with no configured Flash model or after removing the assistant', async () => {
+    await withSearchMaterial(['𠮷姓。', '吉姓。'], async (store, bookId) => {
+      const input = { bookId, query: '𠮷', k: 8 };
+      const local = await store.searchReferableMaterials(input);
+      expect(local.candidates.map(candidate => candidate.preview)).toEqual(['𠮷姓。']);
+      const governor = new ModelRequestGovernor();
+      const owner = new UnderlyingFlashService({ fixture: null, live: null, requestGovernor: governor });
+      try {
+        // Wired as the service wires it: a task the owner refuses is not asked, so nothing is sent and the answer stays local.
+        store.useRetrievalAssist({
+          expand: async query => owner.refusal('retrieval-query-expansion') === null ? owner.execute(queryExpansion, query, 'search') : null,
+          rerank: async source => owner.refusal('retrieval-rerank') === null ? owner.execute(retrievalRerank, source, 'search') : null,
+        });
+        expect(await store.searchReferableMaterials(input)).toEqual(local);
+        store.useRetrievalAssist(null);
+        expect(await store.searchReferableMaterials(input)).toEqual(local);
+      } finally { owner.dispose(); governor.close(); await governor.whenIdle(); }
+    });
+  });
+
+  it('retains pinned entity aliases and Exact Fetch anchors when Flash is offline', async () => {
+    await withSearchMaterial(['长妈妈。'], async (store, bookId, materialId) => {
+      const pin = store.pinMaterialReference(bookId, materialId);
+      const boundary = { bookId, references: [pin] };
+      const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)), {
+        baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ name: '长妈妈', aliases: ['阿长'] }], events: [], settingClaims: [] }, guidelines: [], terms: [],
+      });
+      try {
+        const local = await index.retrieve('阿长');
+        const offline = async (): Promise<never> => { throw new Error('synthetic offline'); };
+        const { candidates: found, assist } = await retrieveWithFlash(index, '阿长', 8, { expand: offline, rerank: offline });
+        expect(assist).toBe('fast-model-unused');
+        expect(found).toEqual(local);
+        expect(found.map(candidate => candidate.preview)).toEqual(['长妈妈。']);
+        expect(index.exactFetch(found[0]!.candidateId).text).toBe('长妈妈。');
+      } finally { index.dispose(); }
+    });
+  });
+
+  it('drops a source withdrawn while the checked rerank was in flight', async () => {
+    await withSearchMaterial(['alpha beta'], async (store, bookId, materialId) => {
+      store.useRetrievalAssist({ rerank: source => runStructuredFlashTask(retrievalRerank, source, async () => {
+        await Promise.resolve();
+        setLibraryDecision(store, { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        return JSON.stringify({ items: source.candidates.map(candidate => candidate.id) });
+      }) });
+      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 1 })).candidates).toEqual([]);
+    });
+  });
+});
+
 describe('资料索引 over the real store', () => {
   it('searches only referable materials without writes, bounds previews, and refuses withdrawal mid-Run (#893)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -121,17 +270,15 @@ describe('资料索引 over the real store', () => {
         const candidates = await index.retrieve('alpha');
         expect(index.exactFetch(candidates[0]!.candidateId).text.length > 0).toBe(true);
         expect(watching.changed()).toBe(false);
-        // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
+        // Nothing persisted: no index or projection file is written anywhere under the data root.
         expect(dataRootFiles()).toEqual(files);
         await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
-        // Hybrid ranking (#892 seam): without the item's vectors only the lexical rank counts; once the editor builds them, the
-        // pinned build's own vectors rank the same paragraph too and reciprocal-rank fusion lifts it above a single rank.
-        expect(Math.max(...(await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 })).candidates.map((candidate) => candidate.score))).toBeLessThanOrEqual(1 / 61);
-        store.buildMaterialVectors(item.materialId);
-        await store.settleMaterialLayers();
-        const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
-        expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
-        expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
+        // By the lexical ranking alone (R5-F2c): exactly the candidates and scores of a bare index over the same pinned build, the
+        // paragraph holding the words verbatim first.
+        const lexical = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
+        expect(lexical.candidates).toEqual(await new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from))).retrieve('alpha delta', 8, ['material']));
+        expect(lexical.candidates[0]!.preview).toBe('alpha delta');
+        expect(lexical.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
         setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         expect((await index.retrieve('alpha')).length).toBe(0);
         expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');
@@ -146,8 +293,8 @@ describe('资料索引 over the real store', () => {
       // A store that does not serve builds nothing by itself: the item waits, every layer but the original pending, the
       // deferred ones not provided from the start.
       expect(added.index).toEqual({
-        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
       });
       expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NOT_READY');
 
@@ -156,8 +303,8 @@ describe('资料索引 over the real store', () => {
       const built = store.inspectLibraryMaterial(added.materialId).index;
       expect(built.state).toBe('complete');
       expect(built.reason).toBeNull();
-      // Its similarity vectors wait for the editor to ask (Issue #892): never built on open.
-      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
+      // Six layers: 相似段落检索 needs none of its own (R5-F2c).
+      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' });
       expect(built.metadata!.language).toBe('zh');
       expect(built.metadata!.paragraphs).toBeGreaterThan(MAX_MATERIAL_SEGMENTS_PAGE);
       expect(built.metadata!.sentences).toBeGreaterThanOrEqual(built.metadata!.paragraphs);
@@ -260,8 +407,8 @@ describe('资料索引 over the real store', () => {
       // A scan needs recognition, which is not provided (Issue #892); a file with no text has none. Each is a build that says
       // so, and the original and metadata stand. A web page is read since Issue #428's formats.
       expect(store.inspectLibraryMaterial(pdf.materialId).index).toMatchObject({
-        state: 'unsupported', reason: 'needs-recognition', vectors: null, translation: null,
-        layers: { original: 'complete', metadata: 'complete', text: 'unsupported', recognition: 'deferred', translation: 'unsupported', segments: 'unsupported', vectors: 'unsupported' },
+        state: 'unsupported', reason: 'needs-recognition', translation: null,
+        layers: { original: 'complete', metadata: 'complete', text: 'unsupported', recognition: 'deferred', translation: 'unsupported', segments: 'unsupported' },
       });
       expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
         state: 'complete', reason: null, layers: { text: 'complete', recognition: 'not-needed', segments: 'complete' },
@@ -327,7 +474,7 @@ describe('资料索引 over the real store', () => {
         const index = store.inspectLibraryMaterial(item.materialId).index;
         expect([index.state, index.reason, index.metadata?.documentTitle, index.metadata?.language, index.metadata?.headings, index.metadata?.paragraphs])
           .toEqual(['complete', null, title, 'zh', 1, sentences.length]);
-        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
+        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' });
         const segments = segmentsOf(item.materialId);
         expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual(sentences);
         expect(segments.map((segment) => segment.kind)).toEqual(['heading', ...sentences.slice(1).map(() => 'paragraph')]);
@@ -516,7 +663,8 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
-  it('builds at the next start what a closing service stopped, what arrived at revision 65, and removes stray working copies', async () => {
+
+  it('builds at the next start what a closing service stopped, and removes stray working copies', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let materialId: string;
     try {
@@ -524,19 +672,6 @@ describe('资料索引 over the real store', () => {
       store.markCleanShutdown();
     } finally {
       store.close();
-    }
-    // A revision-65 store: the item arrived before revision 66's enrollments and revision 67's index existed, so its open
-    // takes the two steps 65 → 66 → 67 before it builds (#725 re-review; #729).
-    const plant = new DatabaseSync(storePath());
-    try {
-      plant.exec('PRAGMA foreign_keys = OFF');
-      for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) plant.exec(`DROP TABLE ${table}`);
-      plant.exec('PRAGMA foreign_keys = ON');
-      downgradeAnalysisRunAuthorizationsToRevision65(plant);
-      execPre74Fixture(plant, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
-      expect(analysisRunAuthorizationsShape(plant)).toBe('revision-65');
-    } finally {
-      plant.close();
     }
     const work = join(roots.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY);
     mkdirSync(work, { recursive: true });
@@ -557,7 +692,6 @@ describe('资料索引 over the real store', () => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-        expect(analysisRunAuthorizationsShape(database)).toBe('current');
         expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
       } finally {
         database.close();

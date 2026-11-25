@@ -44,6 +44,8 @@ describe('the direct-search candidate in 联网检索', () => {
       settings.searchBackends.alwaysUseSelectedBackend = override;
       const node = render();
       expect(node.textContent).toContain(override ? '编辑指定 · TinyFish' : '随模型渠道 · 官方渠道 自带搜索（未实测）');
+      expect(node.textContent).toContain('；可设一个备用来源，出错时自动切换。');
+      expect(node.textContent).not.toContain('自动用于随渠道检索');
       expectNoTechnicalText(node);
       expect(node.querySelectorAll('[data-search-backend]')).toHaveLength(5);
     }
@@ -51,8 +53,8 @@ describe('the direct-search candidate in 联网检索', () => {
   it('keeps candidate decisions and test outcomes without technical identifiers in ordinary mode', async () => {
     setTechnicalLayerVisible(false);
     const { node, api } = section(async () => SUCCESS);
-    expect(node.textContent).toContain('不作为独立排名默认后端或备用来源');
-    expect(node.textContent).toContain('尚未测量这一接口的命中率、延迟与可达性');
+    expect(node.textContent).not.toContain('不作为独立排名默认后端或备用来源');
+    expect(node.textContent).not.toContain('尚未测量这一接口的命中率、延迟与可达性');
     expectNoTechnicalText(node);
     expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u);
     node.querySelector('button[data-action="probe-search-candidate"]')!.click();
@@ -69,6 +71,7 @@ describe('the direct-search candidate in 联网检索', () => {
     expect(effectiveSearchSourceLine(settings)).toContain('随模型渠道 · DeepSeek 开放平台（官方） 自带搜索');
   });
   it('saves the source override from its default-off checkbox and explains the effective source', async () => {
+    setTechnicalLayerVisible(true);
     const settings = projection();
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn().mockResolvedValue(settings), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
@@ -79,6 +82,21 @@ describe('the direct-search candidate in 联网检索', () => {
     settings.searchBackends.alwaysUseSelectedBackend = true;
     expect(effectiveSearchSourceLine(settings)).toContain('编辑指定 · TinyFish');
   });
+  it.each([false, true])('says 检索服务 in ordinary mode and keeps 后端 in developer mode, with technical mode %s (#1547 rework)', (technical) => {
+    setTechnicalLayerVisible(technical);
+    const settings = projection();
+    Object.assign(settings, { routeChoice: { routes: [] } });
+    for (const backend of settings.searchBackends.backends) Object.assign(backend.connection, { credentialOperationState: 'missing', credentialReference: null });
+    const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
+    const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    const text = node.textContent;
+    expect(text.includes('后端')).toBe(technical);
+    expect(text.includes('请在 设置 › 联网检索 保存一个后端密钥')).toBe(technical);
+    // The ordinary state line says what to do on this page, not where this page is.
+    expect(text.includes('请在下面的检索服务里，为其中一个保存密钥')).toBe(!technical);
+    expect(text.includes('总是使用选定的检索服务')).toBe(!technical);
+    expect(text.includes('总是使用联网检索里选定的后端')).toBe(technical);
+  });
   it.each([false, true])('offers native candidate connection tests with technical mode %s', async (technical) => {
     setTechnicalLayerVisible(technical);
     const settings = projection();
@@ -87,7 +105,7 @@ describe('the direct-search candidate in 联网检索', () => {
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     for (const service of ['openai', 'anthropic']) {
       const card = node.querySelector(`[data-search-candidate="${service}-native-search-v1"]`)!;
-      expect(card.textContent).toContain('未实测'); expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
+      expect(card.textContent).toContain('未实测'); expect(card.textContent.includes('不作为独立排名默认后端或备用来源')).toBe(technical);
       const controls = card.querySelectorAll('button'); expect(controls).toHaveLength(1); expect(controls[0]!.disabled).toBe(false);
       controls[0]!.click(); await settle();
       expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: `search-${service}`, candidateId: `${service}-native-search-v1` });
@@ -155,7 +173,7 @@ describe('the direct-search candidate in 联网检索', () => {
     const card = node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!;
     expect(card.dataset['measurement']).toBe('not-measured');
     expect(card.textContent).toContain('未实测');
-    expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
+    expect(card.textContent.includes('不作为独立排名默认后端或备用来源')).toBe(true);
     expect(card.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
     expect(card.querySelector('[data-search-candidate-probe]')!.textContent).toBe('');
   });
@@ -194,9 +212,10 @@ describe('the 备用来源 control in 联网检索 (#1226)', () => {
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(async () => settings), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     const control = (id: string) => node.querySelector(`[data-search-backend="${id}"]`)!.querySelectorAll('button').find((item) => item.dataset['action']?.endsWith('search-fallback'))!;
-    expect(node.textContent).toContain('设置备用来源后');
-    expect(node.textContent).toContain('余额或套餐额度不足时，直接切换一次');
-    expect(node.textContent).toContain('其他认证错误不会切换');
+    expect(node.textContent).not.toContain('设置备用来源后');
+    expect(node.textContent).toContain('可设一个备用来源，出错时自动切换。');
+    expect(node.textContent).not.toContain('余额或套餐额度不足时，直接切换一次');
+    expect(node.textContent).not.toContain('其他认证错误不会切换');
     expect(control('search-tinyfish').disabled).toBe(true);
     expect(control('search-deepseek').disabled).toBe(true);
     expect(node.querySelector('[data-search-backend="search-parallel"]')!.dataset['fallback']).toBe('true');
@@ -210,4 +229,14 @@ describe('the 备用来源 control in 联网检索 (#1226)', () => {
     expect(api.selectSearchBackend).toHaveBeenLastCalledWith({ backendId: null, role: 'fallback' });
     expect(node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
   });
+});
+
+
+it('keeps the complete fallback rule and native candidate disclosure in developer mode', () => {
+  setTechnicalLayerVisible(true);
+  const { node } = section(async () => SUCCESS);
+  expect(node.textContent).toContain('设置备用来源后');
+  expect(node.textContent).toContain('余额或套餐额度不足时，直接切换一次');
+  expect(node.textContent).toContain('其他认证错误不会切换');
+  expect(node.textContent).toContain('自动用于随渠道检索');
 });

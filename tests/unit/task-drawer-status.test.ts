@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { EditorialStore } from '../../src/service/store.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { leaveSeries, makeJ13Series } from '../support/series-consistency.js';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mountTaskDrawer, type MountTaskDrawerOptions, type TaskPlanRequest } from '../../src/renderer/task-drawer.js';
 import { taskStatusDuration, taskStatusName, TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -6,6 +13,10 @@ import type { TaskPlanProjection, TaskPlanRunControlProjection } from '../../src
 import { composeGlobalAttention } from '../../src/service/global-attention.js';
 import { taskOverviewItem } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
+import { IPC_CHANNELS, type RendererApi, type ServiceOperationMap, type TaskOverviewCall } from '../../src/shared/protocol.js';
+import { registerProductionAndPackageHandlers } from '../../src/main/deliverables-handlers.js';
+import { PREFERENCES_ENVELOPE_VERSION, preferenceDefaults } from '../../src/shared/preferences.js';
 import { taskPlanFixture } from '../support/task-plan-fixture.js';
 
 // The ordinary-mode drawer of a started Task (Issue #1527): the real drawer paints a plan read from a stub service, and the unit reads what
@@ -16,6 +27,10 @@ vi.mock('../../src/renderer/task-panel.js', () => ({
   mountTaskComposer: () => ({ element: document.createElement('div'), stop: vi.fn() }),
 }));
 vi.mock('../../src/renderer/dialogue.js', () => ({ mountDialogue: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
+
+type BridgeHandler = (...args: unknown[]) => Promise<{ ok: boolean; result?: unknown; error?: { message: string } }>;
+const handlers = vi.hoisted(() => new Map<string, BridgeHandler>());
+vi.mock('electron', () => ({ ipcMain: { handle: (key: string, handler: BridgeHandler) => handlers.set(key, handler) } }));
 
 const NOW = '2026-11-17T08:03:12.000Z';
 let uninstall: () => void;
@@ -41,7 +56,8 @@ const paused = (): TaskPlanRunControlProjection => running({ activity: null, res
   continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] } });
 const runningPlan = (overrides: Partial<TaskPlanProjection> = {}, control: TaskPlanRunControlProjection = running()) =>
   taskPlanFixture({ state: { key: 'running', label: '运行中' }, start: STARTED, runControl: control, ...overrides });
-const finishedPlan = (overrides: Partial<TaskPlanProjection> = {}) => taskPlanFixture({ state: { key: 'settled', label: '已完成' }, start: STARTED, ...overrides });
+const finishedPlan = (overrides: Partial<TaskPlanProjection> = {}) => taskPlanFixture({ state: { key: 'settled', label: '已完成' }, start: STARTED,
+  work: { workedMs: 192_000, workingSince: null, finished: { requests: 9, modelLabel: 'synthetic-model@high' } }, ...overrides });
 
 /** One Task of the Book as the 任务总览 reads it: its model and thinking effort, how long its Run worked, and the result 查看结果 opens. */
 const row = (state: 'running' | 'completed', overrides: Record<string, unknown> = {}) => ({
@@ -50,23 +66,24 @@ const row = (state: 'running' | 'completed', overrides: Record<string, unknown> 
 });
 const overviewOf = (...items: unknown[]) => ({ groups: [{ key: 'recent', items, total: items.length }] });
 
-interface Opening { overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3] }
+interface Opening { overviewApiForBook?: MountTaskDrawerOptions['overviewApiForBook']; overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3]; api?: Record<string, unknown> }
 async function openDrawer(plan: TaskPlanProjection, opening: Opening = {}) {
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
   const openTaskResult = vi.fn();
   const inspectTaskOverview = vi.fn(opening.overview ?? (async () => overviewOf(row(plan.state.key === 'settled' ? 'completed' : 'running'))));
   const inspectTaskPlan = vi.fn(async () => plan);
-  const api = { inspectTaskPlan, inspectTaskOverview };
+  const api = { inspectTaskPlan, inspectTaskOverview, ...opening.api };
+  const setStatus = vi.fn();
   const technicalDetails = (_className: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement => {
     const details = document.createElement('details'); details.append(...rows); return details;
   };
-  const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, errorMessage: (_error: unknown, fallback: string) => fallback,
-    errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
-  const task: TaskPlanRequest = { bookId: 'book', kind: 'baseline-analysis', ref: 'task' };
-  const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, overviewApiForBook: opening.overviewApiForBook, settle: async () => true, errorMessage: (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback,
+    errorCode: () => null, setStatus, onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
+  const task: TaskPlanRequest = { bookId: plan.bookId, kind: plan.kind, ref: plan.ref };
+  const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => opening.how?.redo ? expect(root.dataset['taskRelaunch']).toBe(plan.relaunch?.operation) : expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
   await open();
-  return { root, drawer, open, openTaskResult, inspectTaskOverview, inspectTaskPlan };
+  return { root, drawer, open, openTaskResult, inspectTaskOverview, inspectTaskPlan, setStatus };
 }
 
 const shown = (node: MiniElement): boolean => { for (let at: MiniElement | null = node; at !== null; at = at.parentElement) if (at.hidden) return false; return true; };
@@ -76,9 +93,200 @@ const lines = (root: MiniElement): string[] => root.querySelectorAll('h2, h3, h4
   .filter((node) => shown(node) && node.textContent.trim().length > 0 && node.closest('button, .task-bar-actions, .task-drawer-modes') === null).map((node) => node.textContent);
 const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-task-drawer-control]').filter((node) => shown(node) && !node.disabled)
   .map((node) => node.dataset['taskDrawerControl']!);
-const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
+const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高'));
+
+type ReferenceOperation = 'inspectTaskOverview' | 'inspectTaskPlan' | 'inspectEvaluation' | 'launchInitialEvaluation' | 'launchReadersReport';
+type ReferenceArgs = { [K in ReferenceOperation]: [K, ServiceOperationMap[K]['input']] }[ReferenceOperation];
+
+async function referenceBridge(sender: { routeGeneration: number; bookId: string }, call: (...args: ReferenceArgs) => Promise<unknown>) {
+  registerProductionAndPackageHandlers({ requireSender: () => sender, requireAuthority: () => {}, requireCurrentRouteGeneration: () => {}, rememberDispatchChoice: () => {},
+    serializeEffect: (effect: () => Promise<unknown>) => effect(), service: { call },
+  } as unknown as Parameters<typeof registerProductionAndPackageHandlers>[0]);
+  expect((await handlers.get(IPC_CHANNELS.inspectTaskOverview)!(sender)).ok).toBe(true);
+  return {
+    getModelServiceSettings: async () => { throw new Error('no settings'); },
+    getPreferences: async () => ({ version: PREFERENCES_ENVELOPE_VERSION, notice: null, values: preferenceDefaults() } as const),
+    taskOverviewCall: async (request: TaskOverviewCall) => {
+      const reply = await handlers.get(IPC_CHANNELS.taskOverviewCall)!(sender, request);
+      if (!reply.ok) throw new Error(reply.error?.message);
+      return reply.result;
+    },
+  };
+}
+
+async function evaluationSeriesFixture() {
+  vi.useRealTimers();
+  const roots = await createServiceTestRoots('ai7-series-relaunch-');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const governor = new ModelRequestGovernor();
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
+  onTestFinished(async () => {
+    await capture.owner.dispose();
+    governor.close();
+    await governor.whenIdle();
+    store.close();
+    await roots.dispose();
+  });
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+  store.selectSearchBackend('search-tinyfish');
+  const active = await importSample1Book(store, roots.codeRoot, '当前图书');
+  const target = await importSample1Book(store, roots.codeRoot, '初评图书');
+  const bookId = target.bookId;
+  await pinEditorialWorkspaceProfileRevision2(store, bookId);
+  const seriesId = makeJ13Series(store, bookId);
+  const first = store.launchInitialEvaluation({ bookId, seriesId, startWhen: 'when-online', clientCommandId: randomUUID() }, capture.policy);
+  const task = (ref: string) => ({ bookId, kind: 'initial-evaluation' as const, ref });
+  store.cancelWaitingTask(task(first.taskIntentId));
+  const sender = { routeGeneration: 1, bookId: active.bookId };
+  const launch = vi.fn((input: ServiceOperationMap['launchInitialEvaluation']['input']) => {
+    const result = store.launchInitialEvaluation(input, capture.policy);
+    return { taskIntentId: result.taskIntentId, runRecordId: result.runRecordId };
+  });
+  const overview = () => store.inspectTaskOverview(() => null, 2, () => null, false);
+  const api = await referenceBridge(sender, async (...[op, input]) => {
+    switch (op) {
+      case 'inspectTaskOverview': return overview();
+      case 'inspectEvaluation': return store.inspectEvaluation(input.bookId, input.recordId);
+      case 'inspectTaskPlan': return store.inspectTaskPlan(input);
+      case 'launchInitialEvaluation': return launch(input);
+      default: throw new Error(op);
+    }
+  });
+  const scoped = taskOverviewApi(api as unknown as RendererApi & typeof api, () => bookId);
+  const openSource = async (ref: string) => {
+    const plan = await scoped.inspectTaskPlan({ kind: 'initial-evaluation', ref });
+    expect(plan.relaunch?.operation).toBe('launchInitialEvaluation');
+    const view = await openDrawer(plan, { api: { ...api, inspectTaskPlan: scoped.inspectTaskPlan }, how: { redo: true }, overviewApiForBook: () => scoped });
+    const timing = view.root.querySelector('[data-task-start-when]')!;
+    timing.value = 'when-online';
+    timing.dispatchEvent({ type: 'change', bubbles: true } as never);
+    const start = view.root.querySelector('[data-task-drawer-control="launch"]')!;
+    await vi.waitFor(() => expect(start.disabled).toBe(false));
+    return { ...view, start };
+  };
+  return { store, active, bookId, seriesId, first, task, sender, launch, openSource };
+}
 
 describe('the status card of a started Task in ordinary mode', () => {
+  it.each(['launchInitialEvaluation', 'launchReadersReport'] as const)('edits the target Book references through the global overview bridge for %s', async operation => {
+    const bookA = 'a0000000-0000-4000-8000-000000000001', bookB = 'b0000000-0000-4000-8000-000000000002';
+    const sender = { routeGeneration: 1, bookId: bookA };
+    const call = vi.fn(async (name: string, input: { bookId?: string }) => {
+      if (name === 'inspectTaskOverview') return { books: [{ bookId: bookA }, { bookId: bookB }] };
+      if (name === 'inspectEvaluation') {
+        const bookId = input.bookId;
+        return { bookId, materials: { statement: '', more: 0, items: ['old', 'new'].map(id => ({ materialId: id, title: bookId + id, scope: 'book', selectable: true, characters: 2, reason: null })) }, market: { series: [{ seriesId: 'series', title: bookId }] } };
+      }
+      if (name === operation) return { bookId: input.bookId, taskIntentId: 'new-task' };
+      throw new Error(name);
+    });
+    const ambient = vi.fn(async () => { throw new Error('Requires Book route'); });
+    const api = { ...await referenceBridge(sender, call), inspectEvaluation: ambient };
+    const kind = operation === 'launchInitialEvaluation' ? 'initial-evaluation' : 'readers-report';
+    const source = finishedPlan({ bookId: bookB, kind, relaunch: { operation, input: { bookId: bookB, materialIds: ['old'], ...(operation === 'launchInitialEvaluation' ? { seriesId: 'series' } : {}) }, summary: [], cancelsFirst: null } as NonNullable<TaskPlanProjection['relaunch']> });
+    const { root } = await openDrawer(source, { how: { redo: true }, api,
+      overviewApiForBook: bookId => taskOverviewApi(api as unknown as RendererApi & typeof api, () => bookId) });
+    await vi.waitFor(() => expect(root.querySelector('[data-evaluation-material="old"]')?.checked).toBe(true));
+    const added = root.querySelector('[data-evaluation-material="new"]')!;
+    expect(added.closest('label')?.textContent).toContain(bookB);
+    if (operation === 'launchInitialEvaluation') expect(root.querySelector('[aria-label="本次任务的书系参考"]')?.value).toBe('series');
+    added.checked = true;
+    added.dispatchEvent({ type: 'change', bubbles: true } as never);
+    await vi.waitFor(() => expect(root.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(false));
+    root.querySelector('[data-task-drawer-control="launch"]')!.click();
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith(operation, expect.objectContaining({ bookId: bookB, materialIds: ['old', 'new'] })));
+    expect(call).toHaveBeenCalledWith('inspectEvaluation', { bookId: bookB, recordId: null });
+    expect(ambient).not.toHaveBeenCalled();
+    expect(sender).toEqual({ routeGeneration: 1, bookId: bookA });
+  });
+
+  it('relaunches the saved evaluation series through the target Book bridge and only clears it on explicit selection', async () => {
+    const { store, active, bookId, seriesId, first, task, sender, launch, openSource } = await evaluationSeriesFixture();
+    const selector = '[aria-label="本次任务的书系参考"]';
+    const offered = await openSource(first.taskIntentId);
+    const original = offered.root.querySelector(selector)!;
+    expect(original.value).toBe(seriesId);
+    expect(original.querySelectorAll('option').find(option => option.value === seriesId)?.disabled).toBe(false);
+    offered.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[0]?.type).toBe('return'));
+    expect(launch.mock.lastCall?.[0]).toMatchObject({ bookId, seriesId });
+    const repeated = launch.mock.results[0]!.value as { taskIntentId: string };
+    store.cancelWaitingTask(task(repeated.taskIntentId));
+    offered.drawer.close(false);
+
+    leaveSeries(store, seriesId, bookId);
+    launch.mockClear();
+    const saved = await openSource(repeated.taskIntentId);
+    const select = saved.root.querySelector(selector)!;
+    expect(select?.value).toBe(seriesId);
+    expect(select.querySelectorAll('option').find(option => option.value === seriesId)?.disabled).toBe(true);
+    saved.start.click();
+    await vi.waitFor(() => expect(saved.root.querySelector('.task-bar-refusal')?.textContent).toBeTruthy());
+    expect(launch.mock.results[0]).toMatchObject({ type: 'throw', value: { code: 'SERIES_SCOPE_UNAVAILABLE' } });
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({ bookId, seriesId });
+    select.value = '';
+    select.dispatchEvent({ type: 'change', bubbles: true } as never);
+    saved.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[1]?.type).toBe('return'));
+    expect(launch.mock.calls[1]?.[0]).toMatchObject({ bookId, seriesId: null });
+    const cleared = launch.mock.results[1]!.value as { taskIntentId: string };
+    store.cancelWaitingTask(task(cleared.taskIntentId));
+    saved.drawer.close(false);
+
+    const bookOnly = await openSource(cleared.taskIntentId);
+    expect(bookOnly.root.querySelector(selector)).toBeNull();
+    bookOnly.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[2]?.type).toBe('return'));
+    expect(launch.mock.calls[2]?.[0]).not.toHaveProperty('seriesId');
+    expect(sender).toEqual({ routeGeneration: 1, bookId: active.bookId });
+    bookOnly.drawer.close(false);
+  });
+
+  it.each([true, false])('requires one confirmation between review categories with an available recipe %s', async available => {
+    const cancelReviewRun = vi.fn(async () => { throw new Error('这次审阅正在进行。'); });
+    const source = finishedPlan({ kind: 'review-run', state: { key: 'stopped', label: '中途停止 · 可继续审阅' }, relaunch: available ? { operation: 'launchReviewRun', summary: [], input: { bookId: 'book', categoryIds: ['typos-and-usage'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } }, cancelsFirst: { operation: 'cancelReviewRun', input: { bookId: 'book', reviewRunId: 'task' } } } : null });
+    const { root, setStatus } = await openDrawer(source, { how: { cancel: true }, api: { cancelReviewRun } });
+    expect(text(root, '.task-bar-cancel-lines')).toBe('这次审阅将结束，已经记录的结果会保留。');
+    expect(cancelReviewRun).not.toHaveBeenCalled();
+    root.querySelector('[data-task-drawer-control="keep-running"]')!.click();
+    expect(cancelReviewRun).not.toHaveBeenCalled();
+    root.querySelector('[data-task-drawer-control="cancel-run"]')!.click();
+    root.querySelector('[data-task-drawer-control="confirm-cancel-run"]')!.click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('这次审阅正在进行。', 'error'));
+    expect(cancelReviewRun).toHaveBeenCalledExactlyOnceWith({ reviewRunId: source.ref });
+  });
+
+  it.each([true, false])('opens the unconfirmed ranges on the first request for a terminal record %s', async terminal => {
+    const source = terminal ? finishedPlan({ unconfirmed: { digest: 'digest', ranges: [{ unitOrdinal: 4, category: null, earlierText: false, recordedAt: NOW }], steps: [] } })
+      : runningPlan({ state: { key: 'outcome-unknown', label: '结果待确认' } }, running({ outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true } }));
+    const { root } = await openDrawer(source, { how: { view: 'run', unconfirmed: true } });
+    expect(root.querySelector('[data-unconfirmed-unit="4"]')).not.toBeNull();
+  });
+
+  it('moves a queued run through its drawer using the recorded position and identity', async () => {
+    const reorderQueuedRun = vi.fn(async () => ({}));
+    const source = runningPlan({ state: { key: 'queued', label: '排队中' }, runControl: null });
+    const overview = async () => overviewOf(row('running', { runRecordId: 'queued-run', queuePosition: 4, state: 'queued' }));
+    const { root } = await openDrawer(source, { overview, api: { reorderQueuedRun } });
+    root.querySelector('[data-task-drawer-control="queue-up"]')!.click();
+    expect(reorderQueuedRun).toHaveBeenCalledWith({ runRecordId: 'queued-run', position: 3 });
+    await vi.waitFor(() => expect(root.querySelector('[data-task-drawer-control="queue-top"]')?.disabled).toBe(false));
+    root.querySelector('[data-task-drawer-control="queue-top"]')!.click();
+    await vi.waitFor(() => expect(reorderQueuedRun).toHaveBeenCalledWith({ runRecordId: 'queued-run', position: 1 }));
+  });
+
+  it('continues a restart-paused baseline without observing a repeated transport stop (#1656 N3)', async () => {
+    const resume = vi.fn(async () => ({ run: { runRecordId: 'run', state: 'admitted' } }));
+    const timer = vi.spyOn(window, 'setTimeout');
+    const { root, setStatus } = await openDrawer(runningPlan({ state: { key: 'paused', label: '已暂停', stopReason: 'shutdown' } },
+      { ...paused(), stopReason: 'shutdown' }), { api: { resumeBaselineAnalysisRun: resume } });
+    root.querySelector('[data-task-drawer-control="resume"]')!.click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('已继续，从已保存的进度接着读。', 'success'));
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(timer.mock.calls.some((call) => call[1] === 25)).toBe(false);
+  });
+
   it('shows a running Task in at most eight lines: its name, state, progress, stage, model, and its actions', async () => {
     const { root } = await openDrawer(runningPlan());
     await model(root);
@@ -100,7 +308,7 @@ describe('the status card of a started Task in ordinary mode', () => {
 
   it('keeps the Run Budget Ceiling on the card of a task that has one, in the plan\'s own words (ADR 0096 §4.2)', async () => {
     const bounded = { service: { ...taskPlanFixture().service, usage: '达到 20,000 tokens 后不再发送新的请求（8 个阅读范围）', usageIsCeiling: true } };
-    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('用量达到 20,000 后不再发送');
+    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('已设用量上限，用到上限时任务会暂停');
     expect(text((await openDrawer(runningPlan())).root, '.task-status-ceiling')).toBeUndefined();
   });
 
@@ -119,11 +327,11 @@ describe('the status card of a started Task in ordinary mode', () => {
     expect(root.querySelector('.task-plan-stage-chain')).toBeNull();
   });
 
-  it('shows a finished task as what it came to, its processing time, its model and 查看结果, which opens the result', async () => {
+  it('shows a finished task as what it came to, its working time and call count, its model and 查看结果, which opens the result', async () => {
     const { root, openTaskResult } = await openDrawer(finishedPlan());
     await model(root);
     expect(text(root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。');
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(lines(root).length).toBeLessThanOrEqual(8);
     root.querySelector('[data-task-drawer-control="view-result"]')!.click();
     expect(openTaskResult).toHaveBeenCalledOnce();
@@ -201,6 +409,56 @@ function composedRunningRow() {
 describe('the running card and the times of a Task', () => {
   const line = (root: MiniElement) => text(root, '.task-status-line');
 
+  it.each(['baseline-analysis', 'review-run'] as const)('ticks %s work in place, stops at a pause, and keeps accumulated time after resume', async kind => {
+    const clock = vi.spyOn(window, 'setInterval');
+    const work = { workedMs: 60_000, workingSince: '2026-11-17T08:03:00.000Z', finished: null };
+    const opened = await openDrawer(runningPlan({ kind, work, ...(kind === 'review-run' ? { runControl: null } : {}) }));
+    const node = opened.root.querySelector('.task-status-line');
+    expect(line(opened.root)).toContain('用时 1 分 12 秒');
+    vi.setSystemTime(new Date(Date.parse(NOW) + 1000));
+    const tick = clock.mock.calls.at(-1)![0] as () => void;
+    tick();
+    expect(opened.root.querySelector('.task-status-line')).toBe(node);
+    expect(line(opened.root)).toContain('用时 1 分 13 秒');
+    opened.inspectTaskPlan.mockImplementation(async () => runningPlan({ kind, state: { key: 'paused', label: '已暂停' },
+      work: { ...work, workedMs: 73_000, workingSince: null } }, paused()));
+    opened.drawer.refresh(kind);
+    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe('paused'));
+    vi.setSystemTime(new Date(Date.parse(NOW) + 60_000)); tick();
+    expect(line(opened.root)).toBe('用时 1 分 13 秒');
+    opened.inspectTaskPlan.mockImplementation(async () => runningPlan({ kind, work: { ...work, workedMs: 73_000, workingSince: new Date().toISOString() } }));
+    opened.drawer.refresh(kind);
+    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe('running'));
+    vi.setSystemTime(new Date(Date.parse(NOW) + 61_000));
+    (clock.mock.calls.at(-1)![0] as () => void)();
+    expect(line(opened.root)).toContain('用时 1 分 14 秒');
+    opened.drawer.close(false); clock.mockRestore();
+  });
+
+  it.each(['settled', 'stopped', 'resumable', 'cancelled-after-start'] as const)('uses the recorded summary for %s even without an overview answer', async key => {
+    const { root } = await openDrawer(finishedPlan({ state: { key, label: '已结束' },
+      work: { workedMs: 45000, workingSince: null, finished: { requests: 0, modelLabel: 'recorded-model@high' } } }),
+    { overview: async () => overviewOf(row('completed', { usage: { elapsed: 999999, calls: 500 }, attention: { modelLabel: 'other-model' } })) });
+    expect(text(root, '.task-status-line')).toBe('用时 45 秒 · 0 次模型调用');
+    expect(text(root, '.task-status-model')).toBe('模型 recorded-model@高');
+    expect(lines(root).join(' ')).not.toMatch(/tokens|处理用时|约 .*次调用|500/u);
+  });
+
+  it('omits unknown completion counts and models without guessing from usage', async () => {
+    const { root } = await openDrawer(finishedPlan({ work: { workedMs: 45000, workingSince: null, finished: { requests: null, modelLabel: null } } }));
+    expect(text(root, '.task-status-line')).toBe('用时 45 秒');
+    expect(text(root, '.task-status-model')).toBeUndefined();
+  });
+
+  it('shows the service estimate unchanged in compact and full plans before launch', async () => {
+    const sentence = '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；用时暂无可靠估计。';
+    const { root } = await openDrawer(taskPlanFixture({ estimate: { parts: 12, fewestRequests: 13, more: ['retry'], ceiling: true, durationMs: null, sentence } }));
+    expect(text(root, '[data-task-plan-row="预计"]')).toBe(sentence);
+    root.querySelector('[data-task-drawer-control="full-link"]')!.click();
+    expect(text(root, '[data-task-plan-term="预计"]')).toBe(sentence);
+    expect(lines(root).join(' ')).not.toMatch(/预计用时|tokens/u);
+  });
+
   it('shows the stage alone while a Run executes, for the row the real composition gives — whose `at` is when the Run was recorded, an hour before the resume', async () => {
     const real = composedRunningRow();
     expect(real.at).toBe('2026-11-17T07:00:00.000Z');
@@ -228,14 +486,14 @@ describe('the running card and the times of a Task', () => {
     expect(root.textContent).not.toMatch(/已运行|用时/u);
   });
 
-  it('on completion shows 处理用时 from the Run Report — and no figure for a Task without one', async () => {
+  it('on completion keeps the work figure and count, without falling back to the report when work is absent', async () => {
     const opened = await openDrawer(runningPlan());
     await model(opened.root);
     opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
     opened.inspectTaskPlan.mockImplementation(async () => finishedPlan());
     opened.drawer.refresh('baseline-analysis');
-    await vi.waitFor(() => expect(line(opened.root)).toBe('处理用时 3 分 12 秒'));
-    const bare = await openDrawer(finishedPlan(), { overview: async () => overviewOf(row('completed', { usage: null })) });
+    await vi.waitFor(() => expect(line(opened.root)).toBe('用时 3 分 12 秒 · 9 次模型调用'));
+    const bare = await openDrawer(finishedPlan({ work: null }), { overview: async () => overviewOf(row('completed')) });
     await vi.waitFor(() => expect(text(bare.root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。'));
     expect(line(bare.root)).toBeUndefined();
   });
@@ -245,7 +503,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
   it('uses the row its opener handed in and asks for no other', async () => {
     const { root, inspectTaskOverview } = await openDrawer(finishedPlan(), { how: { view: 'run', row: row('completed') as never } });
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).not.toHaveBeenCalled();
   });
@@ -266,8 +524,8 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
     drawer.refresh('baseline-analysis');
     await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe('settled'));
-    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
-    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒'));
+    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高');
+    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用'));
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
 
@@ -275,17 +533,17 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     const failing = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(overviewOf(row('completed')));
     const { root, drawer, open, inspectTaskOverview } = await openDrawer(finishedPlan(), { overview: failing });
     await vi.waitFor(() => expect(inspectTaskOverview).toHaveBeenCalledTimes(1));
-    expect(text(root, '.task-status-model')).toBeUndefined();
+    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@高');
     expect(controls(root)).not.toContain('view-result');
     drawer.close(false);
     await open();
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
 
-  it('does not remember a read that found no row for the Task: closed and opened again with the row present, the model, 处理用时 and 查看结果 appear', async () => {
+  it('does not remember a read that found no row for the Task: closed and opened again with the row present, the model, 用时 and 查看结果 appear', async () => {
     const overview = vi.fn().mockResolvedValueOnce(overviewOf()).mockResolvedValue(overviewOf(row('completed')));
     const { root, drawer, open } = await openDrawer(finishedPlan(), { overview });
     await vi.waitFor(() => expect(overview).toHaveBeenCalledTimes(1));
@@ -294,7 +552,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     drawer.close(false);
     await open();
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(overview).toHaveBeenCalledTimes(2);
   });

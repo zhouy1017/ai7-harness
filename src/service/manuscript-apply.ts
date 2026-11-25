@@ -1,9 +1,13 @@
+import { appendOnly } from './append-only.js';
 import { applyReceiptState, type InspectApplyReceiptInput, type ApplyReceiptProjection, type PrepareReverseApplyInput, type ReverseApplyPreparationProjection } from '../shared/protocol.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTarget } from './bounded-manuscript.js';
-import { applyProjection, EditorialMarkError, editorialMarksShape, widenEditorialMarks, type EditorialMarkStore } from './editorial-marks.js';
+import { applyProjection, EditorialMarkError, type EditorialMarkStore } from './editorial-marks.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
+import { inverseTargetsTouchInOrder, type InverseTarget } from './manuscript/structural-edits.js';
+import { workingBlock } from './manuscript/working-positions.js';
+import { recordEffectPart } from './manuscript/editor-steps.js';
 import {
   MAX_MARK_BODY_CODE_UNITS,
   type ApplyChangeSuggestionBatchInput,
@@ -73,7 +77,8 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
   effect_id TEXT NOT NULL UNIQUE REFERENCES manuscript_effect_intents(effect_id),
   payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64),
   actor TEXT NOT NULL CHECK(actor = 'editor'),
-  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply')),
+  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply',
+    'undo-step', 'redo-step')),
   approved_at TEXT NOT NULL
 ) STRICT`,
   manuscript_effect_dispatches: `CREATE TABLE manuscript_effect_dispatches (
@@ -98,47 +103,22 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MANUSCRIPT_EFFECT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MANUSCRIPT_EFFECT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
+/**
+ * The Effect ledger's two lookups that grew with history (Issue #1654 lock profile): whether an Effect was reversed, and the
+ * Effects that wrote an item. Without them each Apply, reversal and card read scanned every Effect or every target.
+ */
+export const MANUSCRIPT_EFFECT_INDEX_SQL = {
+  manuscript_effect_intents_reversal: `CREATE INDEX manuscript_effect_intents_reversal ON manuscript_effect_intents(reverses_effect_id) WHERE reverses_effect_id IS NOT NULL`,
+  manuscript_effect_targets_item: `CREATE INDEX manuscript_effect_targets_item ON manuscript_effect_targets(item_id)`,
+} as const;
 
-export const MANUSCRIPT_EFFECT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  manuscript_effect_intents: [
-    'base_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'reverses_effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_targets: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-    'item_id>proposal_change_items.item_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_approvals: ['effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE'],
-  manuscript_effect_dispatches: [
-    'approval_id>manuscript_effect_approvals.approval_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_receipts: [
-    'command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE',
-    'dispatch_id>manuscript_effect_dispatches.dispatch_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-    'resulting_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const MANUSCRIPT_EFFECT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  manuscript_effect_intents: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_targets: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_approvals: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_dispatches: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_receipts: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+});
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -153,47 +133,6 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-/**
- * Revision 23, once per store and in one transaction. On a store that revision 22 created,
- * `editorial_marks` is first rebuilt to the text that admits the empty pin an applied deletion stands
- * on (`widenEditorialMarks`), with foreign keys off around the transaction; then the five Effect
- * relations are created, and every reference is checked before anything commits. Shape-detected, like
- * the relations of revisions 21 and 22: once the Effect relations exist this has been done, and the
- * mark relation is rebuilt only while it holds revision 22's exact text — a new store creates it
- * widened, and nothing moves for it.
- */
-export function initializeManuscriptEffectSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_intents'").get();
-  if (existing !== undefined) return;
-  const widen = editorialMarksShape(db) === 'revision-22';
-  const foreignKeys = (): number => Number((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
-  const restoreForeignKeys = widen && foreignKeys() === 1;
-  if (widen) {
-    db.exec('PRAGMA foreign_keys = OFF');
-    requireApply(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
-  }
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      if (widen) widenEditorialMarks(db);
-      for (const sql of Object.values(MANUSCRIPT_EFFECT_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(MANUSCRIPT_EFFECT_TRIGGER_SQL)) db.exec(sql);
-      requireApply(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      db.exec('COMMIT');
-    } catch (error) {
-      try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Manuscript effect schema rollback failed.');
-      }
-      throw error;
-    }
-  } finally {
-    if (restoreForeignKeys) {
-      db.exec('PRAGMA foreign_keys = ON');
-      requireApply(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
-    }
-  }
-}
-
 interface PlannedTarget {
   markId: string;
   itemId: string;
@@ -202,10 +141,11 @@ interface PlannedTarget {
   toGrapheme: number;
   expectedText: string;
   insertText: string;
-  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null } | { existingDecisionId: string };
+  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null;
+    reasonSource?: 'reason-field' | 'suggested' | 'free-text' } | { existingDecisionId: string };
   standsAs: 'applied' | 'open';
 }
-type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & { markId: string; originalFrom: number; originalTo: number };
+type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & InverseTarget & { markId: string };
 
 interface Binding {
   manuscriptId: string;
@@ -227,7 +167,7 @@ export class ManuscriptApplyStore {
   }
 
   /** 接受并应用, 修改后接受, or applying a decision recorded before Apply existed. */
-  apply(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
+  apply(input: ApplyChangeSuggestionInput, project = true): ManuscriptApplyCommandProjection {
     this.#requireIdentities(input, [input.markId], input.clientEffectId);
     const replayed = this.#replay(input, input.clientEffectId, input.markId);
     if (replayed) return replayed;
@@ -264,7 +204,7 @@ export class ManuscriptApplyStore {
     return this.#commit(input, 'apply', input.interaction, input.clientEffectId, null, [{
       markId: input.markId, itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme,
       toGrapheme: target.toGrapheme, expectedText: target.currentText, insertText, decision, standsAs: 'applied',
-    }], input.markId);
+    }], project ? input.markId : null);
   }
 
   /**
@@ -328,22 +268,70 @@ export class ManuscriptApplyStore {
     }), input.markId);
   }
 
-  #reverseMembers(input: PrepareReverseApplyInput, effectId: string): ReverseMember[] {
+  /**
+   * An editor step's reversal of one committed Effect whole (Issue #1654): the governed reversal path of 撤销本次修改, with the
+   * interaction `undo-step` or `redo-step` — no confirmation was shown — and no projection, inside the step's transaction.
+   * Refused, as the card refuses, when the applied words changed since.
+   */
+  reverseForStep(binding: { manuscriptId: string; branchId: string }, effectId: string, interaction: 'undo-step' | 'redo-step'): void {
+    const members = this.#reverseMembers(binding, effectId);
+    requireApply(this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(effectId) === undefined, 'APPLY_INVALID', '这次应用已经撤销过。');
+    requireApply(this.#reverseRangesStand(members), 'APPLY_TARGET_DRIFTED', '应用后的文字或修改范围已变，不能直接撤销这次应用。');
+    this.#commit({ ...binding, windowStartBlockId: '' }, 'reverse-apply', interaction, randomUUID(), effectId, members.map((member) => ({
+      markId: member.markId, itemId: member.itemId, blockId: member.blockId, fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme,
+      expectedText: member.standingText, insertText: member.currentText,
+      decision: { disposition: 'withdrawn' as const, editedText: null, reason: null }, standsAs: 'open' as const })), null);
+  }
+
+  /**
+   * An editor step's re-apply of the items `sourceEffectId` applied (Issue #1654): each item's mark must stand open and exact
+   * on its original words again, and the text written is the decision that Effect's target names — the edited text of an
+   * accept-with-edit. The new decision repeats that one, its reason included, and is captured as any accept is: a signal stands while its decision is
+   * the item's latest (the learning ledger's rule), so the undo's 「withdrawn」 set the first accept's signal aside and this one
+   * stands in its place — one standing signal for the accept, whichever way the editor went.
+   */
+  reapplyForStep(binding: { manuscriptId: string; branchId: string }, sourceEffectId: string, interaction: 'undo-step' | 'redo-step'): void {
+    const sources = this.#db.prepare(`SELECT p.mark_id, t.item_id, d.disposition, d.edited_text, r.reason, r.reason_source FROM manuscript_effect_targets t
+      JOIN proposal_change_items p ON p.item_id = t.item_id JOIN proposal_item_decisions d ON d.decision_id = t.decision_id
+      LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
+      WHERE t.effect_id = ? ORDER BY t.ordinal`).all(sourceEffectId) as SqlRow[];
+    requireApply(sources.length > 0, 'APPLY_INVALID', '找不到这次应用的记录。');
+    const planned = sources.map((source): PlannedTarget => {
+      const target = this.#marks.suggestionTarget({ ...binding, markId: String(source.mark_id) });
+      // A suggestion rejected, deferred or applied another way since is handled, not drifted: the step says which.
+      requireApply(target.status === 'open', 'MARK_ACTION_INVALID', '这条修改建议已另作处理，本次应用没有写入稿件。');
+      requireApply(target.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
+      const disposition = String(source.disposition) as 'accepted' | 'accepted-with-edit';
+      const editedText = source.edited_text === null ? null : String(source.edited_text);
+      const reason = source.reason === null ? null : String(source.reason);
+      const reasonSource = source.reason_source === null ? undefined : String(source.reason_source) as 'reason-field' | 'suggested' | 'free-text';
+      return { markId: String(source.mark_id), itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme, toGrapheme: target.toGrapheme,
+        expectedText: target.currentText, insertText: editedText ?? target.proposedText,
+        decision: { disposition, editedText, reason, ...(reasonSource === undefined ? {} : { reasonSource }) }, standsAs: 'applied' };
+    });
+    this.#requireAtomicScope(binding.branchId, planned.map((item) => item.itemId));
+    this.#commit({ ...binding, windowStartBlockId: '' }, 'apply', interaction, randomUUID(), null, planned, null);
+  }
+
+  #reverseMembers(input: { manuscriptId: string; branchId: string }, effectId: string): ReverseMember[] {
     // Reversal consumes the original Effect once, so it must restore that Effect's entire committed batch.
-    const ids = this.#db.prepare(`SELECT p.mark_id, t.from_grapheme, t.to_grapheme FROM manuscript_effect_targets t
+    const ids = this.#db.prepare(`SELECT p.mark_id, t.block_id, t.from_grapheme, t.to_grapheme FROM manuscript_effect_targets t
       JOIN proposal_change_items p ON p.item_id = t.item_id WHERE t.effect_id = ? ORDER BY t.ordinal`).all(effectId);
     requireApply(ids.length > 0, 'APPLY_INVALID', '原应用的修改范围缺失。');
     return ids.map((row) => ({ ...this.#marks.suggestionTarget({ ...input, markId: String(row.mark_id) }), markId: String(row.mark_id),
-      originalFrom: Number(row.from_grapheme), originalTo: Number(row.to_grapheme) }));
+      original: { blockId: String(row.block_id), from: Number(row.from_grapheme), to: Number(row.to_grapheme) } }));
   }
 
+  /**
+   * Whether every member still stands, apart from the others or touching one of its own original paragraph in its original order.
+   * Two touching members from different original paragraphs — joined since — are refused, not reordered (ADR 0105 §2).
+   */
   #reverseRangesStand(members: readonly ReverseMember[]): boolean {
-    const ordered = [...members].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.originalFrom - b.originalFrom);
+    const ordered = [...members].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.original.from - b.original.from);
     return ordered.every((member, index) => {
       const previous = ordered[index - 1];
       return member.status === 'applied' && member.anchorState === 'exact' && (previous === undefined || previous.blockId !== member.blockId ||
-        previous.toGrapheme < member.fromGrapheme || previous.toGrapheme === member.fromGrapheme &&
-          (previous.toGrapheme > previous.fromGrapheme && member.toGrapheme > member.fromGrapheme || previous.originalTo === member.originalFrom));
+        previous.toGrapheme < member.fromGrapheme || previous.toGrapheme === member.fromGrapheme && inverseTargetsTouchInOrder(previous, member));
     });
   }
 
@@ -408,7 +396,7 @@ export class ManuscriptApplyStore {
     const members = this.#reverseMembers(input, String(original.effect_id));
     const exact = this.#reverseRangesStand(members);
     return { ranges: members.map((member) => ({ markId: member.markId,
-      position: Number(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, member.blockId)?.position ?? 0),
+      position: workingBlock(this.#db, input.branchId, member.blockId)?.position ?? 0,
       fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme })),
       originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
       journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: exact && reversed === undefined,
@@ -468,7 +456,7 @@ export class ManuscriptApplyStore {
     clientEffectId: string,
     reversesEffectId: string | null,
     planned: ReadonlyArray<PlannedTarget>,
-    projectedMarkId: string,
+    projectedMarkId: string | null,
   ): ManuscriptApplyCommandProjection {
     // EREC-005: while an Effect identity of this branch stands 结果待确认, no other Apply could be told apart from it.
     requireApply(this.#db.prepare(`SELECT 1 FROM manuscript_outcome_recovery o WHERE o.manuscript_id = ? AND o.branch_id = ? AND o.state = 'unresolved'
@@ -503,7 +491,7 @@ export class ManuscriptApplyStore {
         const written = commit.targets[index]!;
         const decisionId = 'existingDecisionId' in target.decision
           ? target.decision.existingDecisionId
-          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now);
+          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now, target.decision.reasonSource);
         this.#db.prepare(
           `INSERT INTO manuscript_effect_targets(
              effect_id, ordinal, item_id, decision_id, block_id, from_grapheme, to_grapheme, expected_text_digest,
@@ -531,6 +519,10 @@ export class ManuscriptApplyStore {
          ) VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?, ?, ?)`,
       ).run(receiptId, effectId, dispatchId, commit.commandGroupId, commit.after.revisionId, commit.after.journalSequence,
         commit.after.workingDigest, planned.length, receiptDigest, now);
+      // One editor step's part (Issue #1654): a new slot of an Apply, the next generation of a reversed one, or — inside an undo
+      // or redo — the replayed slot's next generation.
+      recordEffectPart(this.#db, binding.branchId, { effectId, kind, reversesEffectId, batch: interaction === 'confirm-batch-apply', items: planned.length,
+        anchorBlockId: planned[0]!.blockId });
       // Each mark now stands on the text this Effect wrote: the applied text, or the restored original. A
       // suggestion that deleted its words wrote none, and its mark stands exactly on the empty range they
       // left — nothing has changed there since — so reversing it is an insertion at that point.
@@ -551,6 +543,8 @@ export class ManuscriptApplyStore {
         }, now);
       });
     });
+    // An editor step's dispatch (Issue #1654) and 全部替换's per-occurrence Apply ask for no answer: the caller answers once.
+    if (projectedMarkId === null) return {} as ManuscriptApplyCommandProjection;
     const application = this.#application(clientEffectId, binding.manuscriptId, binding.branchId);
     requireApply(application !== null, 'APPLY_RECEIPT_MISSING', '应用已提交但无法读取凭据。');
     return { ...this.#marks.commandProjection(binding, projectedMarkId), application, window: this.#window(binding) };

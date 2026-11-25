@@ -6,7 +6,7 @@ import { clarificationPromptContractDigest } from './clarification-contract.js';
 import { LOCAL_FIXTURE_MANIFEST_SHA256,
   type LocalFixtureProfile, type LocalFixtureRegisteredProfile, type LocalFixtureRuleId, type SelectedPolicyIdentity } from '../../shared/protocol.js';
 import type { HarnessCompositionDescriptor } from '../harness/primary-agent-harness.js';
-import { LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from './local-tools.js';
+import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from './local-tools.js';
 
 /** #1160's standalone authored counterpart; historical parent fixtures never enter this profile. */
 export const STOCK_TYPOS_LEAF_FIXTURE = 'sample1-stock-typos-leaf-authored';
@@ -106,7 +106,8 @@ export function localFixtureRegisteredProfile(kind: string | null, purpose: stri
  *
  * An entry the fixture converter wrote from a Provider Test Ledger capture (Issue #808) additionally carries its `capture`:
  * the item that captured it, which subject it answers (a unit, the reduction, a sampling turn, the reflection, or a
- * synthesis or dialogue turn the adapter already answers), the route, endpoint, request shape and model, the stage's own
+ * synthesis or dialogue turn the adapter already answers; a tool-turn continuation of a unit sits under the digest of its whole
+ * carried exchange, Issue #1598), the route, endpoint, request shape and model, the stage's own
  * prompt contract and the enclosing task's, when, the digests of the exact provider request and response, the development
  * validation it belonged to, and the captured identity each placeholder stands for. Nothing is keyed by it: the deterministic
  * adapter only declines an entry whose recorded enclosing task contract is not the one it answers for, and an entry without
@@ -117,6 +118,8 @@ export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_FIXTURE_BYTES = 512 * 1024;
 const MAX_BASE_DEPTH = 4;
 const MAX_FIXTURE_ATTEMPT = 8;
+/** The most parallel tool calls one recorded answer carries: a model may exceed the five a unit may run, and the product answers the rest as errors. */
+const MAX_TOOL_CALLS_PER_ANSWER = 16;
 /** The most text deltas one dialogue answer streams. */
 const MAX_ANSWER_CHUNKS = 64;
 /** The keys an entry may carry beside the three it must; every other key is still refused. */
@@ -125,9 +128,9 @@ const CAPTURE_KEYS = [
   'subject', 'itemId', 'selectedItemId', 'evidenceScope', 'route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest',
   'capturedAt', 'providerRequestDigest', 'providerResponseDigest', 'validation', 'identityMap', 'cacheKey', 'generation', 'fixtureResponseDigest', 'responseDigestOrigin',
 ] as const;
-const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate'] as const;
+const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate', 'recording-task', 'scoped-global-dialogue'] as const;
 const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
-const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3})\}\}$/u;
+const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3}|tool-id:[1-9][0-9]{0,3})\}\}$/u;
 const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const MAX_IDENTITY_MAP = 4_096;
 /** The keys a fixture may carry beside the seven it must; every other key is still refused. */
@@ -287,7 +290,7 @@ function parseResponse(value: unknown): ModelFixtureResponse {
   requireFixture(isRecord(value), '夹具响应不是对象。');
   switch (value.kind) {
     case 'tool-calls': {
-      requireFixture(hasExactKeys(value, ['kind', 'calls', 'usage']) && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 5 &&
+      requireFixture(hasExactKeys(value, ['kind', 'calls', 'usage']) && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= MAX_TOOL_CALLS_PER_ANSWER &&
         value.calls.every((call: unknown) => isRecord(call) && hasExactKeys(call, ['name', 'arguments']) &&
           typeof call.name === 'string' && /^[a-z][a-z_]{0,63}$/u.test(call.name) && isRecord(call.arguments) && Buffer.byteLength(canonicalJson(call.arguments)) <= 4096) &&
         isRecord(value.usage) && hasExactKeys(value.usage, ['inputTokens', 'outputTokens']) &&
@@ -368,10 +371,15 @@ function parseCapture(value: unknown): ModelFixtureCapture {
   if (namespaced) {
     let endpoint: URL | undefined;
     try { endpoint = new URL(value.endpoint as string); } catch { /* Refuse without printing a payload field. */ }
+    const gemini = value.requestShape === 'google-generate-content';
+    const shapeAccepted = gemini
+      ? endpoint?.pathname.endsWith('/' + value.model + ':generateContent') && endpoint.search === '' ||
+        (value.subject === 'dialogue' || value.subject === 'recording-task' && isRecord(validation) && validation.step === 'global-agent-dialogue/ask') &&
+          endpoint?.pathname.endsWith('/' + value.model + ':streamGenerateContent') && endpoint.search === '?alt=sse'
+      : endpoint?.search === '' && (['openai-chat-completions', 'openai-responses', 'anthropic-messages'].includes(value.requestShape as string) ||
+        value.requestShape === 'editorial-dialogue-sse' && value.subject === 'dialogue' && value.route === 'opencode-go');
     requireFixture(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
-      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) &&
-      (value.requestShape === 'openai-chat-completions' ||
-        (value.requestShape === 'editorial-dialogue-sse' && value.subject === 'dialogue' && value.route === 'opencode-go')),
+      endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) && shapeAccepted,
       '夹具条目的捕获路由或形态无效。');
   }
   requireFixture(Array.isArray(value.identityMap) && value.identityMap.length <= MAX_IDENTITY_MAP && value.identityMap.every((mapping) =>
@@ -439,6 +447,10 @@ export function parseModelFixture(value: unknown): ModelFixture {
     if (capture !== undefined) {
       requireFixture(capture.fixtureResponseDigest === sha256Hex(canonicalJson(response)), '夹具条目的响应与捕获摘要不一致。');
       const unitSubject = capture.subject === 'unit' || capture.subject.endsWith('-unit');
+      const scoped = capture.subject === 'scoped-global-dialogue';
+      if (scoped) requireFixture(capture.evidenceScope === 'namespaced' && capture.itemId.startsWith('S17c/global-agent-scoped-dialogue/') &&
+        capture.validation?.family.startsWith('four-provider-recording-') && capture.validation.case === 'global-agent-scoped-dialogue' &&
+        /^global-agent-scoped-dialogue\/ask(?:\/tool-turn-[1-9][0-9]*)?$/u.test(capture.validation.step), '范围对话夹具的验证用途无效。');
       const stageSubject = ['reduction', 'sampling', 'reflection'].includes(capture.subject);
       // A legacy line recorded one contract for every call, so only a namespaced capture can say which contract a stage ran under.
       requireFixture(stageSubject ? capture.evidenceScope === 'namespaced'
@@ -448,14 +460,20 @@ export function parseModelFixture(value: unknown): ModelFixture {
       '夹具条目的任务与阶段契约不一致。');
       requireFixture(unitSubject ? (entry.unitOrdinal as number) > 0 : entry.unitOrdinal === 0, '夹具条目的捕获契约序号不一致。');
       requireFixture(capture.subject === 'dialogue' ? response.kind !== 'unit-result' : response.kind !== 'answer-chunks', '夹具条目的捕获响应契约不一致。');
+      // A tool identity can be filled only from the exchange a continuation carries, and a continuation is found only under a unit;
+      // the capture's step names the continuations.
+      const continuation = unitSubject && /\/tool-turn-[1-9][0-9]*$/u.test(capture.validation?.step ?? '');
+      requireFixture(response.kind !== 'tool-calls' || (entry.unitOrdinal as number) > 0 || scoped &&
+        response.calls.every(call => (GLOBAL_AGENT_SCOPED_TOOL_NAMES as readonly string[]).includes(call.name)), '夹具条目的工具调用响应没有可匹配的后续回合。');
       const serializedResponse = JSON.stringify(response);
       const placeholders = serializedResponse.match(/\{\{[^{}]+\}\}/gu) ?? [];
       requireFixture(!/blk_[0-9a-f]{24}/u.test(serializedResponse) && placeholders.every((placeholder) =>
         capture.identityMap.some((mapping) => mapping.placeholder === placeholder)), '夹具条目的响应标识未经映射。');
       requireFixture(capture.identityMap.every((mapping) => serializedResponse.includes(mapping.placeholder) &&
-        (unitSubject ? /^\{\{block:/u.test(mapping.placeholder)
+        (unitSubject ? /^\{\{block:/u.test(mapping.placeholder) || (continuation && /^\{\{tool-id:/u.test(mapping.placeholder))
           : capture.subject === 'reduction' ? /^\{\{unit:/u.test(mapping.placeholder)
-            : capture.subject === 'sampling' && /^\{\{(?:ref|sample-block):/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
+            : capture.subject === 'sampling' ? /^\{\{(?:ref|sample-block):/u.test(mapping.placeholder)
+              : scoped && /^\{\{tool-id:/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
     }
     return {
       unitOrdinal: entry.unitOrdinal as number,

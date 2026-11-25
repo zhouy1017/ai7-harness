@@ -1,7 +1,8 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EvaluationProfiles, builtinEvaluationProfile, EVALUATION_PROFILE_COUNT_REASON, EVALUATION_PROFILE_SCHEMA_SQL, initializeEvaluationProfileSchema } from '../../src/service/evaluation-profiles.js';
+import { EvaluationProfiles, builtinEvaluationProfile, EVALUATION_PROFILE_COUNT_REASON, EVALUATION_PROFILE_SCHEMA_SQL } from '../../src/service/evaluation-profiles.js';
 import type { SaveEvaluationProfileInput } from '../../src/shared/protocol.js';
 
 let db: DatabaseSync;
@@ -9,7 +10,7 @@ let profiles: EvaluationProfiles;
 beforeEach(() => {
   db = new DatabaseSync(':memory:');
   db.exec('CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY) STRICT');
-  initializeEvaluationProfileSchema(db);
+  createBaselineRelations(db, EVALUATION_PROFILE_SCHEMA_SQL);
   profiles = new EvaluationProfiles(db);
 });
 afterEach(() => db.close());
@@ -52,18 +53,6 @@ describe('immutable house evaluation profile versions (KB-002, EVAL-014)', () =>
     expect(() => profiles.save({ ...input(), readiness: ['重复', '重复'] })).toThrow('不能重复');
     expect(() => profiles.save({ ...input(), readiness: Array.from({ length: 21 }, (_, index) => `第${index}项`) })).toThrow('20');
     expect(profiles.page().profiles).toEqual([builtinEvaluationProfile()]);
-  });
-
-  it('leaves a store holding only initial_evaluation_tasks for the exact-schema refusal, not a raw SQLite error (P3-3)', () => {
-    const partial = new DatabaseSync(':memory:');
-    try {
-      partial.exec('CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY) STRICT');
-      partial.exec(EVALUATION_PROFILE_SCHEMA_SQL.initial_evaluation_tasks);
-      expect(() => initializeEvaluationProfileSchema(partial)).not.toThrow();
-      expect(partial.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'evaluation_profile_versions'").get()).toBeUndefined();
-    } finally {
-      partial.close();
-    }
   });
 
   it('keeps Task snapshots independently readable after house edits and bounds history pages', () => {

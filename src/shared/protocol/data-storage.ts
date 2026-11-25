@@ -25,6 +25,7 @@ export interface StoreVersionProjection {
  * the latest software update and whether it kept the Data Version, and the records of the versions that opened the store.
  */
 export interface DataVersionProjection {
+  readonly canRollbackUpgrade?: boolean;
   readonly softwareVersion: string;
   readonly dataVersion: number;
   readonly frozen: boolean;

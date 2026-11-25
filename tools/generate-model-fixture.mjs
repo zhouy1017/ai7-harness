@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { admittedCaptureEndpoint, captureAnswer, captureMessages } from './model-fixture-families.mjs';
 
 /**
  * Turn one Provider Result Cache entry (ADR 0067, ADR 0089) into an `ai7.model-fixture/1` file.
@@ -274,6 +275,54 @@ export function unitContentDigest(ownBlockTexts) {
   return sha256Hex(ownBlockTexts.join('\n'));
 }
 
+// --- Duplicated from src/service/provider/tool-turn-digest.ts (Issue #1598; tests/unit/tool-turn-fixtures.test.ts checks it) ---
+const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
+const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
+
+/** A scored list with each run of equal scores in identity-free content order: only tied candidates can move. Any other text is returned as it is. */
+function tiesInContentOrder(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  if (!Array.isArray(parsed) || parsed.length < 2 || !parsed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry.score === 'number')) return text;
+  const content = (entry) => JSON.stringify(entry).replace(IDENTITY_TOKEN, '~');
+  const ordered = [];
+  for (let from = 0; from < parsed.length;) {
+    let to = from + 1;
+    while (to < parsed.length && parsed[to].score === parsed[from].score) to += 1;
+    ordered.push(...parsed.slice(from, to).sort((a, b) => (content(a) < content(b) ? -1 : content(a) > content(b) ? 1 : 0)));
+    from = to;
+  }
+  return JSON.stringify(ordered);
+}
+
+/** The exchange with every per-import identity renamed by first appearance: the unit's own blocks `{{block:N}}`, the rest `{{tool-id:K}}`. */
+export function normalizeToolExchange(rounds, ownBlockIds, seed = []) {
+  const names = new Map(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
+  const foreign = [...seed];
+  foreign.forEach((id, index) => names.set(id, `{{tool-id:${index + 1}}}`));
+  const rename = (text) => text.replace(IDENTITY_TOKEN, (identity) => {
+    let name = names.get(identity);
+    if (name === undefined) { foreign.push(identity); name = `{{tool-id:${foreign.length}}}`; names.set(identity, name); }
+    return name;
+  });
+  const canonicalArguments = (raw) => { try { return canonicalJson(JSON.parse(raw)); } catch { return raw; } };
+  return {
+    rounds: rounds.map((round) => ({
+      calls: round.calls.map((call) => ({ name: call.name, arguments: rename(canonicalArguments(call.arguments)) })),
+      results: round.calls.map((call) => {
+        const result = round.results.find((candidate) => candidate.callId === call.id);
+        return { text: rename(tiesInContentOrder(result.text)), isError: result.isError };
+      }),
+    })),
+    foreign,
+  };
+}
+
+/** The key of a tool-turn continuation: the unit's request digest and its whole normalized exchange. */
+export function toolTurnRequestDigest(unitRequestDigest, normalized) {
+  return sha256Hex(canonicalJson({ schema: TOOL_TURN_DIGEST_SCHEMA, unitRequestDigest, rounds: normalized.rounds }));
+}
+
 // --- Arguments --------------------------------------------------------------------------------
 
 const ARGUMENT_KEYS = ['--from-cache', '--cache-root', '--identity', '--description', '--out'];
@@ -367,6 +416,13 @@ async function loadSample1Owners() {
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
         "export { EDITORIAL_POLISH_PROMPT_CONTRACT, parseEditorialPolishMessage } from './src/service/fast-role/polish-contract.ts';",
         "export { CONFLICT_REGENERATE_PROMPT_CONTRACT, parseConflictRegenerateMessage } from './src/service/fast-role/conflict-regenerate-contract.ts';",
+        "export { FLASH_TASK_REGISTRY } from './src/service/fast-role/flash-task-registry.ts';",
+        "export { isSyntheticRecordingInput } from './src/service/fast-role/recording-inputs.ts';",
+        "export { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST } from './src/service/learning/curation.ts';",
+        "export { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST } from './src/service/dialogue/global-agent-session.ts';",
+        "export { scopedDialogueRecordingKey } from './src/service/dialogue/recording-scope.ts';",
+        "export { GLOBAL_AGENT_SCOPED_TOOL_NAMES } from './src/service/provider/local-tools.ts';",
+        "export { SCOPED_EDIT_PROMPT_CONTRACT, SCOPED_EDIT_PROMPT_CONTRACT_DIGEST, parseScopedEditMessageHeader, scopedEditRequestDigest } from './src/service/fast-role/scoped-edit-contract.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
       bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
     });
@@ -408,6 +464,41 @@ async function verifySample1FastRoleExcerpt(parsed) {
   }
 }
 
+async function verifyScopedSample1(request, selection, parsed) {
+  const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', 'scoped-dialogue'); };
+  let database;
+  try {
+    if (typeof request.sample1Store !== 'string' || typeof request.sample1Task !== 'string') fail();
+    const relation = relative(TOOL_ROOT, resolve(request.sample1Store));
+    if (!relation.startsWith('..') && !isAbsolute(relation)) fail();
+    const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
+    if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) fail();
+    const { DatabaseSync } = await import('node:sqlite');
+    database = new DatabaseSync(request.sample1Store, { readOnly: true });
+    const { book, question } = parsed.scoped;
+    const original = database.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m USING(manuscript_id)
+      JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
+      WHERE m.book_id = ? AND m.role = 'primary' AND mr.manuscript_id = ? AND mr.revision_id = ? AND mr.parent_revision_id IS NULL
+      AND mr.ordinal = 1 AND sv.source_digest = ?`).get(book.bookId, book.manuscriptId, book.revisionId, SAMPLE1_SOURCE_SHA256);
+    const dialogue = database.prepare(`SELECT d.canonical_json, d.sha256 FROM dialogue_tasks d
+      JOIN dialogue_attempts a USING(dialogue_id) JOIN dialogue_execution_bindings b USING(attempt_id)
+      WHERE d.dialogue_id = ? AND d.book_id IS NULL AND d.question_sha256 = ? AND a.kind = 'ask'
+      AND b.operational_scope = 'developer-live' AND b.prompt_contract_sha256 = ? AND b.route = ? AND b.model = ?`)
+      .get(request.sample1Task, sha256Hex(question), selection.promptContractDigest, selection.captured.route, selection.model);
+    if (!original || !dialogue || sha256Hex(dialogue.canonical_json) !== dialogue.sha256) fail();
+    const task = JSON.parse(dialogue.canonical_json);
+    if (task.operationalScope !== 'developer-live' || task.questionSha256 !== sha256Hex(question) || task.sources?.length !== 0) fail();
+    const owners = await loadSample1Owners();
+    const blocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push(block.text), { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    return toolResultsAreSample1(parsed.toolResultTexts ?? [], blocks);
+  } catch {
+    fail();
+  } finally {
+    database?.close();
+  }
+}
+
 /**
  * ADR 0079 §5: only the exact admitted carrier is exempt. Its frozen product manifest is checked
  * against the existing DOCX extractor; the entire selected stage message is rebuilt from that
@@ -417,6 +508,7 @@ async function verifySample1FastRoleExcerpt(parsed) {
 export async function verifySample1Capture(request, selection, parsed) {
   if (FAST_ROLE_SUBJECTS.includes(parsed.subject)) return verifySample1FastRoleExcerpt(parsed);
   if (request.sample1Store === undefined && request.sample1Task === undefined) return false;
+  if (parsed.subject === 'scoped-global-dialogue') return verifyScopedSample1(request, selection, parsed);
   let step = 'source';
   const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', step); };
   let database;
@@ -625,6 +717,13 @@ export async function verifySample1Capture(request, selection, parsed) {
       const execution = plan('execution-plan');
       if (execution.baselineSynopsisContext !== undefined) {
         const context = execution.baselineSynopsisContext;
+        // The rebuild reads the latest baseline revision of the pinned manuscript revision. A store analysed again after the
+        // Task froze no longer holds the frozen chain there: refuse with its own reason rather than an unexplained mismatch.
+        const latest = database.prepare(`SELECT r.revision_id FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+          WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis' AND r.manuscript_revision_id = ? ORDER BY r.ordinal DESC LIMIT 1`).get(manifest.manuscript.bookId, pin.revisionId);
+        step = 'synopsis-revision';
+        if (latest?.revision_id !== context.revisionId) fail();
+        step = 'message';
         const rebuilt = owners.freezeTaskBaselineSynopses(database, kind, manifest.manuscript.bookId,
           pin.revisionId, pin.revisionDigest, context.maximumMessageBytes);
         if (canonicalJson(rebuilt.baselineSynopsisContext) !== canonicalJson(context)) fail();
@@ -651,7 +750,8 @@ export async function verifySample1Capture(request, selection, parsed) {
       expected = owners.buildRunReportReflectionMessage(outcome.runRecordId, owners.runReportAccountingOf(outcome.report));
     } else fail();
     if (expected === undefined || expected !== parsed.unitMessage) fail();
-    return true;
+    // The unit message is proved; the tool exchange a continuation carries is not, unless every word of it is sample1's.
+    return parsed.toolResultTexts === undefined || toolResultsAreSample1(parsed.toolResultTexts, sampleBlocks.map((block) => block.text));
   } catch { fail(); } finally { database?.close(); }
 }
 
@@ -840,11 +940,13 @@ export function evidenceGeneration(namespace, promptContractDigest, taskPromptCo
   return sha256Hex(JSON.stringify([namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest, ...task]));
 }
 
-/** The two usage counts an OpenAI-compatible response states, or `null`: what `usageOfResponse` reads. */
-function usageOfResponse(response) {
-  const usage = response !== null && typeof response === 'object' ? response.usage : undefined;
-  if (usage === null || typeof usage !== 'object') return null;
-  const { prompt_tokens: inputTokens, completion_tokens: outputTokens } = usage;
+/** The reported input and output counts, matching the live cache owner's reading. */
+function usageOfResponse(response, shape) {
+  const usage = response?.usage;
+  const [inputTokens, outputTokens] = shape === 'google-generate-content'
+    ? [response?.usageMetadata?.promptTokenCount, response?.usageMetadata?.candidatesTokenCount]
+    : shape === 'openai-responses' || shape === 'anthropic-messages'
+      ? [usage?.input_tokens, usage?.output_tokens] : [usage?.prompt_tokens, usage?.completion_tokens];
   return Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0
     ? { inputTokens, outputTokens }
     : null;
@@ -917,7 +1019,7 @@ export async function readSelectedEntry(cacheRoot, selection) {
   refuse(entry.model === selection.model && entry.requestDigest === selection.requestDigest && sha256Hex(entry.requestBody) === selection.requestDigest &&
     entry.status === selection.captured.status && typeof entry.transmittedAt === 'string' && !Number.isNaN(Date.parse(entry.transmittedAt)) &&
     (selection.replayCapturedAt === null || selection.replayCapturedAt === entry.transmittedAt) &&
-    (!('usage' in entry) || sameUsage(entry.usage, usageOfResponse(entry.response))),
+    (!('usage' in entry) || sameUsage(entry.usage, usageOfResponse(entry.response, entry.requestShape))),
   'FIXTURE_GEN/entry-invalid', '缓存条目与账本记录的请求不一致。');
   const responseDigest = sha256Hex(JSON.stringify(entry.response) ?? 'null');
   refuse(!('responseDigest' in entry) || entry.responseDigest === responseDigest, 'FIXTURE_GEN/entry-invalid', '缓存响应摘要不一致。');
@@ -960,15 +1062,135 @@ function chatMessageText(content) {
  * which a reduction, a sampling turn or the reflection names as its `stageContractDigest` for the caller to prove against the
  * capture. Any other request shape refuses rather than being guessed at.
  */
-export function parseCachedRequest(requestBody, promptContractDigest, structuredStageContractDigest) {
+export function parseCachedRequest(requestBody, promptContractDigest, structuredStageContractDigest, shape = 'openai-chat-completions') {
   let body;
   try {
-    body = JSON.parse(requestBody);
+    body = { messages: captureMessages(JSON.parse(requestBody), shape) };
   } catch {
-    throw new FixtureGenerationError('FIXTURE_GEN/request-shape-unsupported', '缓存条目的请求体不是 JSON。');
+    throw new FixtureGenerationError('FIXTURE_GEN/request-shape-unsupported', '缓存条目的请求体不是可识别的模型请求。');
   }
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
+  // A tool-turn continuation (Issue #1598) carries the unit's own request and, after its last user message, the tool exchange so far.
+  const lastUser = body.messages.findLastIndex((message) => message !== null && typeof message === 'object' && message.role === 'user');
+  const rounds = lastUser === -1 ? [] : parseToolExchange(body.messages.slice(lastUser + 1));
+  const base = parseUnitRequest(rounds.length === 0 ? body : { ...body, messages: body.messages.slice(0, lastUser + 1) }, promptContractDigest, structuredStageContractDigest);
+  const scoped = base.subject === 'scoped-global-dialogue';
+  if (rounds.length === 0) return { ...base, toolCount: 0 };
+  refuse(scoped ? rounds.every(round => round.calls.every(call => base.allowedTools.includes(call.name))) :
+    base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
+    'FIXTURE_GEN/request-shape-unsupported', '工具回合只支持分析单元。');
+  // A placeholder-shaped text in the exchange would hash like an identity renamed in its place, and replay could not tell them apart.
+  refuse(rounds.every((round) => round.calls.every((call) => call.name.match(PLACEHOLDER_SHAPE) === null && call.arguments.match(PLACEHOLDER_SHAPE) === null) &&
+    round.results.every((result) => result.text.match(PLACEHOLDER_SHAPE) === null)),
+  'FIXTURE_GEN/identity-unmapped', '工具交换已含有占位符形式的文字，回放无法与捕获区分。');
+  const normalized = normalizeToolExchange(rounds, scoped ? [] : base.identities.map(({ identity }) => identity), base.scoped?.identities);
+  const resultTexts = rounds.flatMap((round) => round.results.map((result) => result.text));
+  const assistantTexts = body.messages.slice(lastUser + 1).filter(message => message.role === 'assistant')
+    .flatMap(message => chatMessageText(message.content) ?? []);
+  return {
+    ...base,
+    toolCount: resultTexts.length,
+    toolResultTexts: resultTexts,
+    requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
+    contentDigest: null,
+    // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
+    carriedBlockTexts: [...base.carriedBlockTexts, ...assistantTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves),
+      ...(scoped ? rounds.flatMap(round => round.calls.flatMap(call => jsonStringLeaves(call.arguments))) : [])],
+    identities: [...(scoped ? [] : base.identities), ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
+  };
+}
+
+/**
+ * The decoded strings of a JSON text, object keys apart from values, or the text itself as the one value when it is not JSON: the
+ * words a result carries, without the escapes (a quotation mark, a newline) that would split a quoted passage in its raw form.
+ */
+function jsonStringsOf(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return { keys: [], values: [text] }; }
+  const keys = [];
+  const values = [];
+  const visit = (node) => {
+    if (typeof node === 'string') values.push(node);
+    else if (Array.isArray(node)) node.forEach(visit);
+    else if (node !== null && typeof node === 'object') for (const [key, value] of Object.entries(node)) { keys.push(key); visit(value); }
+  };
+  visit(parsed);
+  return { keys, values };
+}
+
+/** The decoded string values of a JSON text, or the text itself when it is not JSON. */
+export function jsonStringLeaves(text) {
+  return jsonStringsOf(text).values;
+}
+
+const IDENTITY_WHOLE = /^(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
+/**
+ * The exact words the product's local tools answer with when they refuse or fail: the fixed texts `#executeLocal` returns
+ * (platform-tool-session.ts) and the codes of a `RetrievalError` (retrieval/index.ts). Only these whole strings count as the product's
+ * own; text that merely begins like one, or is shaped like a code, is not. tests/unit/tool-turn-fixtures.test.ts reads both source
+ * files and checks every constant they hold is in this set.
+ */
+const PRODUCT_REFUSALS = new Set([
+  '检索未完成',
+  '检索未完成：本单元的工具往返已达到熔断上限。',
+  '检索未完成：本单元的检索调用次数已用完，请使用已有结果。',
+  '检索未完成：结果超过字节上限。',
+  '本次尝试未准许该工具。',
+  '检索参数无效。',
+  '检索工具超出并行上限，或重复使用调用标识。',
+  '已达到运行预算上限。',
+  'RETRIEVAL_SOURCE_NOT_AUTHORIZED',
+  'RETRIEVAL_SOURCE_MOVED',
+  'MATERIAL_REFERENCE_UNAVAILABLE',
+]);
+/**
+ * The object keys of the product's retrieval results that are as long as a quotation (a candidate's `revisionOrIndexDigest`, an anchor's
+ * `segmentOrdinal`): fixed field names, never manuscript text. Any other key at that length must be proved like a value.
+ * tests/unit/tool-turn-fixtures.test.ts builds real results with the product's own index and checks they pass.
+ */
+const PRODUCT_RESULT_KEYS = new Set(['revisionOrIndexDigest', 'segmentOrdinal']);
+
+/**
+ * Whether every word a carried tool result holds is exact sample1's: each string it carries that could be a quotation — at the echo
+ * threshold or longer — is a passage of a proved block, an identity, or (a value only) one of the product's own whole refusal texts
+ * or (a key only) one of its own result field names. That covers the object keys as well as the values, so foreign text cannot ride in
+ * as a key. A result of any other text (a pinned fact of an edited revision, a guideline clause) leaves the turn unproved, so the
+ * echo rule decides.
+ */
+export function toolResultsAreSample1(resultTexts, blockTexts) {
+  const blocks = blockTexts.map(collapseWhitespace);
+  const proved = (text) => text.length < MANUSCRIPT_ECHO_THRESHOLD || IDENTITY_WHOLE.test(text) || blocks.some((block) => block.includes(collapseWhitespace(text)));
+  return resultTexts.every((text) => {
+    const { keys, values } = jsonStringsOf(text);
+    return values.every((value) => PRODUCT_REFUSALS.has(value) || proved(value)) && keys.every((key) => PRODUCT_RESULT_KEYS.has(key) || proved(key));
+  });
+}
+
+/** The assistant tool calls and `tool` results after the last user message, as rounds; every call needs exactly one result. */
+function parseToolExchange(tail) {
+  const rounds = [];
+  for (const message of tail) {
+    refuse(message !== null && typeof message === 'object' && !Array.isArray(message), 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
+    if (message.role === 'assistant') {
+      refuse(Array.isArray(message.tool_calls) && message.tool_calls.length > 0 && message.tool_calls.every((call) => call !== null && typeof call === 'object' &&
+        call.type === 'function' && typeof call.id === 'string' && call.function !== null && typeof call.function === 'object' &&
+        typeof call.function.name === 'string' && typeof call.function.arguments === 'string'),
+      'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      rounds.push({ calls: message.tool_calls.map((call) => ({ id: call.id, name: call.function.name, arguments: call.function.arguments })), results: [] });
+    } else {
+      const text = message.role === 'tool' && typeof message.tool_call_id === 'string' ? chatMessageText(message.content) : null;
+      refuse(text !== null && rounds.length > 0, 'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      // The chat-completions wire carries no error flag, so none is recorded; the replay rebuilds the same wire.
+      rounds.at(-1).results.push({ callId: message.tool_call_id, text, isError: message.isError === true });
+    }
+  }
+  refuse(rounds.every((round) => round.results.length === round.calls.length && round.calls.every((call) => round.results.filter((result) => result.callId === call.id).length === 1)),
+    'FIXTURE_GEN/request-shape-unsupported', '工具调用与工具结果不一一对应。');
+  return rounds;
+}
+
+function parseUnitRequest(body, promptContractDigest, structuredStageContractDigest) {
   let unitMessage = null;
   let unitMessageIndex = -1;
   const carriedMessages = [];
@@ -992,6 +1214,19 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
   // The product's own stage identity selects its structured builder; its wire format is never duplicated here.
+  if (structuredStageContractDigest !== null && typeof structuredStageContractDigest === 'object') {
+    const { digest, systemPrompt, requireMessage, subject, requestDigestOf, carriedTextOf } = structuredStageContractDigest;
+    refuse(digest === promptContractDigest && systemMessages.length === 1 && systemMessages[0] === systemPrompt &&
+      carriedMessages.length === 1 && requireMessage(unitMessage),
+    'FIXTURE_GEN/contract-mismatch', '录制任务与固定契约不一致。');
+    const scoped = structuredStageContractDigest.scopedOf?.(unitMessage);
+    return { subject, stageContractDigest: digest, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts: [...carriedBlockTexts, ...(carriedTextOf?.(unitMessage) ?? [])],
+      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
+      identities: scoped?.identities.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity })) ?? [],
+      ...(scoped === undefined ? {} : { scoped, allowedTools: structuredStageContractDigest.allowedTools }),
+      requestDigest: scoped?.digest ?? requestDigestOf?.(unitMessage) ?? sha256Hex(canonicalJson({ contract: digest, message: unitMessage })) };
+  }
   if (structuredStageContractDigest !== undefined && promptContractDigest === structuredStageContractDigest) {
     return { subject: 'task-synthesis', stageContractDigest: structuredStageContractDigest, unitMessage, header: null,
       ownBlockTexts: [], carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages,
@@ -1258,6 +1493,36 @@ export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ow
 // --- The response -----------------------------------------------------------------------------
 
 /**
+ * A model answer that is tool calls (Issue #1598): each call's name and JSON arguments, the identities its arguments name remapped
+ * to the placeholders the adapter fills from the request it answers. An identity no request named refuses, as does an argument that
+ * echoes carried manuscript text outside proved sample1. The model's reasoning beside the calls is not kept.
+ */
+function mapToolCalls(message, usage, request) {
+  const carried = request.carriedBlockTexts ?? [];
+  refuse(message.content === null || message.content === undefined || message.content === '', 'FIXTURE_GEN/response-shape-unsupported', '带工具调用的回答同时含有正文，夹具无法如实回放。');
+  refuse(message.tool_calls.length <= 16, 'FIXTURE_GEN/response-shape-unsupported', '一次回答的工具调用超出夹具边界。');
+  const calls = message.tool_calls.map((call) => {
+    refuse(call !== null && typeof call === 'object' && call.type === 'function' && call.function !== null && typeof call.function === 'object' &&
+      /^[a-z][a-z_]{0,63}$/u.test(call.function.name) && typeof call.function.arguments === 'string', 'FIXTURE_GEN/response-shape-unsupported', '工具调用的形态无效。');
+    refuse(request.allowedTools === undefined || request.allowedTools.includes(call.function.name), 'FIXTURE_GEN/request-shape-unsupported', '工具超出录制范围。');
+    let parsed;
+    try { parsed = JSON.parse(call.function.arguments); } catch { parsed = null; }
+    refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed), 'FIXTURE_GEN/response-shape-unsupported', '工具调用的参数不是 JSON 对象。');
+    refuse(call.function.arguments.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始工具参数已含有占位符形式的文字，回放无法与捕获区分。');
+    const remapped = remapIdentities(JSON.stringify(parsed), request.identities);
+    refuse(remapped.match(IDENTITY_TOKEN) === null, 'FIXTURE_GEN/identity-unmapped', '工具参数含有请求中没有的标识。');
+    const args = JSON.parse(remapped);
+    if (request.sample1Verified !== true) {
+      const echo = findManuscriptEcho(args, carried);
+      refuse(echo === null, 'FIXTURE_GEN/manuscript-echo', `工具参数 ${echo?.path} 与请求内容仍有 ${echo?.runLength} 个字符重合。`);
+    }
+    refuse(Buffer.byteLength(canonicalJson(args)) <= 4096, 'FIXTURE_GEN/response-shape-unsupported', '工具调用参数超出夹具边界。');
+    return { name: call.function.name, arguments: args };
+  });
+  return { kind: 'tool-calls', calls, usage };
+}
+
+/**
  * One cached result as a fixture response. A limit is a limit whichever way the ledger and the
  * status say so; any other non-200 becomes an adapter failure named after its status; and a 200 must
  * actually carry a result, with the usage the ceiling is measured against. Absent usage refuses
@@ -1271,18 +1536,17 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   if (entry.status !== 200) {
     return { kind: 'adapter-failure', code: `PROVIDER_HTTP_${entry.status}`, message: HTTP_FAILURE_MESSAGE, status: entry.status };
   }
-  const response = entry.response;
-  refuse(response !== null && typeof response === 'object' && !Array.isArray(response) && Array.isArray(response.choices),
-    'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不是 openai-chat-completions 结果。');
-  const message = response.choices[0] === undefined ? undefined : response.choices[0].message;
+  let answer;
+  try { answer = captureAnswer(entry.response, entry.requestShape ?? 'openai-chat-completions'); }
+  catch { throw new FixtureGenerationError('FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应与捕获的请求形态不符。'); }
+  const { message, inputTokens, outputTokens } = answer;
   const text = message === null || typeof message !== 'object' ? undefined : message.content;
-  refuse(typeof text === 'string' && text.length > 0,
+  const calling = message !== null && typeof message === 'object' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  refuse(calling || (typeof text === 'string' && text.length > 0),
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不含 choices[0].message.content 文本。');
-  const usage = response.usage;
-  const inputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.prompt_tokens;
-  const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
+  if (calling) return mapToolCalls(message, { inputTokens, outputTokens }, request);
   // A placeholder the model itself wrote would be filled on replay like one the converter wrote, and the replay would no
   // longer say what the capture said; so every placeholder in a fixture must be one this conversion put there.
   refuse(text.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始响应已含有占位符形式的文字，回放无法与捕获区分。');
@@ -1404,41 +1668,81 @@ function requireStageContract(selection, parsed) {
   refuse(selection.promptContractDigest === parsed.stageContractDigest, 'FIXTURE_GEN/contract-mismatch', '捕获的阶段契约与请求消息不一致。');
 }
 
+function recordingTaskContract(owners, selection) {
+  const kind = selection.captured.purpose;
+  if (!selection.captured.validation?.family.startsWith('four-provider-recording-')) return null;
+  if (kind === 'editorial-polish' && selection.promptContractDigest === owners.SCOPED_EDIT_PROMPT_CONTRACT_DIGEST) {
+    const digest = owners.SCOPED_EDIT_PROMPT_CONTRACT_DIGEST;
+    return { digest, systemPrompt: owners.SCOPED_EDIT_PROMPT_CONTRACT.systemPrompt, subject: 'recording-task',
+      requireMessage: message => owners.parseScopedEditMessageHeader(message) !== null,
+      requestDigestOf: message => {
+        const { instructionDigest, scopeDigest } = owners.parseScopedEditMessageHeader(message);
+        return owners.scopedEditRequestDigest(digest, instructionDigest, scopeDigest);
+      },
+      carriedTextOf: message => [...message.matchAll(/<readonly_context>(.*?)<\/readonly_context>|<target_to_modify id="T\d+">(.*?)<\/target_to_modify>/gsu)]
+        .map(match => match[1] ?? match[2]) };
+  }
+  const flash = Object.hasOwn(owners.FLASH_TASK_REGISTRY, kind) ? owners.FLASH_TASK_REGISTRY[kind] : null;
+  if (flash !== null) return { digest: flash.promptContractDigest, systemPrompt: flash.systemPrompt, subject: 'recording-task',
+    requireMessage: message => kind === 'model-connection-test' ? message === flash.message() :
+      kind === 'material-translation' ? message.startsWith('AI7 来源译文 · ') :
+      kind === 'learning-sample-tidying' ? message.startsWith('[{') : owners.isSyntheticRecordingInput(kind, message) };
+  if (kind === 'learning-curation') return { digest: owners.CURATION_CONTRACT_DIGEST, systemPrompt: owners.CURATION_CONTRACT.systemPrompt,
+    subject: 'recording-task', requireMessage: message => message.includes('"schema":"' + owners.CURATION_CONTRACT.schema + '"') };
+  if (kind === 'global-agent-scoped-dialogue' && selection.captured.validation.case === kind) {
+    const digest = owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST;
+    const scopedOf = message => owners.scopedDialogueRecordingKey(message, digest);
+    return { digest, systemPrompt: owners.GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt, subject: 'scoped-global-dialogue',
+      scopedOf, requireMessage: message => scopedOf(message) !== null, allowedTools: owners.GLOBAL_AGENT_SCOPED_TOOL_NAMES };
+  }
+  if (kind === 'global-agent-dialogue') return { digest: owners.GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST,
+    systemPrompt: owners.GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt, subject: 'recording-task', requireMessage: message => message.startsWith('AI7 全域对话\n') };
+  return null;
+}
+
 /** Everything but the write: a caller that refuses here has left nothing on disk. */
 export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
+  const shape = entry.requestShape ?? 'openai-chat-completions';
   let parsed;
-  try { parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest); }
+  try { parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, undefined, shape); }
   catch (error) {
     if (!(error instanceof FixtureGenerationError) || error.code !== 'FIXTURE_GEN/unit-message-unrecognized') throw error;
     const owners = await loadSample1Owners();
-    if (selection.promptContractDigest !== owners.RUN_SYNTHESIS_PROMPT_DIGEST) throw error;
-    refuse(request.sample1Store !== undefined && request.sample1Task !== undefined,
-      'FIXTURE_GEN/sample1-source-unproved', 'structured-stage');
-    parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, owners.RUN_SYNTHESIS_PROMPT_DIGEST);
+    const recording = recordingTaskContract(owners, selection);
+    if (recording !== null) parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, recording, shape);
+    else {
+      if (selection.promptContractDigest !== owners.RUN_SYNTHESIS_PROMPT_DIGEST) throw error;
+      refuse(request.sample1Store !== undefined && request.sample1Task !== undefined,
+        'FIXTURE_GEN/sample1-source-unproved', 'structured-stage');
+      parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, owners.RUN_SYNTHESIS_PROMPT_DIGEST, shape);
+    }
   }
   if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
     parsed.contentDigest = null;
     parsed.exactParticipantsOnly = true;
   }
   requireStageContract(selection, parsed);
+  if (parsed.subject === 'scoped-global-dialogue') {
+    const step = 'global-agent-scoped-dialogue/ask' + (parsed.toolCount === 0 ? '' : `/tool-turn-${parsed.toolCount}`);
+    refuse(selection.cacheKey !== null && selection.captured.validation.step === step,
+      'FIXTURE_GEN/capture-unproven', '范围对话的工具结果数与录制步骤不一致。');
+  }
   // Keyed as the deterministic adapter of the wrapped Task asks it: under the Task's contract (Issue #812).
-  if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest);
+  if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest, undefined, shape);
   if (parsed.subject === 'task-synthesis') {
     const owners = await loadSample1Owners();
     parsed.requestDigest = owners.taskSynopsisMessageRequestDigest(parsed.requestDigest, parsed.unitMessage);
   }
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
-  refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
+  refuse(shape === 'google-generate-content' || JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
   if (selection.cacheKey !== null) {
     let endpoint;
     try { endpoint = new URL(entry.endpoint); } catch { /* Refuse below without echoing the URL. */ }
-    refuse(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
-      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
-      (entry.requestShape === 'openai-chat-completions' ||
-        (entry.requestShape === 'editorial-dialogue-sse' && parsed.subject === 'dialogue' && entry.route === 'opencode-go')),
+    refuse(endpoint !== undefined && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
+      admittedCaptureEndpoint(endpoint, shape, selection.model, parsed.subject, { route: entry.route, stream: entry.streamedAnswer !== undefined }),
       'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
   }
   refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');

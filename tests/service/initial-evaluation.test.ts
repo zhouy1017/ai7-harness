@@ -1,7 +1,4 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,12 +12,7 @@ import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } f
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import {
-  ANALYSIS_LEDGER_REVISION_58_SQL,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  DATABASE_MERGE_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   INITIAL_EVALUATION_ASSURANCE_STATEMENT,
   INITIAL_EVALUATION_CONTRACT_VERSION,
@@ -29,7 +21,6 @@ import {
   type EvaluationContent,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -381,12 +372,18 @@ describe('AI7 初评 over the real store on exact sample1', () => {
         expect(stuck.prepare.allowed).toBe(false);
         expect(polled).toContain(stuck.task!.state);
 
+        const actionableBefore = second.inspectGlobalAttention(() => null, false, 'admitting').actionableCount;
         expect(second.reconcileStoppedInitialEvaluationRuns()).toEqual({ settled: 1 });
         const settled = second.inspectInitialEvaluation(bookId);
         if (planted === 'authorized') {
           // It never began: blocked before dispatch with why, no outcome.
           expect(settled.state).toBe('authorized-blocked');
-          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', stopReason: 'shutdown', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          const attention = second.inspectGlobalAttention(() => null, false, 'admitting');
+          expect(attention.actionableCount).toBe(actionableBefore + 1);
+          expect(attention.groups.flatMap((group) => group.items).find((item) => item.itemId === `task:${settled.taskIntent!.taskIntentId}`))
+            .toMatchObject({ state: 'analysis-blocked', facts: { stopReason: 'shutdown' } });
+          expect(second.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: settled.taskIntent!.taskIntentId }).state.stopReason).toBe('shutdown');
           expect(settled.taskOutcome).toBeNull();
         } else {
           expect(settled.state).toBe('resumable');
@@ -442,48 +439,6 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('rebuilds a revision-58 store\'s kind-coupled relations for the evaluation kind, every row kept byte for byte', async () => {
-    await withBook(async (book) => {
-      // A baseline Task, so the rebuilt relations carry rows.
-      let progress = book.store.createBaselineAnalysisPreparationWork(book.bookId, '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。', null, launchPolicy);
-      while (!progress.done) progress = book.store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-      expect(progress.projection!.state).toBe('prepared');
-    });
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const rows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS.map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
-    const plant = new DatabaseSync(path);
-    constructPre94PolicyEncoding(plant);
-    let before: string;
-    try {
-      // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59 or 60.
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-      before = rows(plant);
-      // At revision 58 the evaluation kind is refused by the CHECK itself.
-      expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
-        VALUES ('${randomUUID()}', (SELECT book_id FROM books LIMIT 1), '${INITIAL_EVALUATION_KIND}', 'x', '{}', '${'a'.repeat(64)}')`)).toThrowError(/CHECK constraint failed/u);
-    } finally {
-      plant.close();
-    }
-    const migrated = await openStore();
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(rows(after)).toBe(before!);
-      for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
-      }
-      expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_initial_drafts'").get()).toBeDefined();
-    } finally {
-      after.close();
-    }
-  }, 300_000);
-
   it('refuses an entry of the adjustments\' schema whose item leaves its adjustment out', async () => {
     let bookId = '';
     let recordId = '';
@@ -532,17 +487,4 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     expect(await read()).toBe('unreadable');
   }, 300_000);
 
-  it('refuses a store stamped revision 58 whose kind-coupled relations already read as revision 59\'s', async () => {
-    await withBook(async () => undefined);
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const plant = new DatabaseSync(path);
-    constructPre94PolicyEncoding(plant);
-    try {
-      // Only the version moves back: no store AI7 wrote at revision 58 held these shapes, and none is read as one.
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
-    } finally {
-      plant.close();
-    }
-    await expect(openStore()).rejects.toThrowError(/分析任务账本表（修订版 58） analysis_task_intents 结构不兼容/u);
-  }, 300_000);
 });

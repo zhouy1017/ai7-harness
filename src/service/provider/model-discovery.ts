@@ -5,6 +5,8 @@ import type { OrdinaryProductionRuntime } from '../launch-policy.js';
 import { CredentialBroker, type SecretResolver } from './credential-broker.js';
 import { listProviderModels, PROVIDER_ROUTE_PROFILES } from './deepseek-adapter.js';
 
+const pendingRefreshes = new WeakMap<EditorialStore, Map<ModelServiceRouteId, object>>();
+
 /** Saving a protected key or explicitly refreshing asks for account metadata only. CI never resolves a key or sends. */
 export async function refreshModelServiceModels(store: EditorialStore, runtime: OrdinaryProductionRuntime | null,
   route: ModelServiceRouteId, resolver: SecretResolver): Promise<ModelDiscoveryResult> {
@@ -15,17 +17,26 @@ export async function refreshModelServiceModels(store: EditorialStore, runtime: 
   }
   const profile = PROVIDER_ROUTE_PROFILES[route];
   if (profile.credentialSlot !== MODEL_SERVICE_ROUTE_BINDINGS[route].credentialSlot) return failure('MODEL_DISCOVERY_UNAVAILABLE', '模型列表暂不可用');
+  const pending = pendingRefreshes.get(store) ?? new Map<ModelServiceRouteId, object>();
+  pendingRefreshes.set(store, pending);
+  const refresh = {};
+  pending.set(route, refresh);
+  const isCurrent = () => {
+    if (pending.get(route) !== refresh) return false;
+    const current = store.getModelServiceRouteConnection(route);
+    return current?.credentialOperationState === 'ready' && current.credentialReference === connection.credentialReference &&
+      current.credentialUpdatedAt === connection.credentialUpdatedAt;
+  };
   try {
     const broker = new CredentialBroker(resolver, { developmentReferences: 'refused' });
     const models = await broker.releaseForModelDiscovery({ slot: profile.credentialSlot, credentialReference: connection.credentialReference,
-      isCurrent: () => {
-        const current = store.getModelServiceRouteConnection(route);
-        return current?.credentialOperationState === 'ready' && current.credentialReference === connection.credentialReference && current.credentialUpdatedAt === connection.credentialUpdatedAt;
-      },
+      isCurrent,
     }, (secret) => listProviderModels(profile, runtime.nativeFetch, secret));
+    if (!isCurrent()) return failure('MODEL_DISCOVERY_UNAVAILABLE', '模型列表暂不可用');
     store.cacheModelServiceModels(connection, models);
     return { status: 'success', modelCount: models.length };
   } catch (error) {
+    if (pending.get(route) !== refresh) return failure('MODEL_DISCOVERY_UNAVAILABLE', '模型列表暂不可用');
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
     if (code === 'MODEL_SERVICE_UNREACHABLE') return failure(code, '模型服务不可达，请检查网络或网络代理设置');
     if (code === 'AI7_PROXY_UNREACHABLE') return failure(code, '代理不可达：请检查网络代理设置');
@@ -38,6 +49,8 @@ export async function refreshModelServiceModels(store: EditorialStore, runtime: 
       return failure(code, `模型服务没有返回模型列表（HTTP ${status}）`);
     }
     return failure('MODEL_SERVICE_UNREACHABLE', '模型服务不可达，请检查网络或网络代理设置');
+  } finally {
+    if (pending.get(route) === refresh) pending.delete(route);
   }
 }
 

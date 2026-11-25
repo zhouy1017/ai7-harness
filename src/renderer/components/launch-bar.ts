@@ -1,13 +1,21 @@
 import { styleInput } from './controls.js';
-import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
-import type { ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
+import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult, type TaskLaunchPreviewProjection } from '../../shared/runtime-execution-config.js';
+import type { EvaluationReferencesProjection, ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import type { PreferencesRendererApi } from '../../shared/preferences.js';
 import { createDispatchChooser } from './dispatch-chooser.js';
 import { evaluationMaterialsField } from '../evaluation.js';
 import { similarMaterialsField } from '../task-material-selection.js';
 import { technicalLayerVisible, identityWords } from '../technical-layer.js';
+import { modelEffortWords } from '../model-effort-labels.js';
+import { serviceWords } from '../service-wording.js';
 import { parseBudgetCeiling, TASK_PLAN_BUDGET_INVALID } from '../task-drawer-labels.js';
+
+/** New starts and relaunches read the same estimate; raw ceilings remain in developer mode. */
+export function launchEstimateLines(preview: TaskLaunchPreviewProjection): HTMLElement[] {
+  return [el('p', 'task-launch-estimate-sentence', preview.estimate?.sentence ?? '用时暂无可靠估计。'),
+    ...(technicalLayerVisible ? [el('p', undefined, preview.usage)] : [])];
+}
 
 /** A launch operation as the launch bar dispatches it (Issue #1545). */
 export type TaskLaunchOperation = LedgerTaskLaunchOperation;
@@ -41,6 +49,7 @@ export type LaunchBarApi = Pick<
 
 export interface MountLaunchBarOptions {
   readonly api: LaunchBarApi;
+  readonly readEvaluationReferences?: () => Promise<EvaluationReferencesProjection>;
   readonly request: TaskLaunchRequest;
   /** A failure's words (the drawer's `errorMessage`). */
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -137,6 +146,14 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     });
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
+      // A native close toggle can arrive after a later opening of the disclosure (#1711).
+      let opening = 0, closingOpening = 0;
+      if (typeof MutationObserver === 'function') new MutationObserver(records => {
+        if (details.open && records.some(record => record.oldValue === null)) opening += 1;
+      }).observe(details, { attributes: true, attributeFilter: ['open'], attributeOldValue: true });
+      panel.addEventListener('beforetoggle', event => {
+        if (event.newState === 'closed') closingOpening = opening;
+      });
       // Above or below its whole bar, never over it: a bar that wraps onto two rows keeps its other controls (选项 beside 先看计划)
       // reachable while the panel is open. The side with more room when the panel fits on neither, bounded to that room (its
       // content scrolls), so the summary that closes it stays reachable; across, it starts at its own summary.
@@ -174,7 +191,7 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
         document.addEventListener('scroll', follow, { capture: true, passive: true }); document.addEventListener('transitionend', follow, true); window.addEventListener('resize', follow);
       });
       panel.addEventListener('toggle', () => {
-        if (panel.matches(':popover-open')) return;
+        if (panel.matches(':popover-open') || details.open && closingOpening !== opening) return;
         unfollow();
         details.open = false;
       });
@@ -248,7 +265,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing, el('small', undefined, '只安排这一次任务的开始时间。')); runOptions.append(timingLabel);
 
   const references = el('div', 'task-launch-references');
-  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
+  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : (options.readEvaluationReferences ? options.readEvaluationReferences() : api.inspectEvaluation({ recordId: null })).then(page => {
     if (stopped || page.bookId !== request.bookId) return;
     const selected = new Set('materialIds' in request.input ? request.input.materialIds ?? [] : []);
     const materials = el('div'); references.append(materials);
@@ -262,14 +279,23 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     references.append(similarMaterialsField(api, request.bookId, page.materials?.items ?? [], selected, id => {
       selected.add(id); request.input = { ...request.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidatePreview(); paintReferences(); updateAdjusted();
     }));
-    if (request.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
+    const savedSeries = request.operation === 'launchInitialEvaluation' && request.input.relaunchOf ? request.input.seriesId : null;
+    if (request.operation === 'launchInitialEvaluation' && (page.market.series.length > 0 || savedSeries)) {
       const label = el('label', undefined, '书系参考');
       const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
       for (const [value, title] of [['', '仅本书'], ...page.market.series.map(series => [series.seriesId, `书系《${series.title}》`])]) {
         const option = el('option', undefined, title); option.value = value!; select.append(option);
       }
+      if (savedSeries && !page.market.series.some(series => series.seriesId === savedSeries)) {
+        const saved = el('option', undefined, '原任务的书系（当前不可用）');
+        saved.value = savedSeries; saved.disabled = true; select.append(saved);
+      }
       select.value = request.input.seriesId ?? '';
-      select.addEventListener('change', () => { request.input = { ...request.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
+      select.addEventListener('change', () => {
+        request.input = { ...request.input, seriesId: select.value || null };
+        commandId = crypto.randomUUID();
+        if (savedSeries) invalidatePreview();
+      });
       label.append(select); references.append(label);
     }
   }).catch(error => { if (!stopped) references.append(el('p', undefined, errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
@@ -308,10 +334,11 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       const launch = { operation: request.operation, input: { ...request.input, clientCommandId: commandId, executionConfig, rememberedChoice } } as TaskLaunchPreviewInput['launch'];
       const preview = await api.previewTaskLaunch({ launch });
       if (stopped || version !== previewVersion) return;
-      const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
-      usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
-        ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), el('p', undefined, preview.usage),
-        ...preview.adaptations.map(line => el('p', undefined, line)));
+      // The plan's own sentences read in the editor's words (#1616): the same rules the Task Drawer's plan reads through.
+      const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, serviceWords(step)));
+      usage.replaceChildren(el('p', 'task-launch-scope', `处理范围：${serviceWords(preview.scope)}`), steps,
+        ...preview.reference.map(line => el('p', undefined, `允许参考：${serviceWords(line)}`)), el('p', undefined, `会发送：${modelEffortWords(serviceWords(preview.send))}`), ...launchEstimateLines(preview),
+        ...preview.adaptations.map(line => el('p', 'task-launch-adaptation', serviceWords(line))));
     } catch (error) { if (!stopped && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = false; }
   };

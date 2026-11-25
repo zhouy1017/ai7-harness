@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type JournalEditInput, type JournalStructuralEdit, type ManuscriptBlockKind } from '../../shared/protocol.js';
 import {
-  BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, asNumber, asString, fenwickSpan, graphemes, lastWorkingPosition, one,
-  requireBounded, stagedBlockLength, workingOffsetPrefix, type SqlRow,
+  BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, REVISION_IMPORT_LINEAGE, asNumber, asString, graphemes, one, requireBounded, stagedBlockLength, type SqlRow,
 } from './bounded-kernel.js';
 import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryCommandEvidenceDigest, recoveryWorkingDigest } from './command-history.js';
+import { schemaHas } from '../statement-cache.js';
+import { recordGroupPart, recordStepAnchors } from './editor-steps.js';
+import { insertBlockAfter, neighbours, paragraphCount, removeBlock, rewriteBlock, workingBlock, type WorkingRow } from './working-positions.js';
 
 /**
  * Structural edits as ordinary Edit Journal commands (Issue #1175; ADR 0096 §1, ADR 0006). `Enter` at the caret splits a
@@ -15,14 +17,12 @@ import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryComma
  * text. 撤销 and 重做 replay the group as one step. A heading can create a plain paragraph at its end; a single block's style
  * is an ordinary journal edit too (#1288). Multi-heading hierarchy changes and section moves stay with Structure Adjustment Mode (F-15).
  *
- * The marks of the two blocks (ED-044): a mark wholly before the caret stays; a 批注, 备注 or highlight wholly after it — or on
- * the absorbed paragraph — follows its words to the other block exactly; a mark across the caret stays on the first block as a
- * Drifted Manuscript Range, and so does every ranged 修改建议 the command moves, since its Proposal Change Item still names the
- * words where they stood. 撤销 moves the marks back and leaves a drifted one drifted.
+ * The marks of the two blocks (ED-044, ADR 0105 §2): a mark wholly before the caret stays; a mark wholly after it — or on the
+ * absorbed paragraph — follows its words to the other block with its anchor state, so an applied 修改建议 keeps its 撤销本次修改;
+ * a mark across the caret, or a point exactly at it, stays on the first block as a Drifted Manuscript Range. 撤销 and 重做 follow
+ * the same rules; the editor step then puts back the anchors it recorded for the marks at the caret, once the replay has
+ * proven both paragraphs byte-identical to that side (Issue #1654, `editor-steps.ts`).
  */
-
-/** The shift that lifts positions clear of the `UNIQUE(branch_id, position)` rows they pass while a block comes or goes. */
-const POSITION_SHIFT = 1_000_000_000;
 
 export interface StructuralWriteHooks {
   readonly binding: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number; workingDigest: string; historySequence: number };
@@ -30,60 +30,7 @@ export interface StructuralWriteHooks {
   recordLifetimeWrite(sequence: number, workingDigest: string, durableAt: string): void;
 }
 
-interface WorkingBlock { blockId: string; position: number; kind: string; level: number | null; text: string; digest: string }
-
-function workingBlock(db: DatabaseSync, branchId: string, blockId: string): WorkingBlock | undefined {
-  const row = db.prepare('SELECT block_id, position, kind, level, text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?')
-    .get(branchId, blockId) as SqlRow | undefined;
-  return row === undefined ? undefined : {
-    blockId, position: asNumber(row.position), kind: asString(row.kind), level: row.level === null ? null : asNumber(row.level),
-    text: asString(row.text), digest: asString(row.digest),
-  };
-}
-
-/** Every position past `after` moves by `delta`; the offset nodes there, keyed by position, go first and are written again. */
-function shiftPositions(db: DatabaseSync, branchId: string, after: number, delta: 1 | -1): void {
-  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ? AND position > ?').run(branchId, after);
-  for (const table of ['working_blocks', 'manuscript_outline']) {
-    db.prepare(`UPDATE ${table} SET position = position + ? WHERE branch_id = ? AND position > ?`).run(POSITION_SHIFT, branchId, after);
-    db.prepare(`UPDATE ${table} SET position = position - ? WHERE branch_id = ? AND position > ?`).run(POSITION_SHIFT - delta, branchId, POSITION_SHIFT);
-  }
-}
-
-/**
- * The Fenwick offset nodes from `from` on, written again over the working state as it now stands. The nodes below `from`
- * cover only blocks the command left where they were, so they stay, and every prefix this needs below `from` reads them.
- */
-function rebuildOffsetNodesFrom(db: DatabaseSync, branchId: string, from: number): void {
-  const total = lastWorkingPosition(db, branchId);
-  requireBounded(Number.isSafeInteger(from) && from >= 1 && from <= total, 'OFFSET_INDEX_INVALID', '稿件偏移重建位置无效。');
-  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ? AND position >= ?').run(branchId, from);
-  const base = workingOffsetPrefix(db, branchId, from - 1);
-  const prefix: number[] = [];
-  let running = base;
-  let cursor = from - 1;
-  while (cursor < total) {
-    const rows = db.prepare('SELECT position, grapheme_length FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?')
-      .all(branchId, cursor, MIGRATION_BATCH) as SqlRow[];
-    requireBounded(rows.length > 0, 'OFFSET_INDEX_INVALID', '稿件偏移重建缺少内容块。');
-    for (const row of rows) {
-      cursor = asNumber(row.position);
-      requireBounded(cursor === from + prefix.length, 'OFFSET_INDEX_INVALID', '工作稿内容块顺序不连续。');
-      running += asNumber(row.grapheme_length);
-      prefix.push(running);
-    }
-  }
-  const prefixAt = (position: number): number => position >= from ? prefix[position - from]! : position === from - 1 ? base : workingOffsetPrefix(db, branchId, position);
-  const insert = db.prepare('INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)');
-  for (let position = from; position <= total; position += 1) insert.run(branchId, position, prefixAt(position) - prefixAt(position - fenwickSpan(position)));
-}
-
-function refreshSearch(db: DatabaseSync, branchId: string, blockId: string, text: string | null): void {
-  db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
-  if (text !== null) db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, text);
-}
-
-function requireParagraph(block: WorkingBlock | undefined, digest: string): asserts block is WorkingBlock {
+function requireParagraph(block: WorkingRow | undefined, digest: string): asserts block is WorkingRow {
   requireBounded(block !== undefined, 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
   requireBounded(block.kind === 'paragraph', 'STRUCTURE_INVALID', '只有正文段落可以拆分或合并。');
   requireBounded(block.digest === digest, 'EDIT_BLOCK_CHANGED', '内容块已变化，请刷新窗口。');
@@ -99,16 +46,9 @@ function splitWorking(db: DatabaseSync, branchId: string, blockId: string, newBl
   requireBounded(Number.isSafeInteger(at) && at >= 0 && at <= parts.length, 'EDIT_RANGE_INVALID', '拆分位置无效。');
   const head = parts.slice(0, at).join('');
   const tail = parts.slice(at).join('');
-  shiftPositions(db, branchId, block.position, 1);
-  db.prepare('UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?')
-    .run(head, blockDigest(block.kind as ManuscriptBlockKind, block.level, head), at, branchId, blockId);
-  db.prepare(
-    `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-     VALUES (?, ?, ?, 'paragraph', NULL, ?, ?, ?)`,
-  ).run(branchId, newBlockId, block.position + 1, tail, blockDigest('paragraph', null, tail), parts.length - at);
-  refreshSearch(db, branchId, blockId, head);
-  refreshSearch(db, branchId, newBlockId, tail);
-  rebuildOffsetNodesFrom(db, branchId, block.position);
+  // The head first, so the page's grapheme total never counts a tail twice; then the tail as one new row (ADR 0105 §6).
+  rewriteBlock(db, branchId, blockId, { kind: block.kind, level: block.level, text: head, digest: blockDigest(block.kind, block.level, head) }, block.digest);
+  insertBlockAfter(db, branchId, blockId, newBlockId, { kind: 'paragraph', level: null, text: tail, digest: blockDigest('paragraph', null, tail) });
   return { head, tail };
 }
 
@@ -122,51 +62,93 @@ function joinWorking(
     requireBounded(into.digest === intoDigest && merged?.text === '', 'EDIT_BLOCK_CHANGED', '标题后的新段落已变化。');
   } else requireParagraph(into, intoDigest);
   requireParagraph(merged, mergedDigest);
-  requireBounded(merged.position === into.position + 1, 'STRUCTURE_INVALID', '只能与紧邻的上一段合并。');
+  requireBounded(neighbours(db, branchId, into.key).next === mergedBlockId, 'STRUCTURE_INVALID', '只能与紧邻的上一段合并。');
   const joined = into.text + merged.text;
   const length = stagedBlockLength(joined, 'EDIT_TOO_LARGE', '合并后的段落超出安全范围。');
   requireBounded(joined.length <= MAX_BLOCK_CODE_UNITS && length <= MAX_BLOCK_GRAPHEMES, 'EDIT_TOO_LARGE', '合并后的段落超出安全范围。');
-  db.prepare('DELETE FROM working_blocks WHERE branch_id = ? AND block_id = ?').run(branchId, mergedBlockId);
-  db.prepare('UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?')
-    .run(joined, blockDigest(into.kind as ManuscriptBlockKind, into.level, joined), length, branchId, intoBlockId);
-  shiftPositions(db, branchId, merged.position, -1);
-  refreshSearch(db, branchId, intoBlockId, joined);
-  refreshSearch(db, branchId, mergedBlockId, null);
-  rebuildOffsetNodesFrom(db, branchId, into.position);
+  removeBlock(db, branchId, mergedBlockId);
+  rewriteBlock(db, branchId, intoBlockId, { kind: into.kind, level: into.level, text: joined, digest: blockDigest(into.kind, into.level, joined) }, into.digest);
   return { intoText: into.text, mergedText: merged.text, joined };
 }
 
 const LIVE_MARKS = `status IN ('open', 'resolved', 'applied') AND anchor_state IN ('exact', 'drifted')`;
 
-/** A ranged 修改建议 the command moves no longer stands where its Proposal Change Item names its words (ED-044). */
-function movedState(row: SqlRow, drift: boolean): string {
-  return drift && asString(row.kind) === 'change-suggestion' && asString(row.pinned_text) !== '' ? 'drifted' : asString(row.anchor_state);
+/** The live marks of `blockId` whose range touches the span `[from, to]` (a caret when `from = to`). */
+function caretMarks(db: DatabaseSync, branchId: string, blockId: string, from: number, to: number): string[] {
+  return (db.prepare(`SELECT mark_id FROM editorial_marks WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS} AND from_grapheme <= ? AND to_grapheme >= ?`)
+    .all(branchId, blockId, to, from) as SqlRow[]).map((row) => asString(row.mark_id));
 }
 
-/** The marks of `fromBlockId` at or past grapheme `at` go to `toBlockId`; one across `at` stays, drifted. */
-function splitMarks(db: DatabaseSync, branchId: string, fromBlockId: string, toBlockId: string, at: number, sequence: number, drift: boolean): void {
-  const rows = db.prepare(`SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state FROM editorial_marks
+/**
+ * The marks of a 就地编辑修订 session (Issue #1428) are bound to their paragraph's text as the session began, by offsets in it; a
+ * split or join that moves one of them drifts it, so its decision is never matched against another paragraph's words.
+ */
+const inlineRevisionMark = (db: DatabaseSync): string => !schemaHas(db, 'editor_inline_revision_marks')
+  ? '0' : 'mark_id IN (SELECT mark_id FROM editor_inline_revision_marks)';
+
+/**
+ * The marks of `fromBlockId` wholly past grapheme `at` go to `toBlockId` with their anchor state; one the caret cuts through
+ * stays, drifted. A point exactly at the caret stays drifted too, since its side is ambiguous, unless the caret is at the very
+ * start of the paragraph (it goes with the words) or its very end (it stays): one side is empty then (clarification of 2026-11-20).
+ */
+function splitMarks(db: DatabaseSync, branchId: string, fromBlockId: string, toBlockId: string, at: number, sequence: number): void {
+  const tail = asNumber(one(db.prepare('SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, toBlockId) as SqlRow[],
+    'HISTORY_CORRUPT', '分段后的段落缺失。').grapheme_length);
+  const rows = db.prepare(`SELECT mark_id, from_grapheme, to_grapheme, ${inlineRevisionMark(db)} inline_revision FROM editorial_marks
     WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).all(branchId, fromBlockId) as SqlRow[];
-  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
-    WHERE mark_id = ?`);
+  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = COALESCE(?, anchor_state),
+    followed_journal_sequence = ? WHERE mark_id = ?`);
   for (const row of rows) {
     const from = asNumber(row.from_grapheme);
     const to = asNumber(row.to_grapheme);
-    if (to <= at) continue;
-    if (from >= at) update.run(toBlockId, from - at, to - at, movedState(row, drift), sequence, asString(row.mark_id));
+    if (to < at || to === at && (from < to || tail === 0)) continue;
+    if (from >= at && (to > at || at === 0)) update.run(toBlockId, from - at, to - at, row.inline_revision ? 'drifted' : null, sequence, asString(row.mark_id));
     else update.run(fromBlockId, from, at, 'drifted', sequence, asString(row.mark_id));
   }
 }
 
-/** Every mark of `fromBlockId` goes to `intoBlockId`, `offset` graphemes on. */
-function joinMarks(db: DatabaseSync, branchId: string, intoBlockId: string, fromBlockId: string, offset: number, sequence: number, drift: boolean): void {
-  const rows = db.prepare(`SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state FROM editorial_marks
-    WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).all(branchId, fromBlockId) as SqlRow[];
-  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
-    WHERE mark_id = ?`);
-  for (const row of rows) {
-    update.run(intoBlockId, asNumber(row.from_grapheme) + offset, asNumber(row.to_grapheme) + offset, movedState(row, drift), sequence, asString(row.mark_id));
-  }
+/**
+ * Every mark of `fromBlockId` goes to `intoBlockId` after the absorbing paragraph's text, with its anchor state: a join cuts no
+ * mark. When the absorbed paragraph starts with a grapheme that fuses with the one before it (a combining mark, U+200D, a
+ * variation selector), the joined paragraph is a grapheme shorter than the two, so its offsets no longer hold and its marks drift.
+ */
+function joinMarks(db: DatabaseSync, branchId: string, intoBlockId: string, fromBlockId: string, parts: { intoText: string; mergedText: string; joined: string },
+  sequence: number): void {
+  const offset = graphemes(parts.intoText).length;
+  const length = graphemes(parts.joined).length;
+  db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = min(from_grapheme + ?, ?), to_grapheme = min(to_grapheme + ?, ?),
+      anchor_state = CASE WHEN ? OR ${inlineRevisionMark(db)} THEN 'drifted' ELSE anchor_state END, followed_journal_sequence = ?
+    WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).run(intoBlockId, offset, length, offset, length,
+    Number(length < offset + graphemes(parts.mergedText).length), sequence, branchId, fromBlockId);
+}
+
+/**
+ * Whether block lineage carries the words of `fromBlockId` into `toBlockId` on `branchId` (ADR 0105 §2): a split carries them
+ * into the new block; a merge into the block that absorbed them, while the absorbed block is gone from the working state — once
+ * an undone merge brought it back, its words are its own again. Lineage rows are facts about the blocks whatever later became of
+ * their command groups, so no group status is read; `UNION` ends a cycle such as a split joined back.
+ */
+export function blockReachesThroughLineage(db: DatabaseSync, branchId: string, fromBlockId: string, toBlockId: string): boolean {
+  return fromBlockId === toBlockId || db.prepare(`WITH RECURSIVE reached(block_id) AS (
+      SELECT ? UNION
+      SELECT l.block_id FROM reached r JOIN manuscript_block_lineage l ON l.related_block_id = r.block_id AND l.relation = 'split-from'
+      UNION
+      SELECT l.related_block_id FROM reached r JOIN manuscript_block_lineage l ON l.block_id = r.block_id AND l.relation = 'merged-into'
+        AND NOT EXISTS(SELECT 1 FROM working_blocks w WHERE w.branch_id = ? AND w.block_id = l.block_id)
+    ) SELECT 1 FROM reached WHERE block_id = ? LIMIT 1`).get(fromBlockId, branchId, toBlockId) !== undefined;
+}
+
+/** A reversal target: where its range stands now, and where the Apply it reverses found it. */
+export interface InverseTarget { readonly fromGrapheme: number; readonly toGrapheme: number; readonly original: { readonly blockId: string; readonly from: number; readonly to: number } }
+
+/**
+ * Whether two inverse targets touching in one block (`previous` ends where `next` starts) stand in a known order: both from one
+ * original paragraph, and both non-empty or contiguous there. Touching targets from different original paragraphs are refused,
+ * not reordered (ADR 0105 §2).
+ */
+export function inverseTargetsTouchInOrder(previous: InverseTarget, next: InverseTarget): boolean {
+  return previous.original.blockId === next.original.blockId &&
+    (previous.toGrapheme > previous.fromGrapheme && next.toGrapheme > next.fromGrapheme || previous.original.to === next.original.from);
 }
 
 const insertMember = (db: DatabaseSync, groupId: string, position: number, blockId: string, before: string | null, after: string | null,
@@ -192,12 +174,13 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
   const sequence = binding.journalSequence + 1;
   const groupId = randomUUID();
   const durableAt = new Date().toISOString();
-  db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(binding.branchId);
   db.prepare(
     `INSERT INTO manuscript_command_groups(
        command_group_id, branch_id, ordinal, kind, status, source_group_id, before_working_digest, after_working_digest, created_at
      ) VALUES (?, ?, ?, ?, 'applied', NULL, ?, ?, ?)`,
   ).run(groupId, binding.branchId, binding.historySequence + 1, commandKind, binding.workingDigest, '0'.repeat(64), durableAt);
+  // One editor step (Issue #1654): opening it supersedes what was undone.
+  const stepId = recordGroupPart(db, binding.branchId, groupId, structure.kind, input.blockId);
   let resultingDigest: string;
   if (structure.kind === 'split') {
     requireBounded(BLOCK_PATTERN.test(structure.newBlockId) &&
@@ -208,7 +191,10 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     const original = workingBlock(db, binding.branchId, input.blockId)!;
     const before = original.text;
     const { head, tail } = splitWorking(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, input.baseBlockDigest);
-    splitMarks(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, sequence, true);
+    const atCaret = caretMarks(db, binding.branchId, input.blockId, input.fromGrapheme, input.fromGrapheme);
+    recordStepAnchors(db, stepId, 'pre', atCaret);
+    splitMarks(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, sequence);
+    recordStepAnchors(db, stepId, 'post', atCaret);
     insertMember(db, groupId, 1, input.blockId, before, head, original.kind as ManuscriptBlockKind, original.level);
     insertMember(db, groupId, 2, structure.newBlockId, null, tail);
     db.prepare("INSERT INTO manuscript_block_lineage(block_id, related_block_id, relation, command_group_id) VALUES (?, ?, 'split-from', ?)")
@@ -224,16 +210,20 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     resultingDigest = blockDigest(structure.blockKind, structure.level, block.text);
     insertMember(db, groupId, 1, block.blockId, block.text, block.text, block.kind as ManuscriptBlockKind, block.level);
     db.prepare('UPDATE manuscript_command_edits SET after_digest = ? WHERE command_group_id = ?').run(resultingDigest, groupId);
-    db.prepare('UPDATE working_blocks SET kind = ?, level = ?, digest = ? WHERE branch_id = ? AND block_id = ?')
-      .run(structure.blockKind, structure.level, resultingDigest, binding.branchId, block.blockId);
-    db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(binding.branchId, block.blockId);
-    if (structure.blockKind !== 'paragraph') db.prepare(`INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(binding.branchId, block.blockId, block.position, structure.blockKind, structure.level, block.text, resultingDigest);
+    rewriteBlock(db, binding.branchId, block.blockId, { kind: structure.blockKind, level: structure.level, text: block.text, digest: resultingDigest }, block.digest);
   } else {
     requireBounded(BLOCK_PATTERN.test(structure.mergedBlockId) && structure.mergedBlockId !== input.blockId, 'STRUCTURE_INVALID', '合并段落标识无效。');
-    const { intoText, mergedText, joined } = joinWorking(db, binding.branchId, input.blockId, structure.mergedBlockId, input.baseBlockDigest, structure.mergedBlockDigest);
+    const parts = joinWorking(db, binding.branchId, input.blockId, structure.mergedBlockId, input.baseBlockDigest, structure.mergedBlockDigest);
+    const { intoText, mergedText, joined } = parts;
     requireBounded(graphemes(intoText).length === input.fromGrapheme, 'EDIT_RANGE_INVALID', '合并位置无效。');
-    joinMarks(db, binding.branchId, input.blockId, structure.mergedBlockId, input.fromGrapheme, sequence, true);
+    // The marks at the boundary: the absorbing paragraph's end and the absorbed one's start — every absorbed mark when the
+    // boundary fuses two graphemes (ADR 0105 §1, Commander decision of 2026-11-22).
+    const fused = graphemes(joined).length < graphemes(intoText).length + graphemes(mergedText).length;
+    const atCaret = [...caretMarks(db, binding.branchId, input.blockId, input.fromGrapheme, input.fromGrapheme),
+      ...caretMarks(db, binding.branchId, structure.mergedBlockId, 0, fused ? Number.MAX_SAFE_INTEGER : 0)];
+    recordStepAnchors(db, stepId, 'pre', atCaret);
+    joinMarks(db, binding.branchId, input.blockId, structure.mergedBlockId, parts, sequence);
+    recordStepAnchors(db, stepId, 'post', atCaret);
     insertMember(db, groupId, 1, input.blockId, intoText, joined);
     insertMember(db, groupId, 2, structure.mergedBlockId, mergedText, null);
     db.prepare("INSERT INTO manuscript_block_lineage(block_id, related_block_id, relation, command_group_id) VALUES (?, ?, 'merged-into', ?)")
@@ -257,6 +247,22 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
   ).run(sequence, workingDigest, binding.historySequence + 1, binding.branchId, binding.journalSequence, binding.workingDigest);
   requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
   hooks.recordLifetimeWrite(sequence, workingDigest, durableAt);
+}
+
+export function restoreRevisionMergeLineage(db: DatabaseSync, branchId: string, revisionId: string): void {
+  db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE}, cutoffs AS (
+      SELECT journal.base_revision_id, max(journal.sequence) last_sequence FROM lineage
+        JOIN lineage parent ON parent.revision_id = lineage.parent_revision_id
+        JOIN edit_journal_entries journal ON journal.base_revision_id = lineage.parent_revision_id AND journal.resulting_working_digest = lineage.revision_digest
+        WHERE journal.branch_id = ? GROUP BY journal.base_revision_id
+    ), states AS (
+      SELECT journal.command_group_id, journal.command_kind, row_number() OVER (PARTITION BY journal.command_group_id ORDER BY journal.sequence DESC) latest
+        FROM edit_journal_entries journal JOIN cutoffs ON journal.base_revision_id = cutoffs.base_revision_id AND journal.sequence <= cutoffs.last_sequence
+        WHERE journal.branch_id = ? AND journal.command_kind IN ('merge','undo','redo')
+    ), applied AS (SELECT command_group_id FROM states WHERE latest = 1 AND command_kind IN ('merge','redo'))
+    UPDATE manuscript_command_groups SET status = CASE WHEN command_group_id IN applied THEN 'applied' ELSE 'superseded' END
+    WHERE branch_id = ? AND kind = 'merge' AND (status = 'applied' OR command_group_id IN applied)`)
+    .run(revisionId, branchId, branchId, branchId, branchId);
 }
 
 /** Whether a command group is a structural one, which 撤销 and 重做 replay here rather than member by member. */
@@ -285,13 +291,13 @@ export function replayStructuralGroup(db: DatabaseSync, branchId: string, groupI
     const keptText = kind === 'split' ? asString(first.after_text) : asString(first.before_text);
     const at = graphemes(keptText).length;
     stale(() => splitWorking(db, branchId, firstId, secondId, at, kind === 'split' ? asString(first.before_digest) : asString(first.after_digest)));
-    splitMarks(db, branchId, firstId, secondId, at, sequence, action === 'redo');
+    splitMarks(db, branchId, firstId, secondId, at, sequence);
   } else {
     const intoDigest = kind === 'split' ? asString(first.after_digest) : asString(first.before_digest);
     const mergedDigest = kind === 'split' ? asString(second.after_digest) : asString(second.before_digest);
-    let offset = 0;
-    stale(() => { offset = graphemes(joinWorking(db, branchId, firstId, secondId, intoDigest, mergedDigest, kind === 'split').intoText).length; });
-    joinMarks(db, branchId, firstId, secondId, offset, sequence, action === 'redo');
+    let parts = { intoText: '', mergedText: '', joined: '' };
+    stale(() => { parts = joinWorking(db, branchId, firstId, secondId, intoDigest, mergedDigest, kind === 'split'); });
+    joinMarks(db, branchId, firstId, secondId, parts, sequence);
   }
 }
 
@@ -393,7 +399,8 @@ export function verifyStructuralReconstruction(
     if (seen.has(blockId)) continue;
     present += compare(blockId, 'paragraph', null, replay(blockId, null));
   }
-  const inventory = one(db.prepare('SELECT count(*) total, coalesce(max(position), 0) maximum FROM working_blocks WHERE branch_id = ?')
+  const inventory = one(db.prepare('SELECT count(*) total FROM working_blocks WHERE branch_id = ?')
     .all(branchId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作状态清单缺失。');
-  if (asNumber(inventory.total) !== present || asNumber(inventory.total) !== asNumber(inventory.maximum)) fail('恢复检查点与工作状态的内容块清单不一致。');
+  // As many blocks as the pages count (Issue #1654): no stored position is dense any more.
+  if (asNumber(inventory.total) !== present || asNumber(inventory.total) !== paragraphCount(db, branchId)) fail('恢复检查点与工作状态的内容块清单不一致。');
 }

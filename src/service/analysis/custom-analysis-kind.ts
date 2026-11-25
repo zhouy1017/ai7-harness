@@ -34,6 +34,7 @@ import { locateQuotation, normalizedQuotation, quotationForLocation } from './fa
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from './kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from './reducers.js';
 import { carryPositionalResult } from './reused-result.js';
+import { ledgerPlanEstimate } from '../task-estimate.js';
 
 /**
  * One 自定义分析维度 version as an analysis kind (Issue #922, wave 10 slice 7f; ADR 0090 item 4): `custom-analysis/<dimension-id>`,
@@ -316,5 +317,8 @@ export function customAnalysisPlan(
     service: { ...plan.service, send: live ? `${plan.service.send}；${template}` : plan.service.send },
     outcomes: [`${named}的结果集修订版：每个单元的回答与引文，在「分析 › 自定义」中查看`],
     technical: [...plan.technical, { key: 'custom-analysis-dimension', label: '自定义分析维度版本', value: `${version.versionId} · ${version.documentDigest}` }],
+    // One answer per part and nothing after it: the kind declares no cross-unit step and no sample (Issue #1670).
+    ...(plan.estimate === undefined ? {} : { estimate: ledgerPlanEstimate(plan, { parts: plan.estimate.parts, afterParts: 0, sampling: false,
+      webSearch: plan.estimate.more.includes('web-search'), ceiling: plan.estimate.ceiling }) }),
   };
 }

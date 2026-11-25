@@ -15,6 +15,7 @@ export const CONFIGURED_ROUTE_IDS = [
   'opencode-go',
   'opencode-go-messages',
   'opencode-go-responses',
+  'opencode-go-gemini',
   'opencode-zen',
   'opencode-zen-messages',
   'opencode-zen-responses',
@@ -52,6 +53,7 @@ export const CONFIGURED_ROUTE_REASONING = {
   'opencode-go': null,
   'opencode-go-messages': null,
   'opencode-go-responses': null,
+  'opencode-go-gemini': null,
   'opencode-zen': null,
   'opencode-zen-messages': null,
   'opencode-zen-responses': null,
@@ -62,6 +64,30 @@ export const CONFIGURED_ROUTE_REASONING = {
 
 export interface ConfiguredReasoningDeclaration { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string }
 export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReasoningDeclaration>> = {
+  'anthropic-claude/claude-opus-5-5': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+    readOn: '2026-11-24',
+  },
+  'anthropic-claude/claude-sonnet-5-5': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels',
+    readOn: '2026-11-24',
+  },
+  'deepseek-open-platform/deepseek-v4-pro': {
+    control: 'deepseek-thinking',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+    readOn: '2026-11-14',
+  },
+  'deepseek-open-platform/deepseek-flash': {
+    control: 'deepseek-thinking',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+    readOn: '2026-11-14',
+  },
   'google-gemini/gemini-3.8-flash': {
     control: 'google-generate-content',
     efforts: ['low', 'medium', 'high'],
@@ -80,6 +106,42 @@ export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReaso
     source: 'https://ai.google.dev/gemini-api/docs/generate-content/thinking',
     readOn: '2026-11-14',
   },
+  'google-gemini/gemini-4-argon': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high'],
+    source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+    readOn: '2026-11-24',
+  },
+  'google-gemini/gemini-4-hydrogen': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high', 'xhigh'],
+    source: 'https://aistudio.google.com/docs/thinking?generate-content=true',
+    readOn: '2026-11-24',
+  },
+  'openai-platform/gpt-6.2-sol': {
+    control: 'openai-responses',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/guides/deployment-checklist#set-up-reasoningeffort',
+    readOn: '2026-11-24',
+  },
+  'openai-platform/gpt-6.1-terra': {
+    control: 'openai-responses',
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/models/gpt-6.1-terra',
+    readOn: '2026-11-24',
+  },
+  'opencode-go/deepseek-v4.1-flash': {
+    control: 'openai-chat-completions',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/deepseek-v4.1-flash.toml ; https://api-docs.deepseek.com/api/create-chat-completion/ (documented; acceptance on the Go gateway is unverified)',
+    readOn: '2026-11-24',
+  },
+  'opencode-go-gemini/gemini-4-argon': {
+    control: 'google-generate-content',
+    efforts: ['low', 'medium', 'high'],
+    source: 'https://github.com/anomalyco/models.dev/blob/dev/providers/opencode-go/models/gemini-4-argon.toml',
+    readOn: '2026-11-24',
+  },
 };
 export const PRE114_MODEL_REASONING_DEFAULTS: Readonly<Record<string, string>> = { 'deepseek-open-platform/deepseek-v4-pro': 'high' };
 
@@ -90,6 +152,72 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
     endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
     model: 'deepseek-v4.1-flash',
     credentialSlot: 'opencode-go',
+  },
+  recordingProviders: {
+    'openai-platform': {
+      pro: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-6.2-sol',
+        credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-6.1-terra',
+        credentialSlot: 'openai-platform',
+        reasoningEffort: 'high',
+      },
+    },
+    'anthropic-claude': {
+      pro: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-opus-5-5',
+        credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'anthropic-claude',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-sonnet-5-5',
+        credentialSlot: 'anthropic-claude',
+        reasoningEffort: 'high',
+      },
+    },
+    'google-gemini': {
+      pro: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'google-gemini',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'google-gemini',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        model: 'gemini-4-hydrogen',
+        credentialSlot: 'google-gemini',
+        reasoningEffort: 'high',
+      },
+    },
+    'opencode-go': {
+      pro: {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+        reasoningEffort: 'high',
+      },
+      flash: {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+        reasoningEffort: 'high',
+      },
+    },
   },
   legacyDeepSeek: {
     route: 'deepseek-open-platform',
@@ -237,6 +365,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
     fast: [
       {
@@ -377,6 +511,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gpt-5.6-luna',
         credentialSlot: 'opencode-zen',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
   },
   ordinaryProduction: {
@@ -447,6 +587,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
     fast: [
       {
@@ -515,6 +661,12 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'gemini-2.5-pro',
         credentialSlot: 'google-gemini',
       },
+      {
+        route: 'opencode-go-gemini',
+        endpoint: 'https://opencode.ai/inference/go/google/v1beta/models',
+        model: 'gemini-4-argon',
+        credentialSlot: 'opencode-go',
+      },
     ],
   },
 } as const;
@@ -544,6 +696,29 @@ export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> =
   'opencode-zen-responses/gpt-6-astra': 'GPT 6 Astra（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-sol': 'GPT 5.6 Sol（OpenCode Zen）',
   'opencode-zen-responses/gpt-5.6-luna': 'GPT 5.6 Luna（OpenCode Zen）',
+  'opencode-go-gemini/gemini-4-argon': 'Gemini 4 Argon（OpenCode Go）',
+};
+
+/** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */
+export const CONFIGURED_RECOMMENDED_MODELS: Readonly<Record<string, { readonly pro: readonly string[]; readonly flash: readonly string[] }>> = {
+  'anthropic-claude': { pro: ['claude-opus-5', 'claude-fable-5-1'], flash: ['claude-haiku-4-5'] },
+  'deepseek-open-platform': { pro: ['deepseek-v4-pro'], flash: ['deepseek-flash'] },
+  'google-gemini': { pro: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'], flash: ['gemini-3.8-flash'] },
+  'openai-platform': { pro: ['gpt-5.6-sol', 'gpt-6-astra'], flash: ['gpt-5.6-luna'] },
+  'opencode-go': { pro: ['deepseek-v4-pro', 'kimi-k3', 'glm-5.3'], flash: ['deepseek-v4.1-flash', 'glm-5.3-flash'] },
+  'opencode-zen': {
+    pro: ['claude-opus-5-5', 'gpt-6.1-sol', 'qwen3.8-max'],
+    flash: ['deepseek-v4.1-flash', 'glm-5.3-flash', 'claude-haiku-5-5'],
+  },
+};
+
+/** The models a channel declares on a further route only (Issue #1582), by route: never sent on the first route of the channel. */
+export const CONFIGURED_ALTERNATE_ROUTE_MODELS: Readonly<Record<string, readonly string[]>> = {
+  'opencode-go-messages': ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
+  'opencode-go-responses': ['grok-4.6', 'gpt-5.6-luna'],
+  'opencode-go-gemini': ['gemini-4-argon'],
+  'opencode-zen-messages': ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
+  'opencode-zen-responses': ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
 };
 
 /** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker's closed set. */
@@ -584,6 +759,7 @@ export const CONFIGURED_PROVIDER_LABELS: Readonly<Record<ConfiguredRouteId, stri
   'opencode-go': 'OpenCode Go',
   'opencode-go-messages': 'OpenCode Go',
   'opencode-go-responses': 'OpenCode Go',
+  'opencode-go-gemini': 'OpenCode Go',
   'opencode-zen': 'OpenCode Zen',
   'opencode-zen-messages': 'OpenCode Zen',
   'opencode-zen-responses': 'OpenCode Zen',
@@ -619,8 +795,7 @@ export type ConfiguredDevelopmentSlot = (typeof CONFIGURED_DEVELOPMENT_SLOTS)[nu
 /**
  * The fixed development Credential Reference of each such slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the
  * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret, and it is a
- * place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067; ADR 0073 §5
- * authorizes no credential).
+ * place for a key. Enrollment requires separate authorization, as in ADR 0067 and ADR 0108.
  */
 export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredDevelopmentSlot, string>> = {
   'alibaba-model-studio': '41bfff73-4c97-44b2-a88c-ef51b208d589',

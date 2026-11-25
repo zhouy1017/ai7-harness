@@ -87,8 +87,9 @@ describe('the wording of the Mark surface', () => {
     expect(markSourceLine({ source: { ...editor, editorName: '责任编辑甲、责任编辑乙' }, convertedFrom: null })).toBe('责任编辑甲、责任编辑乙');
     const card = { source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: 'past-task',
       modelLabel: '模型甲@high', modelTechnicalLabel: 'OpenAI 官方 · raw-model-id@high' }, convertedFrom: null } as const;
-    expect(markSourceLine(card)).toBe('模型甲@high · 任务「润色这段」');
-    expect(markSourceLine(card, true)).toContain('raw-model-id');
+    // The record keeps the service's level name; ordinary mode says it in the list's word, developer mode shows the record.
+    expect(markSourceLine(card)).toBe('模型甲@高 · 任务「润色这段」');
+    expect(markSourceLine(card, true)).toContain('raw-model-id@high');
     expect(markSourceLine({ ...card, source: { ...card.source, modelLabel: 'AI7 本地检查' } })).toBe('AI7 本地检查 · 任务「润色这段」');
   });
 
@@ -191,7 +192,7 @@ it('keeps source marks separate from provenance and identifies handled states (#
   expect(markSourceMark({ ...editor, editorName: '责编甲' })).toBe('责编甲');
   expect(markSourceMark({ ...editor, kind: 'imported-author', label: '作者甲' })).toBe('作者甲');
   const source = { kind: 'ai7', origin: 'task', label: '校对', taskId: 'task', modelLabel: '模型甲@high', modelTechnicalLabel: 'raw-model' } as const;
-  expect(markSourceMark(source)).toBe('模型甲@high'); expect(markSourceMark(source, true)).toBe('raw-model');
+  expect(markSourceMark(source)).toBe('模型甲@高'); expect(markSourceMark(source, true)).toBe('raw-model');
   expect(markSourceMark({ ...source, modelLabel: 'AI7 本地检查' })).toBe('AI7 本地检查');
   for (const status of ['applied', 'resolved']) expect(markIsHandled({ status })).toBe(true);
   expect(markIsHandled({ status: 'open', disposition: 'rejected' })).toBe(true);

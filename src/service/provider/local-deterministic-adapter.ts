@@ -3,6 +3,7 @@ import { isRecord, canonicalJson } from '../analysis/canonical.js';
 import { taskSynopsisMessageRequestDigest } from '../analysis/baseline-synopsis.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
+import { scopedDialogueRecordingKey } from '../dialogue/recording-scope.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { clarificationMessageRequestDigest } from './clarification-contract.js';
 import {
@@ -64,6 +65,7 @@ import {
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText, messageText, toolResultOf } from './payload.js';
+import { normalizeToolExchange, substituteToolIdPlaceholders, toolExchangeOf, toolTurnRequestDigest } from './tool-turn-digest.js';
 import { fixtureEntryKey, resolveFixtureEntry, fixtureReplayContentKey, resolveReplayCompatibleFixtureEntry, type LocalFixtureExecutionContext, type LocalFixturePolicyCatalog,
   type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
@@ -371,6 +373,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     requestDigest: string,
     subject: string,
     failure: (code: string, message: string, status?: number) => StreamChunk,
+    scopedIdentities?: ReadonlyArray<string>,
   ): AsyncIterable<StreamChunk> {
     const pairKey = fixtureEntryKey(0, requestDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
@@ -383,15 +386,31 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const response = entry.response;
     switch (response.kind) {
       case 'tool-calls':
+        if (entry.capture?.subject === 'scoped-global-dialogue' && scopedIdentities !== undefined) {
+          const args = response.calls.map(call => substituteToolIdPlaceholders(JSON.stringify(call.arguments), scopedIdentities));
+          if (args.some(value => value.includes('{{tool-id:'))) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '范围对话夹具的工具标识缺失。'); return; }
+          for (const [index, call] of response.calls.entries()) {
+            const id = `fixture-${this.#served}-${index}` as CallId;
+            yield { type: 'block-start', index, blockType: 'tool-call' };
+            yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: args[index]! };
+            yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: args[index]! } };
+          }
+          yield { type: 'usage', usage: response.usage };
+          yield { type: 'finish', reason: { kind: 'tool-calls' } };
+          return;
+        }
         yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '工具脚本只答复分析单元。');
         return;
-      case 'unit-result':
+      case 'unit-result': {
+        const text = scopedIdentities === undefined ? response.text : substituteToolIdPlaceholders(response.text, scopedIdentities);
+        if (scopedIdentities !== undefined && text.includes('{{tool-id:')) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '范围对话夹具的工具标识缺失。'); return; }
         yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: response.text };
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: response.text } };
+        yield { type: 'text-delta', index: 0, text };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } };
         yield { type: 'usage', usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } };
         yield { type: 'finish', reason: { kind: 'stop' } };
         return;
+      }
       case 'answer-chunks':
         yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '分段回答只答复编辑对话。');
         return;
@@ -472,6 +491,24 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const originalUser = options.messages.findLast((message) => message.role === 'user' && message.source?.kind === 'user');
     const text = originalUser === undefined ? lastUserMessageText(options) : messageText(originalUser);
+    if (text !== null) {
+      const index = originalUser === undefined ? -1 : options.messages.indexOf(originalUser);
+      const scoped = index < 0 ? null : scopedDialogueRecordingKey(text, this.#promptContractDigest);
+      if (scoped !== null) {
+        const rounds = toolExchangeOf(options.messages, index);
+        const exchange = rounds === null ? null : normalizeToolExchange(rounds, [], scoped.identities);
+        const key = exchange === null ? scoped.digest : toolTurnRequestDigest(scoped.digest, exchange);
+        if ((exchange !== null || index === options.messages.length - 1) && this.#entries.get(fixtureEntryKey(0, key))?.capture?.subject === 'scoped-global-dialogue') {
+          yield* this.#fastRole(key, '范围对话', failure, exchange?.foreign ?? scoped.identities);
+          return;
+        }
+      }
+      const key = sha256Hex(canonicalJson({ contract: this.#promptContractDigest, message: text }));
+      if (this.#entries.get(fixtureEntryKey(0, key))?.capture?.subject === 'recording-task') {
+        yield* this.#fastRole(key, '录制任务', failure);
+        return;
+      }
+    }
     const parsedDialogue = text === null ? null : parseDialogueMessage(text);
     const dialogue = parsedDialogue?.followUp === true
       ? { kind: parsedDialogue.kind, questionDigest: dialogueQuestionDigest(parsedDialogue.question) }
@@ -551,7 +588,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const toolResults = options.messages.slice(Math.max(lastUserIndex, lastAssistantIndex) + 1).flatMap((message) => {
       const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
     });
-    let expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
+    const unitDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
       ? crossUnitRequestDigest(this.#crossUnitPromptContractDigest, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
@@ -578,6 +615,14 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
                       : writing !== null
                         ? writingRequestDigest(this.#promptContractDigest, writing.ordinal, writing.unitDigest)
                         : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest));
+    // A continuation turn (Issue #1598) is keyed by its whole carried exchange under the unit's request digest; an exchange this
+    // cannot read keeps the older key over the result bytes alone, which only authored scripts use.
+    const rounds = toolResults.length > 0 && !named && reviewSynthesis === null ? toolExchangeOf(options.messages, lastUserIndex) : null;
+    const exchange = rounds === null ? null : normalizeToolExchange(rounds, ownBlockIdsOf(text!));
+    const scriptDigest = toolResults.length > 0 && reviewSynthesis === null ? fixtureToolResultDigest(toolResults) : null;
+    // The request is keyed by its result bytes alone exactly when it carries results and no exchange this reads.
+    const keyedByScript = exchange === null && scriptDigest !== null;
+    let expectedDigest = exchange !== null ? toolTurnRequestDigest(unitDigest, exchange) : scriptDigest ?? unitDigest;
     const originalDigest = expectedDigest;
     if (text !== null && (synthesis !== null || report !== null || rewrite !== null || drafting !== null))
       expectedDigest = taskSynopsisMessageRequestDigest(expectedDigest, text);
@@ -585,7 +630,11 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
+    // The older key over the result bytes alone answers capture-less entries only (authored scripts): a captured entry is keyed by its
+    // unit or its whole exchange, so one found under the result bytes is not its answer, whether this request's exchange is readable or not.
+    const found = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
+    const script = exchange !== null && scriptDigest !== null && this.#fixture.provenance === 'authored' ? resolveFixtureEntry(this.#entries, ordinal, scriptDigest, attempt) : undefined;
+    const exact = (keyedByScript && found?.capture !== undefined ? undefined : found) ?? (script?.capture === undefined ? script : undefined);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
     const stageContractDigest = crossUnit !== null ? this.#crossUnitPromptContractDigest : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
     const compatible = exact === undefined && !hasSynopsisContext && stage !== null && this.#sourceDigest !== null
@@ -611,12 +660,15 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const response = entry.response;
     switch (response.kind) {
       case 'tool-calls': {
-        if (this.#fixture.provenance !== 'authored' || entry.capture !== undefined) {
+        if (entry.capture === undefined && this.#fixture.provenance !== 'authored') {
           yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '只接受显式编写的工具脚本。'); return;
         }
+        const filled = response.calls.map((call) => substituteToolIdPlaceholders(substituteBlockPlaceholders(JSON.stringify(call.arguments), ownBlockIdsOf(text!)), exchange?.foreign ?? []));
+        // A placeholder no carried exchange could fill is never handed to the product as if it were an identity.
+        if (filled.some((args) => args.includes('{{tool-id:'))) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '夹具响应的工具标识占位符没有对应的工具交换。'); return; }
         for (const [index, call] of response.calls.entries()) {
           const id = `fixture-${this.#served}-${index}` as CallId;
-          const args = substituteBlockPlaceholders(JSON.stringify(call.arguments), ownBlockIdsOf(text!));
+          const args = filled[index]!;
           yield { type: 'block-start', index, blockType: 'tool-call' };
           yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: args };
           yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: args } };
@@ -635,8 +687,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
           : sampling !== null
             ? substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!)), text!)
             : crossUnit === null
-              ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
+              ? substituteToolIdPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!)), exchange?.foreign ?? [])
               : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
+        if (replay.includes('{{tool-id:')) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '夹具响应的工具标识占位符没有对应的工具交换。'); return; }
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: replay };
         yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };

@@ -58,7 +58,9 @@ export type LearningEligibilityChoice = 'book' | 'house' | 'excluded' | 'deferre
 /** One decision the editor made, as the chain holds it: a later one supersedes, none is rewritten (LEARN-007). */
 export type LibraryMaterialDecisionInput =
   | { readonly kind: 'attribution'; readonly attribution: LibraryAttribution }
-  | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly reason: string | null };
+  | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly reason: string | null }
+  /** 暂不使用 (0.7.4): decided that nobody uses the item; accepted with or without an attribution, superseded by any later one. */
+  | { readonly kind: 'not-used' };
 
 export interface LibraryMaterialDecisionProjection {
   readonly ordinal: number;
@@ -66,7 +68,9 @@ export interface LibraryMaterialDecisionProjection {
   readonly decision:
     | { readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string }
     | { readonly kind: 'attribution'; readonly scope: 'house' }
-    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean };
+    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean;
+        /** Present (`true`) on the entry that recorded 暂不使用; it reads as 稍后决定 to a reader that does not know it. */
+        readonly notUsed?: true };
 }
 
 /** One 资料库 item: what arrived, where it belongs, whether it may teach, and whose Tasks may list it under 允许参考. */
@@ -99,6 +103,11 @@ export interface LibraryMaterialProjection {
     | { readonly state: 'available'; readonly scope: 'book'; readonly bookTitle: string }
     | { readonly state: 'available'; readonly scope: 'house' }
     | { readonly state: 'pending' };
+  /**
+   * Present while 暂不使用 is the decision that stands (0.7.4): nothing lists the item in 待我处理 and no Task may use it.
+   * Absent otherwise, including for an item that was left for later before 0.7.4 (that one stays 稍后决定).
+   */
+  readonly notUsed?: { readonly decidedAt: string };
   /** How many decisions the item's chain holds. */
   readonly decisionCount: number;
   /** The latest of them, oldest first, at most `MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN`. */
@@ -176,7 +185,6 @@ export interface MaterialIndexProjection {
     readonly recognition: MaterialIndexLayerState;
     readonly translation: MaterialIndexLayerState;
     readonly segments: MaterialIndexLayerState;
-    readonly vectors: MaterialIndexLayerState;
   };
   /** What the metadata layer read of the file: its own title when it names one, the language, and the counts. */
   readonly metadata: null | {
@@ -189,28 +197,8 @@ export interface MaterialIndexProjection {
     /** A PDF's page count (Issue #892); `null` for every format without pages. */
     readonly pages: number | null;
   };
-  /**
-   * 相似段落检索 (Issue #892): the similarity vectors of the current build, made only when the editor asks, never on open;
-   * `null` until the text was read.
-   */
-  readonly vectors: null | MaterialVectorsProjection;
   /** 来源译文 (Issue #892): the machine translation of a non-Chinese item's text, a separate layer; `null` when none is needed. */
   readonly translation: null | MaterialTranslationProjection;
-}
-
-/** Where the current build's similarity vectors stand, and what makes them (Issue #892). */
-export interface MaterialVectorsProjection {
-  readonly state: 'not-built' | 'building' | 'complete' | 'needs-model';
-  /** The provider's identity, e.g. `ai7-embedding/stub-1`: what the vectors are made by. */
-  readonly embedding: string;
-  readonly dimensions: number;
-  /** How many of the build's paragraphs have their vector, of `total`. */
-  readonly built: number;
-  readonly total: number;
-  /** When the last vector was recorded; `null` before any. */
-  readonly builtAt: string | null;
-  /** The model digest the provider expects when its model files are missing or do not match; `null` otherwise. */
-  readonly expectedDigest: string | null;
 }
 
 /** Where the current build's 来源译文 stands, and whether the editor may ask for it now (Issue #892). */
@@ -243,19 +231,31 @@ export interface MaterialTranslationAttemptProjection {
 /** What a 来源译文 is labelled wherever it is shown or read: it is the machine's, never the original. */
 export const MATERIAL_TRANSLATION_LABEL = '来源译文';
 
-/** The candidates one 相似段落检索 answers at most, and the longest text it compares. */
-export const MAX_MATERIAL_VECTOR_CANDIDATES = 32;
+/**
+ * The candidates one 相似段落检索 answers at most, and the longest text it compares: the lexical ranker's own bounds
+ * (R5-F2c). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
+ */
+export const MAX_MATERIAL_VECTOR_CANDIDATES = 8;
 
-export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 2_000;
+export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 1_000;
 
 /**
- * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, each with its anchor and a short
- * preview. The ranking finds candidates; the words are read where the anchor points (ADR 0026).
+ * What left the machine for one 相似段落检索 (0.7.9 review 2.3): `fast-model` — the fast model's expansion or rerank shaped the
+ * answer; `fast-model-unused` — the search words (and candidate previews) were sent to it but nothing usable came back, so the
+ * ranking is this machine's; `local` — nothing was sent. A page never calls a search local unless it is `local`.
+ */
+export type RetrievalAssistMode = 'fast-model' | 'fast-model-unused' | 'local';
+
+/**
+ * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs that best match the editor's words, ranked on this machine by
+ * the lexical ranker (R5-F2c), each with its anchor and a short preview — widened and re-ordered by the fast model when one is
+ * connected, and `assist` says what this search sent. The ranking finds candidates; the words are read where the anchor points
+ * (ADR 0026). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
  */
 export interface MaterialVectorSearchProjection {
   readonly materialId: string;
   readonly indexDigest: string;
-  readonly embedding: string;
+  readonly assist: RetrievalAssistMode;
   readonly candidates: ReadonlyArray<{
     readonly ordinal: number;
     readonly page: number | null;

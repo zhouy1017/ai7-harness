@@ -1,4 +1,8 @@
-import { editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems, supervisionSourceCandidates } from './learning/supervision-directives.js';
+import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
+import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../shared/public-samplebooks.js';
+import type { ResolvedModelRole } from './model-search-settings.js';
+import { MODEL_EFFORT_STALE_REASON } from './provider/model-efforts.js';
+import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -27,7 +31,6 @@ import {
   type GlobalAgentProjection,
   modelServiceChannelOf,
   type ManuscriptWindowProjection,
-  type ModelServiceConnectionProjection,
   type LaunchPolicyProjection,
 } from '../shared/protocol.js';
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
@@ -51,6 +54,7 @@ import {
 import { resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 
 export interface GlobalAgentOperationsHost {
+  resolveModelRole: (role: import('../shared/protocol.js').ModelRoleId) => ResolvedModelRole;
   readonly authority: DatabaseSync;
   readonly baselineAnalysis: BaselineAnalysisStore;
   readonly codeRoot: string;
@@ -61,9 +65,8 @@ export interface GlobalAgentOperationsHost {
   memoryFacade: () => EditorialMemoryFacade;
   localFixtureCatalog: LocalFixturePolicyCatalog | null;
   transaction: <T>(db: DatabaseSync, operation: () => T) => T;
-  getConfiguredModelRoleBinding: (role: 'main-editorial' | 'fast-interaction') => ConfiguredProviderBinding | null;
+  getConfiguredModelRoleBinding: (role: 'main-editorial' | 'foreground-flash') => ConfiguredProviderBinding | null;
   getManuscriptWindow: (manuscriptId: string, branchId: string, cursor: string | null) => ManuscriptWindowProjection;
-  getModelServiceConnections: () => ModelServiceConnectionProjection[];
   globalAgentAttempt: (input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now?: Date, preview?: boolean, qualification?: QualifiedGlobalAttemptMetadata) => DialogueTurnStart | string;
   globalAgentModelConnection: () => { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection };
   globalAgentProcedureDocument: (pin: GlobalAgentProcedurePin) => ProcedureDefinitionDocument;
@@ -82,8 +85,10 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
     const facts = memory.globalSources(operationalScope, internalGlobalOriginalFieldsSelected(host), basis);
     const base = basis.preference === null ? null : { ...basis.preference, lines: basis.preference.governance?.baseLines ?? basis.preference.lines };
     const redact = (text: string) => memory.redact(text, facts.names);
-    const items = governedMemoryItems(preferenceItems(base), facts.legacyDirectives).map(item => ({ ...item, text: redact(item.text),
-      revisionId: item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base') }));
+    // Each line's own revision is its row pin (Issue #1655); the listed and sent revision keeps the newest directive's suffix.
+    const items = [...governedPreferences(preferenceItems(base), facts.legacyDirectives).values()].filter((entry) => !entry.retired)
+      .map((entry) => ({ ...entry.item, text: redact(entry.item.text), revisionId: entry.item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base'),
+        row: preferenceRow(entry, basis.preference?.recordedAt) }));
     const mutableMemories = facts.revisions.map(entry => ({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: redact(entry.current.title) }));
     const sources: GlobalAgentSourceCandidate[] = [
       ...facts.revisions.flatMap(entry => entry.sourceRevision === null ? [] : [{ itemId: entry.current.itemId,
@@ -91,7 +96,7 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
       ...facts.legacy.map(entry => ({ itemId: entry.itemId, revisionId: entry.versionId, kind: 'memory' as const, title: redact(entry.title), text: redact(entry.title) })),
       ...supervisionSourceCandidates(basis.directives).map(entry => ({ ...entry, text: redact(entry.text) })),
     ];
-    const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('fast-interaction') === null
+    const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('foreground-flash') === null
       ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
     return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
       scopedDialogueState: scopedAdmitted ? 'available' : blocked, procedures: internalGlobalAgentProcedures(host),
@@ -142,6 +147,14 @@ export function internalPinGlobalAgentScope(host: GlobalAgentOperationsHost, inp
 }
 
 export function globalAgentScopeCurrent(host: GlobalAgentOperationsHost, scope: GlobalAgentScope): boolean {
+  if (host.baselineAnalysis.launch.operationalScope === 'developer-live' && host.baselineAnalysis.launch.liveForKind !== undefined) {
+    // Only the unedited import revision of the public sample. The title is part of the emitted scope.
+    if (scope.procedures.length > 0 || scope.books.length !== 1 || !scope.books.every(book => book.title === 'sample1' &&
+      host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
+        WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ? AND mr.parent_revision_id IS NULL AND mr.ordinal = 1
+        AND sv.source_digest = ?`).get(book.bookId, book.manuscriptId, book.revisionId, SAMPLE1_PUBLIC_SAMPLEBOOK.sha256))) return false;
+  }
   const excluded = host.memoryFacade().controls().excludedBooks;
   return scope.books.every((book) => !excluded.has(book.bookId) && host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
       ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)
@@ -177,7 +190,7 @@ export function localFixtureRuntime(host: GlobalAgentOperationsHost): LocalFixtu
 
 export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperationsHost): boolean {
   const policy = host.baselineAnalysis.launch.policy;
-  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34' && policy?.providerProcessing.version !== 'v35')) return false;
+  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34' && !supportsEditorialMemoryPolicy(policy?.providerProcessing.version))) return false;
   requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
     selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
@@ -185,14 +198,20 @@ export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperations
 }
 
 export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
-  const binding = host.getConfiguredModelRoleBinding('fast-interaction');
-  const connection = binding === null ? undefined : host.getModelServiceConnections().find((entry) =>
-    entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
-    entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
-  requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
+  const resolved = host.resolveModelRole('foreground-flash');
+  requireStore(resolved.refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+  const binding = host.getConfiguredModelRoleBinding('foreground-flash');
+  const used = resolved.usedChoice;
+  const connection = resolved.connection;
+  requireStore(used !== null && binding !== null && connection !== null && connection.credentialOperationState === 'ready' &&
+    connection.connectionId === used.connectionId && connection.credentialReference === binding.credentialReference &&
+    connection.binding.providerId === modelServiceChannelOf(binding.route) && connection.binding.credentialSlot === binding.credentialSlot &&
+    used.modelId === binding.model && used.reasoningEffort === binding.reasoningEffort &&
+    resolved.binding !== null && canonicalJson(resolved.binding) === canonicalJson(binding),
+    'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
   const policy = resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production',
     host.getConfiguredModelRoleBinding('main-editorial'), binding);
-  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || policy.providerProcessing.version === 'v35'))) &&
+  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || supportsEditorialMemoryPolicy(policy.providerProcessing.version)))) &&
     canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(host.baselineAnalysis.launch.policy?.selectedPolicyIdentity),
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
   return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };

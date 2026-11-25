@@ -1,3 +1,5 @@
+import { serviceWords } from './service-wording.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import type { ModelServiceSettingsProjection, ReviewSynthesisProjection } from '../shared/protocol.js';
 import type { ModelFavourites } from '../shared/preferences.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -25,6 +27,7 @@ export function reviewSynthesisGenerateRow(runChoice: RuntimeExecutionConfig | u
 /** Native disclosure keeps evidence keyboard reachable while leaving finding cards in view. */
 export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel: string | undefined,
   jump?: (evidence: ReviewSynthesisProjection['evidence'][number]) => void): HTMLElement {
+  value = { ...value, detail: serviceWords(value.detail), missingCategories: value.missingCategories.map((line) => serviceWords(line)) };
   const root = document.createElement(jump === undefined ? 'section' : 'details');
   root.className = 'review-synthesis';
   root.dataset['synthesisState'] = value.state;
@@ -36,7 +39,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
   }
   root.append(heading);
   if (modelLabel) {
-    const mark = document.createElement('p'); mark.className = 'review-synthesis-model'; mark.textContent = modelLabel; root.append(mark);
+    const mark = document.createElement('p'); mark.className = 'review-synthesis-model'; mark.textContent = modelEffortWords(modelLabel); root.append(mark);
   }
   const paragraph = (text: string, refs: readonly string[] = []): void => {
     const node = document.createElement('p'); node.textContent = text;

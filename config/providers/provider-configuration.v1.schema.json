@@ -34,11 +34,21 @@
     "notes": {
       "type": "array",
       "items": { "$ref": "#/definitions/prose" }
+    },
+    "recommendedModels": {
+      "description": "The models 设置 › 模型服务 lists first for the Pro and the Flash tier (ADR 0107 §1; Issue #1620). Each must be a model this document lists on a route the runtime model table serves; a recommendation binds nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pro", "flash"],
+      "properties": {
+        "pro": { "type": "array", "items": { "$ref": "#/definitions/modelId" } },
+        "flash": { "type": "array", "items": { "$ref": "#/definitions/modelId" } }
+      }
     }
   },
   "definitions": {
     "reasoning": {
-      "description": "Wire encoding and suggested effort identifiers, never model or effort admission. Unlisted identifiers reach the vendor unchanged.",
+      "description": "A wire encoding hint on a route, or documented supported effort identifiers on an exact model and route. Frozen requests keep their original choices.",
       "type": "object",
       "additionalProperties": false,
       "required": [

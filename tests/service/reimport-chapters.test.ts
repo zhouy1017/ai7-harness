@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -15,6 +15,11 @@ import type {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+vi.mock('node:crypto', async (original) => {
+  const actual = await original<typeof import('node:crypto')>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
 
 // Service-integration suite (L2) for the chapter-level Reimport Comparison (Issue #412, plan slice S63; V2-UX-IMP-041,
 // IMP-042, IMP-057) over the real `EditorialStore` on a temporary Agent Data Root. Both files are composed from exact
@@ -164,7 +169,8 @@ describe('the chapter-level Reimport Comparison', () => {
       review = resolve(store, review, page.items[1]!.groupId, 'merge');
       review = resolve(store, review, page.items[2]!.groupId, 'delete');
       expect(review.commitReady).toBe(false);
-      expect(code(() => store.createReimportResolutionWork(review.draftId, review.draftVersion, page.items[0]!.groupId, 'rewrite'))).toBe('REIMPORT_MAPPING_INVALID');
+      review = resolve(store, review, page.items[0]!.groupId, 'rewrite');
+      review = resolve(store, review, page.items[0]!.groupId, 'split');
       review = resolve(store, review, page.items[3]!.groupId, 'rewrite');
       expect(review.comparison).toMatchObject({ groups: 4, unresolvedGroups: 0, unresolvedMappings: 0 });
       expect(review.commitReady).toBe(true);
@@ -240,6 +246,37 @@ describe('the chapter-level Reimport Comparison', () => {
       const standing = view.marks.find((entry) => entry.markId === moved);
       expect(standing?.anchorState).toBe('exact');
       expect(view.blocks.findIndex((block) => block.blockId === standing?.blockId) + 1).toBe(2);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('supersedes every editor step: after a reimport there is nothing to undo or redo (#1654)', async () => {
+    const first = await compose('steps-base', [paragraph(span(21)), paragraph(span(22))]);
+    const second = await compose('steps-revised', [paragraph(span(21, 0, 10)), paragraph(span(21, 10), span(22), span(23, 0, 8))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      const type = (position: number): void => {
+        const view = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+        const block = view.blocks[position - 1]!;
+        store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId, blockId: block.blockId, windowStartBlockId: view.blocks[0]!.blockId,
+          baseBlockDigest: block.digest, expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔甲〕' });
+      };
+      // One applied step and one undone step stand before the reimport.
+      type(1);
+      type(2);
+      store.undoManuscript(book.manuscriptId, book.branchId, store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest);
+      expect(store.inspectEditorHistory(book.manuscriptId, book.branchId)).toMatchObject({ undo: { kind: 'typing' }, redo: { kind: 'typing' } });
+      let review = await prepareReimport(store, book, second);
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      review = resolve(store, review, page.items[0]!.groupId, 'rewrite');
+      expect((await commit(store, review)).resultKind).toBe('changed');
+      expect(store.inspectEditorHistory(book.manuscriptId, book.branchId)).toMatchObject({ undo: null, redo: null });
+      const digest = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      expect(code(() => store.undoManuscript(book.manuscriptId, book.branchId, digest))).toBe('NOTHING_TO_UNDO');
+      expect(code(() => store.redoManuscript(book.manuscriptId, book.branchId, digest))).toBe('NOTHING_TO_REDO');
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -430,4 +467,389 @@ describe('the chapter-level Reimport Comparison', () => {
       database.close();
     }
   }, 180_000);
+});
+
+// #1638: each compatible ordered pair of the four verbs, over both split and merge rows.
+describe('editing an import review again (#1638)', () => {
+  it.each(['split', 'merge'] as const)('re-chooses every compatible ordered pair on a %s row and returns just that row', async (shape) => {
+    const first = await compose('pair-base', [21, 22, 23, 24].map((b) => paragraph(span(b))));
+    const second = await compose('pair-new', shape === 'split'
+      ? [paragraph(span(21)), paragraph(span(22, 0, 12)), paragraph(span(22, 12)), paragraph(span(23)), paragraph(span(24))]
+      : [paragraph(span(21)), paragraph(span(22), span(23)), paragraph(span(24))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      for (const before of (shape === 'split' ? ['split', 'rewrite', 'delete'] : ['merge', 'rewrite', 'delete']) as ReimportGroupVerb[]) {
+        for (const after of (shape === 'split' ? ['split', 'rewrite', 'delete'] : ['merge', 'rewrite', 'delete']) as ReimportGroupVerb[]) {
+          let review = await prepareReimport(store, book, second);
+          const row = store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!;
+          review = resolve(store, review, row.groupId, before);
+          const version = review.draftVersion;
+          const work = store.createReimportResolutionWork(review.draftId, version, row.groupId, after);
+          let progress = store.advanceReimportResolutionWork(work.workId);
+          while (!progress.done) progress = store.advanceReimportResolutionWork(work.workId);
+          expect(progress.review).toMatchObject({ draftVersion: version + 1, unresolvedGroups: 0, row: { groupId: row.groupId, verb: after } });
+          expect(code(() => store.createReimportResolutionWork(review.draftId, version, row.groupId, after))).toBe('DRAFT_VERSION_CHANGED');
+          review = progress.review!;
+          expect(store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!.verb).toBe(after);
+          await store.abandonImportDraft(review.draftId, review.draftVersion);
+        }
+      }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('keeps choices across restart and 返回修改 and commits the same final choices as one pass', async () => {
+    const first = await compose('return-base', [21, 22, 23].map((b) => paragraph(span(b))));
+    const second = await compose('return-new', [paragraph(span(21)), paragraph(span(22, 0, 12)), paragraph(span(22, 12)), paragraph(span(23))]);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      let review = await prepareReimport(store, book, second);
+      const row = store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!;
+      review = resolve(store, review, row.groupId, 'delete');
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const returned = store.returnImportToEditing(review.draftId, review.draftVersion);
+      expect(returned.state).toBe('reimport');
+      if (returned.state !== 'reimport') throw new Error('expected comparison');
+      expect(returned.draftVersion).toBe(review.draftVersion + 1);
+      expect(store.getReimportMappingPage(review.draftId, returned.draftVersion, null).items[0]!.verb).toBe('delete');
+      expect(code(() => store.returnImportToEditing(review.draftId, review.draftVersion))).toBe('DRAFT_VERSION_CHANGED');
+      review = resolve(store, returned.review, row.groupId, 'split');
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!.verb).toBe('split');
+      const result = await commit(store, review);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const digests = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.map((b) => b.digest);
+      const directRoots = await createServiceTestRoots();
+      const directStore = await EditorialStore.open(directRoots.dataRoot, directRoots.codeRoot);
+      try {
+      const direct = await importBook(directStore, first);
+      let onePass = await prepareReimport(directStore, direct, second);
+      onePass = resolve(directStore, onePass, directStore.getReimportMappingPage(onePass.draftId, onePass.draftVersion, null).items[0]!.groupId, 'split');
+      const directResult = await commit(directStore, onePass);
+      expect(directStore.getManuscriptWindow(direct.manuscriptId, direct.branchId, null).blocks.map((b) => b.digest)).toEqual(digests);
+      expect(result.receipt.groups).toEqual(directResult.receipt.groups);
+      directStore.markCleanShutdown();
+      } finally { directStore.close(); await directRoots.dispose(); }
+      expect(code(() => store.returnImportToEditing(review.draftId, review.draftVersion))).toBe('DRAFT_STATE_CHANGED');
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('rolls a stopped replacement back as one transaction and keeps the old choice on restart', async () => {
+    const first = await compose('atomic-base', [21, 22, 23].map((b) => paragraph(span(b))));
+    const second = await compose('atomic-new', [paragraph(span(21)), paragraph(span(24)), paragraph(span(23))]);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let review!: ReviewBeforeManuscriptReimportProjection;
+    let groupId!: string;
+    try {
+      const book = await importBook(store, first);
+      review = await prepareReimport(store, book, second);
+      groupId = store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!.groupId;
+      review = resolve(store, review, groupId, 'rewrite');
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
+      interruptReimportResolutionAfterDelete: true,
+    });
+    try {
+      expect(code(() => resolve(store, review, groupId, 'delete'))).toBe('REIMPORT_RESOLUTION_INTERRUPTED');
+    } finally { store.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!.verb).toBe('rewrite');
+      const returned = store.returnImportToEditing(review.draftId, review.draftVersion);
+      await store.abandonImportDraft(review.draftId, returned.draftVersion);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('returns new-book and source details to their staged page, preserving the retained source', async () => {
+    const path = await compose('staged-return', [21, 22, 23].map((b) => paragraph(span(b))));
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      for (const sourceOnly of [false, true]) {
+        const staged = await store.stageSelectedManuscript(randomUUID(), path);
+        const target = { kind: 'new-book' as const, choiceId: 'new-book' as const, confirmedTitle: staged.titleSuggestion.value };
+        const review = sourceOnly ? store.prepareSourceImportReview(staged.draftId, staged.draftVersion, { ...target, relationship: 'source-only' })
+          : store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+        const returned = store.returnImportToEditing(staged.draftId, review.draftVersion);
+        expect(returned).toMatchObject({ state: 'staged', draftVersion: review.draftVersion + 1, staged: { source: staged.source },
+          editingChoices: { target: review.target, title: target.confirmedTitle, relationship: sourceOnly ? 'source-only' : 'first-manuscript',
+            textBoxDisposition: sourceOnly ? null : (review as { textBoxDisposition: unknown }).textBoxDisposition, trackedChanges: null, structure: null, acceptance: false } });
+        expect(code(() => store.returnImportToEditing(staged.draftId, review.draftVersion))).toBe('DRAFT_VERSION_CHANGED');
+        const again = sourceOnly ? store.prepareSourceImportReview(staged.draftId, returned.draftVersion, { ...target, relationship: 'source-only' })
+          : store.prepareNewBookReview(staged.draftId, returned.draftVersion, target, false);
+        expect(again.draftVersion).toBe(returned.draftVersion + 1);
+        await store.abandonImportDraft(staged.draftId, again.draftVersion);
+      }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 180_000);
+});
+
+it.each([false, true])('accepts reduced fidelity on submission only when required=%s, and a replay records once (#1638)', async (required) => {
+  const first = await compose('accept-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = join(roots.inputRoot, required ? 'accept-new.md' : 'accept-new.docx');
+  if (required) await writeFile(second, (await Promise.all([21, 24, 23].map((b) => sourceSpanText(SOURCE, span(b))))).join('\n\n') + '\n\n*' + await sourceSpanText(SOURCE, span(25)) + '*\n');
+  else await composeRevisedDocx(second, { source: SOURCE, title: '提交测试', paragraphs: [21, 24, 23].map((b) => paragraph(span(b))) });
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store, first);
+    let review = await prepareReimport(store, book, second);
+    for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
+    const input = { draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() };
+    if (required) {
+      const before = tableState();
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const version = db.prepare('PRAGMA data_version').get();
+        await expect(store.createManuscriptReimportCommitWork(input)).rejects.toMatchObject({ code: 'DEGRADATION_ACCEPTANCE_REQUIRED' });
+        expect(db.prepare('PRAGMA data_version').get()).toEqual(version);
+        expect(tableState()).toEqual(before);
+      } finally { db.close(); }
+    }
+    const work = await store.createManuscriptReimportCommitWork({ ...input, acceptDegradation: true });
+    const firstRow = store.getReimportMappingPage(review.draftId, review.draftVersion + (required ? 1 : 0), null).items[0]!;
+    expect(code(() => store.createReimportResolutionWork(review.draftId, review.draftVersion + (required ? 1 : 0), firstRow.groupId, 'delete'))).toBe('SERVICE_BUSY');
+    let result = work.result;
+    while (result === null) { await new Promise((next) => setTimeout(next, 5)); result = (await store.advanceManuscriptReimportCommitWork(work.workId!)).result; }
+    if (required) expect(result.receipt.degradationDecision?.summaryLabel).toBe('含已接受的降级');
+    else expect(result.receipt.degradationDecision).toBeNull();
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const replay = await store.createManuscriptReimportCommitWork(required ? { ...input, acceptDegradation: true } : input);
+    let replayed = replay.result;
+    while (replayed === null) { await new Promise((next) => setTimeout(next, 5)); replayed = (await store.advanceManuscriptReimportCommitWork(replay.workId!)).result; }
+    expect(replayed.commitId).toBe(input.commitId);
+    expect(store.getBookOverview(book.bookId).records.filter((r) => r.kind === 'manuscript-reimport-record')).toHaveLength(1);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+}, 180_000);
+
+it('refuses return during a draft job and honors the abandonment cleanup fence (#1638)', async () => {
+  const first = await compose('fence-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = await compose('fence-new', [21, 24, 23].map((b) => paragraph(span(b))));
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: true, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
+  });
+  let abandonedDraft!: { id: string; version: number };
+  try {
+    const book = await importBook(store, first);
+    const review = await prepareReimport(store, book, second);
+    const row = store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!;
+    const work = store.createReimportResolutionWork(review.draftId, review.draftVersion, row.groupId, 'rewrite');
+    expect(code(() => store.returnImportToEditing(review.draftId, review.draftVersion))).toBe('SERVICE_BUSY');
+    store.cancelReimportResolutionWork(work.workId);
+    const returned = store.returnImportToEditing(review.draftId, review.draftVersion);
+    await expect(store.abandonImportDraft(review.draftId, returned.draftVersion)).rejects.toMatchObject({ code: 'ABANDON_CLEANUP_FAILED' });
+    expect(code(() => store.returnImportToEditing(review.draftId, returned.draftVersion))).toBe('ABANDON_CLEANUP_PENDING');
+    expect(code(() => store.createReimportResolutionWork(review.draftId, returned.draftVersion, row.groupId, 'delete'))).toBe('ABANDON_CLEANUP_PENDING');
+    abandonedDraft = { id: review.draftId, version: returned.draftVersion };
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(code(() => reopened.returnImportToEditing(abandonedDraft.id, abandonedDraft.version))).toBe('DRAFT_NOT_FOUND');
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
+}, 180_000);
+
+it('refuses returning an uncertain attempt until startup has proved its outcome (#1638)', async () => {
+  const path = await compose('uncertain-return', [21, 22, 23].map((b) => paragraph(span(b))));
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let draftId!: string;
+  let version!: number;
+  try {
+    const staged = await store.stageSelectedManuscript(randomUUID(), path);
+    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+    draftId = staged.draftId; version = review.draftVersion;
+    await expect(store.commitNewBookImport({ draftId, expectedDraftVersion: version, reviewDigest: review.reviewDigest!, commitId: randomUUID() },
+      { interruptAfterAttempt: true })).rejects.toBeDefined();
+  } finally { store.close(); }
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+    induceUnprovableReconciliation: true, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
+  });
+  try {
+    expect((await store.getImportStartup()).state).toBe('outcome-uncertain');
+    expect(code(() => store.returnImportToEditing(draftId, version))).toBe('IMPORT_COMMIT_OUTCOME_UNCERTAIN');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+it('clears a proved uncommitted prepared attempt when returning to editing (#1638)', async () => {
+  const path = await compose('prepared-return', [21, 22, 23].map((b) => paragraph(span(b))));
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let version!: number;
+  let draftId!: string;
+  try {
+    const staged = await store.stageSelectedManuscript(randomUUID(), path);
+    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+    draftId = staged.draftId; version = review.draftVersion;
+    await expect(store.commitNewBookImport({ draftId, expectedDraftVersion: version, reviewDigest: review.reviewDigest!, commitId: randomUUID() },
+      { interruptAfterAttempt: true })).rejects.toBeDefined();
+  } finally { store.close(); }
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect((await store.getImportStartup()).state).toBe('draft-recovery');
+    const returned = store.returnImportToEditing(draftId, version);
+    if (returned.state !== 'staged') throw new Error('expected staged');
+    const review = store.prepareNewBookReview(draftId, returned.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: returned.staged.titleSuggestion.value }, false);
+    const result = await store.commitNewBookImport({ draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID() });
+    expect(result.completionLabel).toBe('稿件已导入');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+function tableState(dataRoot = roots.dataRoot): Record<string, string> {
+  const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    return Object.fromEntries(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map((t) => {
+      const rows = db.prepare('SELECT * FROM "' + String(t.name).replaceAll('"', '""') + '"').all().map((r) => JSON.stringify(r)).sort();
+      return [String(t.name), createHash('sha256').update(JSON.stringify(rows)).digest('hex')];
+    }));
+  } finally { db.close(); }
+}
+
+it('records inline acceptance exactly like separate accept-then-submit in every table (#1638 review 2)', async () => {
+  const first = await compose('equivalent-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = join(roots.inputRoot, 'equivalent-new.md');
+  await writeFile(second, (await Promise.all([21, 24, 23].map((b) => sourceSpanText(SOURCE, span(b))))).join('\n\n') + '\n\n*' + await sourceSpanText(SOURCE, span(25)) + '*\n');
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let review!: ReviewBeforeManuscriptReimportProjection;
+  try {
+    const book = await importBook(store, first);
+    review = await prepareReimport(store, book, second);
+    for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const other = await createServiceTestRoots();
+  try {
+    await cp(roots.dataRoot, other.dataRoot, { recursive: true });
+    const commitId = randomUUID();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-22T00:00:00Z'));
+    for (const [dataRoot, inline] of [[roots.dataRoot, false], [other.dataRoot, true]] as const) {
+      let ordinal = 0;
+      vi.mocked(randomUUID).mockImplementation(() => `00000000-0000-4000-8000-${String(++ordinal).padStart(12, '0')}`);
+      store = await EditorialStore.open(dataRoot, roots.codeRoot);
+      try {
+        const accepted = inline ? review : store.acceptReimportDegradation(review.draftId, review.draftVersion);
+        const work = await store.createManuscriptReimportCommitWork({ draftId: review.draftId, commitId,
+          expectedDraftVersion: accepted.draftVersion, reviewDigest: accepted.reviewDigest, ...(inline ? { acceptDegradation: true } : {}) });
+        let result = work.result;
+        while (result === null) { await new Promise((next) => setTimeout(next, 5)); result = (await store.advanceManuscriptReimportCommitWork(work.workId!)).result; }
+        store.markCleanShutdown();
+      } finally { store.close(); }
+      store = await EditorialStore.open(dataRoot, roots.codeRoot);
+      store.markCleanShutdown(); store.close();
+    }
+    expect(tableState(other.dataRoot)).toEqual(tableState());
+  } finally {
+    vi.useRealTimers();
+    vi.mocked(randomUUID).mockImplementation((await vi.importActual<typeof import('node:crypto')>('node:crypto')).randomUUID);
+    await other.dispose();
+  }
+}, 180_000);
+
+it('refuses an unresolved submission with acceptance without writing anything (#1638 re-check)', async () => {
+  const first = await compose('open-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = join(roots.inputRoot, 'open-new.md');
+  await writeFile(second, (await Promise.all([21, 24, 23].map((b) => sourceSpanText(SOURCE, span(b))))).join('\n\n') + '\n\n*' + await sourceSpanText(SOURCE, span(25)) + '*\n');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store, first);
+    const review = await prepareReimport(store, book, second);
+    expect(review.comparison.unresolvedMappings).toBeGreaterThan(0);
+    const before = tableState();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const version = db.prepare('PRAGMA data_version').get();
+      await expect(store.createManuscriptReimportCommitWork({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+        reviewDigest: review.reviewDigest, commitId: randomUUID(), acceptDegradation: true })).rejects.toMatchObject({ code: 'REIMPORT_MAPPING_UNRESOLVED' });
+      expect(db.prepare('PRAGMA data_version').get()).toEqual(version);
+      expect(tableState()).toEqual(before);
+    } finally { db.close(); }
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+it.each([false, true])('keeps the ordinary missing-draft refusal with acceptance=%s (#1638 re-check)', async (acceptDegradation) => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const before = tableState();
+    await expect(store.createManuscriptReimportCommitWork({ draftId: randomUUID(), expectedDraftVersion: 1, reviewDigest: 'a'.repeat(64),
+      commitId: randomUUID(), acceptDegradation })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+    expect(tableState()).toEqual(before);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+it('names earlier lineage files with their first import times in every import-page projection (N.5)', async () => {
+  const first = await compose('earlier-original', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = await compose('earlier-revised', [21, 24, 23].map((b) => paragraph(span(b))));
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store, first);
+    const initial = store.getBookOverview(book.bookId).records.find((r) => r.kind === 'import-record');
+    if (initial?.kind !== 'import-record') throw new Error('Expected import record');
+    let review = await prepareReimport(store, book, second);
+    for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
+    const result = await commit(store, review);
+    const expected = [
+      { sourceVersionId: initial.sourceVersionId, displayName: 'earlier-original.docx', importedAt: initial.importedAt },
+      { sourceVersionId: result.sourceVersionId, displayName: 'earlier-revised.docx', importedAt: result.importedAt },
+    ].sort((a, b) => b.sourceVersionId.localeCompare(a.sourceVersionId));
+    const page = store.getReimportLineageSourceVersionPage(book.bookId, null);
+    expect(page.items).toEqual(expected);
+    const legacyPage = { ...page, items: page.items.map((item) => item.sourceVersionId) };
+    expect(JSON.stringify(legacyPage)).toBe(JSON.stringify({ bookId: book.bookId, after: null, items: expected.map((item) => item.sourceVersionId), previousCursor: null, nextCursor: null }));
+    expect(store.getReimportLineageSourceVersionPage(book.bookId, expected[0]!.sourceVersionId)).toEqual({ bookId: book.bookId, after: expected[0]!.sourceVersionId, items: expected.slice(1), previousCursor: null, nextCursor: null });
+    expect(store.listBooks(null).items.find((item) => item.bookId === book.bookId)!.reimportLineageSourceVersionIds).toEqual(expected);
+    const staged = await store.stageSelectedManuscript(randomUUID(), first);
+    const choice = staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === book.bookId);
+    expect(choice).toMatchObject({ reimportLineageSourceVersionIds: expected });
+    const finding = staged.identityFindings.find((item) => item.sourceVersionId === initial.sourceVersionId)!;
+    expect(finding.displayName).toBe('earlier-original.docx');
+    expect(finding.importedAt).toBe(initial.importedAt);
+    const { displayName: _name, importedAt: _time, ...legacyFinding } = finding;
+    expect(JSON.stringify(legacyFinding)).toBe(JSON.stringify({ bookId: book.bookId, bookTitle: '章节对应组稿', sourceVersionId: initial.sourceVersionId,
+      importRecordId: initial.importRecordId, recordKind: 'manuscript-import', recordLabel: '稿件导入记录', identityClass: { kind: 'immutable-original', label: '精确原始文件身份' } }));
+    const distinct = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book-distinct-intended-work', confirmedTitle: '另一部作品' }, false);
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('改过的记录名.docx', initial.sourceVersionId);
+      const continued = await store.continueImportDraft(staged.draftId, distinct.draftVersion);
+      expect(continued).toMatchObject({ state: 'review-ready', review: { draftVersion: distinct.draftVersion, reviewDigest: distinct.reviewDigest } });
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('   ', initial.sourceVersionId);
+      expect(store.getReimportLineageSourceVersionPage(book.bookId, null).items.find((item) => item.sourceVersionId === initial.sourceVersionId)!.displayName).toBeNull();
+      const unnamed = await store.stageSelectedManuscript(randomUUID(), first);
+      expect(unnamed.identityFindings.find((item) => item.sourceVersionId === initial.sourceVersionId)!.displayName).toBeNull();
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('earlier-original.docx', initial.sourceVersionId);
+    } finally { database.close(); }
+    const alias = join(roots.inputRoot, 'earlier-renamed-copy.docx');
+    await cp(first, alias);
+    const reuse = await store.stageSelectedManuscript(randomUUID(), alias);
+    const sourceReview = store.prepareSourceImportReview(reuse.draftId, reuse.draftVersion,
+      { kind: 'existing-book', bookId: book.bookId, relationship: 'source-only', reuseSourceVersionId: initial.sourceVersionId });
+    const reused = await store.commitSourceImport({ draftId: reuse.draftId, expectedDraftVersion: sourceReview.draftVersion, reviewDigest: sourceReview.reviewDigest, commitId: randomUUID() });
+    expect(reused.importedAt).not.toBe(initial.importedAt);
+    expect(store.getReimportLineageSourceVersionPage(book.bookId, null).items.find((item) => item.sourceVersionId === initial.sourceVersionId))
+      .toEqual({ sourceVersionId: initial.sourceVersionId, displayName: 'earlier-original.docx', importedAt: initial.importedAt });
+    store.markCleanShutdown();
+  } finally { store.close(); }
 });

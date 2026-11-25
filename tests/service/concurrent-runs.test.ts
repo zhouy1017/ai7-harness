@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
-import { RECONCILED_QUEUED_DETAIL, RECONCILED_YIELDED_DETAIL, RUN_IDLE_YIELD_LABEL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_PAUSED_DETAIL, RECONCILED_QUEUED_DETAIL, RECONCILED_YIELDED_DETAIL, RUN_IDLE_YIELD_LABEL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -527,7 +527,10 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       for (const [book, runRecordId] of [[yi, runYi], [bing, runBing]] as const) {
         const blocked = second.inspectBaselineAnalysis(book.bookId);
         expect(blocked.state).toBe('authorized-blocked');
-        expect(blocked.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+        expect(blocked.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', stopReason: 'shutdown', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+        expect(second.inspectGlobalAttention(() => null, false, 'admitting').groups.flatMap((group) => group.items).find((item) => item.book.bookId === book.bookId))
+          .toMatchObject({ state: 'analysis-blocked', facts: { stopReason: 'shutdown' } });
+        expect(second.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: book.taskIntentId }).state.stopReason).toBe('shutdown');
         expect(blocked.run!.attempt).toBeNull();
       }
       expect(second.inspectBaselineAnalysis(jia.bookId).state).toBe('resumable');
@@ -558,6 +561,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       const blocked = third.inspectBaselineAnalysis(yi.bookId);
       expect(blocked.state).toBe('authorized-blocked');
       expect(blocked.run).toMatchObject({ state: 'blocked-before-dispatch', blockedBy: 'launch', blockedReasons: ['没有可执行的本地确定性路由。'] });
+      expect(blocked.run?.stopReason).toBeUndefined();
       expect(third.reconcileStoppedBaselineAnalysisRuns().settled).toBe(0);
       third.markCleanShutdown();
     } finally {
@@ -884,14 +888,44 @@ it('reads a Run AI7 yielded as an ordinary paused Run after a restart, which not
     expect(reopened.reconcileStoppedBaselineAnalysisRuns().settled).toBe(1);
     const reading = reopened.inspectBaselineAnalysis(bookId, () => null);
     expect([reading.run?.runRecordId, reading.state, reading.run?.stateLabel]).toEqual([runRecordId, 'paused', '已暂停']);
+    expect(reading.run?.stopReason).toBe('shutdown');
     expect(reopened.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(1);
     const items = reopened.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items;
     expect(items.filter((item) => item.book.bookId === bookId).map((item) => item.state)).toEqual(['analysis-paused']);
+    expect(items.find((item) => item.book.bookId === bookId)?.facts.stopReason).toBe('shutdown');
     expect(reopened.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reading.taskIntent!.taskIntentId }).state.label).toBe('已暂停');
+    expect(reopened.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reading.taskIntent!.taskIntentId }).runControl?.stopReason).toBe('shutdown');
     expect(RECONCILED_YIELDED_DETAIL).toContain('续行');
     reopened.markCleanShutdown();
   } finally { reopened.close(); }
 }, 60_000);
+
+it.each([[false, false], [true, false], [false, true], [true, true]])('reads pausing-to-yield=%s, already reconciled=%s without new facts (#1656)', async (idleYield, reconciled) => {
+  const store = await openWithRoute();
+  let book: Book;
+  let runRecordId: string;
+  try {
+    book = await preparedBook(store, '合成历史暂停', true);
+    runRecordId = store.authorizeBaselineAnalysis(book.bookId, book.taskIntentId, book.planEnvelopeDigest).dispatchRunRecordId!;
+    // Public ledger writes reproduce the durable pre-0.7.4 history, with no new stopReason field.
+    store.baselineAnalysisLedger.recordRunState(runRecordId, 'pausing', { idleYield });
+    if (reconciled) store.baselineAnalysisLedger.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  for (let restart = 0; restart < 2; restart += 1) {
+    const reopened = await openWithRoute();
+    try {
+      expect(reopened.reconcileStoppedBaselineAnalysisRuns().settled).toBe(restart === 0 && !reconciled ? 1 : 0);
+      const reading = reopened.inspectBaselineAnalysis(book!.bookId);
+      expect(reading.run?.stopReason).toBe(idleYield ? 'shutdown' : undefined);
+      expect(reading.run?.attempt).toBeNull();
+      const items = reopened.inspectGlobalAttention(() => null, false, 'admitting').groups.flatMap((group) => group.items);
+      expect(items.find((item) => item.book.bookId === book!.bookId)?.facts.stopReason).toBe(idleYield ? 'shutdown' : undefined);
+      expect(reopened.inspectTaskPlan({ bookId: book!.bookId, kind: 'baseline-analysis', ref: book!.taskIntentId }).state.stopReason).toBe(idleYield ? 'shutdown' : undefined);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+  }
+});
 
 it('decodes 空闲时处理 for every kind that dispatches, the baseline included, and never for the record-only fixed Task (#1089)', () => {
   const frame = (request: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(request));

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { SERIES_TITLE_FILTER_SQL } from './series.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * 作者 · 责编 · 相关人 of a Book (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013). Authors and editors may be several
@@ -86,24 +88,9 @@ export const BOOK_PEOPLE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const BOOK_PEOPLE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BOOK_PEOPLE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_PEOPLE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_PEOPLE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const BOOK_PEOPLE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  book_people_versions: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-};
+export const BOOK_PEOPLE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  book_people_versions: 'BOOK_PEOPLE_LEDGER_IMMUTABLE',
+});
 
 export class BookPeopleError extends Error {
   constructor(readonly code: string, message: string) {
@@ -120,26 +107,15 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 const RECORD_SCHEMA = 'ai7.book-people/1';
 const ACTOR = '本机编辑';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_people_versions'";
+/** Latest persisted editorial activity, including reading/edits that create no revision. No library read records activity. */
+export const BOOK_LAST_WORKED_SQL = `max(b.created_at,
+  coalesce((SELECT max(p.recorded_at) FROM manuscript_entry_positions p WHERE p.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(e.durable_at) FROM edit_journal_entries e JOIN manuscripts m ON m.manuscript_id = e.manuscript_id WHERE m.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(r.created_at) FROM manuscript_revisions r JOIN manuscripts m ON m.manuscript_id = r.manuscript_id WHERE m.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(p.recorded_at) FROM book_people_versions p WHERE p.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(c.recorded_at) FROM series_membership_changes c WHERE c.book_id = b.book_id), b.created_at))`;
 /** A name never holds a separator, a list comma or a line break: each field is read back as its names. */
 const NAME_FORBIDDEN = /[、,，;；\r\n]/u;
-
-/** Revision 44's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeBookPeopleSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BOOK_PEOPLE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BOOK_PEOPLE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Book people schema rollback failed.');
-    }
-    throw error;
-  }
-  requirePeople(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '图书人员记录与已有记录不一致。');
-}
 
 interface PeopleSet {
   authors: string[];
@@ -243,6 +219,17 @@ export class BookPeople {
     return { authors: people.authors, editors: people.editors, related: people.related.map((person) => ({ roleLabel: person.roleLabel, name: person.name })) };
   }
 
+  /** Metadata shared by the catalog page and recently worked Books outside that page. */
+  libraryFacts(bookId: string): NonNullable<import('../shared/protocol.js').PriorWorkItemProjection['library']> {
+    const book = this.#db.prepare(`SELECT b.internal_number, ${BOOK_LAST_WORKED_SQL} last_worked_at FROM books b WHERE b.book_id = ?`).get(bookId)!;
+    const series = this.#db.prepare(`SELECT s.title FROM series_membership_changes c JOIN series s ON s.series_id = c.series_id
+      WHERE c.book_id = ? AND c.kind = 'add' AND c.ordinal = (
+        SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
+      ORDER BY s.title, s.series_id`).all(bookId);
+    return { internalNumber: book.internal_number === null ? null : String(book.internal_number), people: this.summary(bookId),
+      lastWorkedAt: String(book.last_worked_at), seriesNames: series.map(row => String(row.title)) };
+  }
+
   /**
    * `保存人员`: the whole set, against the version the editor read. The same set as the newest version records nothing and
    * says so; any other appends the next version. The caller holds the transaction.
@@ -309,7 +296,7 @@ export class BookPeople {
     if (filter.field === 'editor') return { where: newest('editors_text'), parameters: [text] };
     // 书系 (Issue #63, S28a): a Series the Book is in now, by its name.
     if (filter.field === 'series') return { where: SERIES_TITLE_FILTER_SQL, parameters: [text] };
-    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')} OR ${SERIES_TITLE_FILTER_SQL})`, parameters: [text, text, text, text] };
+    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')} OR ${SERIES_TITLE_FILTER_SQL} OR instr(lower(b.internal_number), lower(?)) > 0)`, parameters: [text, text, text, text, text] };
   }
 
   /** The Book's newest version. */
@@ -324,7 +311,7 @@ export class BookPeople {
    * pinned — whichever shipped list that was, never only today's.
    */
   *#verified(bookId: string): IterableIterator<VerifiedPeopleVersion> {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
+    if (!schemaHas(this.#db, 'book_people_versions')) return;
     const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId) as IterableIterator<SqlRow>;
     let prior: string | null = null;
     let index = 0;

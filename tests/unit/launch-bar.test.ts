@@ -70,6 +70,36 @@ function tick(materialId: string): void {
   node.dispatchEvent({ type: 'change', bubbles: true });
 }
 
+it.each([false, true])('shows the service estimate before launching, keeping tokens only in developer mode (%s)', async developer => {
+  setTechnicalLayerVisible(developer);
+  try {
+    const { api, launch } = launchApi('launchWritingTask');
+    const sentence = '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；按最近同类任务，约 6 分钟。';
+    const previewTaskLaunch = vi.fn(async () => ({ steps: [], scope: '', units: 12, reference: [], send: '', usage: '上限 50000 tokens', adaptations: [],
+      estimate: { parts: 12, fewestRequests: 13, more: ['retry'], ceiling: true, durationMs: 360000, sentence } }));
+    const { bar } = await mount({ ...api, previewTaskLaunch }, { bookId: 'book', operation: 'launchWritingTask', title: '写作', input: WRITING_REQUEST });
+    await bar.openPlan();
+    expect(miniDocument.querySelector('.task-launch-estimate-sentence')?.textContent).toBe(sentence);
+    expect(miniDocument.querySelector('.task-launch-estimate')?.textContent.includes('50000 tokens')).toBe(developer);
+    expect(launch).not.toHaveBeenCalled();
+  } finally { setTechnicalLayerVisible(true); }
+});
+
+it.each([false, true])('reads the scope and adaptation lines of the plan preview in ordinary words, and as the service wrote them in developer mode (%s)', async developer => {
+  setTechnicalLayerVisible(developer);
+  try {
+    const { api } = launchApi('launchWritingTask');
+    const scope = '《合成书》全书 · 8,289 字 · 8 个阅读范围', adaptation = '模型服务暂时出错时，同一个阅读范围安全地再试一次：允许';
+    const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取（重新读取 2 个阅读范围，沿用 6 个）'], scope, units: 8, reference: [], send: '', usage: '', adaptations: [adaptation] }));
+    const { bar } = await mount({ ...api, previewTaskLaunch }, { bookId: 'book', operation: 'launchWritingTask', title: '写作', input: WRITING_REQUEST });
+    await bar.openPlan();
+    const plan = miniDocument.querySelector('.task-launch-estimate')!.textContent;
+    expect(miniDocument.querySelector('.task-launch-scope')?.textContent).toBe(developer ? `处理范围：${scope}` : '处理范围：《合成书》全书 · 8,289 字 · 8 个部分');
+    expect(miniDocument.querySelector('.task-launch-adaptation')?.textContent).toBe(developer ? adaptation : '模型服务暂时出错时，同一部分安全地再试一次：允许');
+    expect(plan.includes('阅读范围')).toBe(developer);
+  } finally { setTechnicalLayerVisible(true); }
+});
+
 it.each(OPERATIONS)('builds the %s input from the run options and the remembered choice, with a fresh clientCommandId after a change', async operation => {
   const kind = LEDGER_TASK_LAUNCH_KINDS[operation];
   const remembered = { modelConnectionId: 'connection', modelId: 'model', reasoningEffort: 'high' };
@@ -431,5 +461,50 @@ it('lets go of the page once a launch popover is removed while it is open (#1526
     bar.remove();
     document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
     expect(listeners.has('resize')).toBe(false);
+  } finally { restore(); }
+});
+
+
+it.each(['button', 'programmatic'] as const)('keeps a later %s opening when the previous native panel close arrives late (#1711)', opening => {
+  let flushOpenAttribute = (_wasOpen: boolean) => {};
+  vi.stubGlobal('MutationObserver', class {
+    constructor(changed: (records: Array<{ oldValue: string | null }>) => void) { flushOpenAttribute = wasOpen => changed([{ oldValue: wasOpen ? '' : null }]); }
+    observe(): void {}
+    disconnect(): void {}
+  });
+  const { plan, panel, restore } = popoverBar(382);
+  const button = plan.querySelector<HTMLButtonElement>('summary button')!;
+  const setOpen = (value: boolean): void => {
+    const wasOpen = plan.open;
+    if (opening === 'button') button.click(); else plan.open = value;
+    // Native attribute mutation delivery precedes the queued toggle task, as in the captured browser sequence.
+    flushOpenAttribute(wasOpen);
+  };
+  const panelClosing = (): void => {
+    panel.dispatchEvent({ type: 'beforetoggle', oldState: 'open', newState: 'closed' } as never);
+    panel.hidePopover();
+  };
+  const closedEvent = (): void => { panel.dispatchEvent({ type: 'toggle', oldState: 'open', newState: 'closed' } as never); };
+  try {
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    panelClosing();
+    setOpen(false);
+    setOpen(true);
+    // The old close is delivered after the latest opening, before that opening's own toggle work.
+    closedEvent();
+    expect(plan.open).toBe(true);
+    plan.dispatchEvent({ type: 'toggle' } as never);
+    expect(panel.matches(':popover-open')).toBe(true);
+    // Normal closing still closes both controls.
+    setOpen(false); panelClosing(); plan.dispatchEvent({ type: 'toggle' } as never); closedEvent();
+    expect(plan.open).toBe(false); expect(panel.matches(':popover-open')).toBe(false);
+    // A new external close after an opening remains authoritative.
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    panelClosing(); closedEvent();
+    expect(plan.open).toBe(false);
+    // Another automatic popover closes this panel in the same task, before a redundant open write is delivered.
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    plan.open = true; panelClosing(); flushOpenAttribute(true); closedEvent();
+    expect(plan.open).toBe(false);
   } finally { restore(); }
 });

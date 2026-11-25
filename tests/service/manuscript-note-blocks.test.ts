@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, admittedSourcePath, composeManuscriptDocx, type ComposedRetentionContent } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { reimportVersion } from '../support/reimport-version.js';
 
 // Service-integration suite (L2) for the note block (Issue #1204, W22-S4b; ADR 0096 §1) over the real store. Every manuscript
 // is composed from exact `sample1` (ADR 0043/0044): six paragraphs, a footnote after the third whose note is the source's
@@ -28,14 +30,14 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-async function importNotes(retention: ComposedRetentionContent = NOTES): Promise<{ original: Uint8Array; source: ParsedDocxBlock[]; path: string;
+async function importNotes(retention: ComposedRetentionContent = NOTES, title = '注释组稿'): Promise<{ original: Uint8Array; source: ParsedDocxBlock[]; path: string;
   book: { bookId: string; manuscriptId: string; branchId: string }; view: () => ManuscriptWindowProjection }> {
   const path = join(roots.inputRoot, `${randomUUID()}.docx`);
-  const original = await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '注释组稿', retention });
+  const original = await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title, retention });
   const source: ParsedDocxBlock[] = [];
   await parseDocx(admittedSourcePath(ADMITTED_BASELINE_DOCX), 'sample1.docx', (block) => source.push(block));
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
-  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '注释组稿' }, false);
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: title }, false);
   expect(review.reviewDigest).not.toBeNull();
   const commitId = randomUUID();
   const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
@@ -51,6 +53,49 @@ function editNote(book: { manuscriptId: string; branchId: string }, view: Manusc
 }
 
 describe('the note block (#1204)', () => {
+  it('does not walk version history for edits and window reads in another book without notes, or each child of a known note import', async () => {
+    const noted = await importNotes();
+    const plain = await importNotes({}, '无脚注组稿');
+    const checkpoint = async (item: typeof plain, ordinal: number) => {
+      const page = item.view();
+      const block = page.blocks.find(row => row.kind === 'paragraph')!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: page.manuscriptId, branchId: page.branchId, baseRevisionId: page.revisionId,
+        blockId: block.blockId, windowStartBlockId: page.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: page.journalSequence,
+        fromGrapheme: 0, toGrapheme: 0, insertText: '甲' });
+      await store.saveMilestone(page.manuscriptId, page.branchId, '阶段 ' + ordinal, 'stage-archive', null, '');
+      expect(item.view().revisionId === page.revisionId).toBe(false);
+    };
+    for (let ordinal = 1; ordinal <= 12; ordinal++) await checkpoint(plain, ordinal);
+    noted.view();
+    const reads = vi.spyOn(StatementSync.prototype, 'get');
+    const walks = () => reads.mock.contexts.filter(statement => statement instanceof StatementSync &&
+      /\bWITH\s+RECURSIVE\s+lineage\s+AS\b/i.test(statement.sourceSQL)).length;
+    try {
+      for (let ordinal = 13; ordinal <= 15; ordinal++) {
+        await checkpoint(plain, ordinal);
+        expect(plain.view().blocks.some(row => row.note || row.noteLinks)).toBe(false);
+      }
+      expect(walks()).toBe(0);
+      noted.view();
+      const initialWalks = walks();
+      for (let ordinal = 1; ordinal <= 3; ordinal++) {
+        await checkpoint(noted, ordinal);
+        expect(noted.view().blocks.some(row => row.noteLinks?.length)).toBe(true);
+      }
+      expect(walks()).toBe(initialWalks);
+      const plans = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const probes = new Set(reads.mock.contexts.filter(statement => statement instanceof StatementSync).map(statement => statement.sourceSQL)
+          .filter(sql => sql.startsWith('SELECT source_version_id, parent_revision_id,') || sql.startsWith('SELECT 1 FROM manuscript_note_sources WHERE') ||
+            sql.startsWith('SELECT 1 FROM manuscript_block_versions WHERE revision_id = ? AND kind')));
+        expect(probes.size).toBeGreaterThan(1);
+        for (const sql of probes) {
+          const plan = plans.prepare('EXPLAIN QUERY PLAN ' + sql).all(...Array<null>(sql.split('?').length - 1).fill(null));
+          expect(plan.map(row => row.detail).some(detail => typeof detail === 'string' && /^SCAN\b/.test(detail))).toBe(false);
+        }
+      } finally { plans.close(); }
+    } finally { reads.mockRestore(); }
+  });
   it('keeps both note links on the absorbing paragraph through a merge and undo', async () => {
     const { book, view } = await importNotes();
     const before = view();
@@ -64,6 +109,34 @@ describe('the note block (#1204)', () => {
     expect(merged.blocks.find((block) => block.blockId === note.blockId)!.note).toMatchObject({ referenceBlockId: into!.blockId, referencePosition: 2 });
     store.undoManuscript(book.manuscriptId, book.branchId, merged.workingDigest);
     expect(view().blocks.find((block) => block.blockId === absorbed!.blockId)!.noteLinks).toEqual([{ blockId: note.blockId, part: 'footnote', ordinal: 1 }]);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    const checkOwner = (owner: string) => {
+      const blocks = view().blocks;
+      expect(blocks.find(block => block.blockId === note.blockId)?.note?.referenceBlockId).toBe(owner);
+      expect(blocks.filter(block => block.noteLinks?.some(link => link.blockId === note.blockId)).map(block => block.blockId)).toEqual([owner]);
+    };
+    const step = store.restoreBookVersion({ ...book, bookId: before.bookId, revisionId: before.revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+    checkOwner(absorbed!.blockId);
+    expect(store.undoManuscript(book.manuscriptId, book.branchId, view().workingDigest, step.stepId).canUndo).toBe(false);
+    checkOwner(into!.blockId);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(absorbed!.blockId);
+    const scope = { bookId: before.bookId, manuscriptId: before.manuscriptId, branchId: before.branchId };
+    const mergedVersion = store.listBookVersions({ ...scope, offset: 0 }).rows.find(row => row.label.startsWith('恢复前自动保存'))!.revisionId;
+    const restore = (revisionId: string) => store.restoreBookVersion({ ...scope, revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+    restore(mergedVersion);
+    const movedPath = join(roots.inputRoot, 'moved-footnote.docx');
+    await composeManuscriptDocx(movedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '注释组稿',
+      retention: { ...NOTES, footnote: { block: 4, noteSourceBlock: 9 } } });
+    await reimportVersion(store, book.bookId, movedPath, false);
+    const newOwner = view().blocks[3]!.blockId;
+    checkOwner(newOwner);
+    restore(mergedVersion);
+    checkOwner(into!.blockId);
+    store.undoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(newOwner);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(into!.blockId);
   });
 
   it('imports a footnote and an endnote as note blocks after the body, each naming the paragraph that refers to it', async () => {

@@ -34,3 +34,12 @@ export function resolveEditorialMarkCategory(input: {
   for (const [pattern, key] of rules) if (pattern.test(label)) return EDITORIAL_MARK_CATEGORIES[key];
   return { key: 'other', label: label || '常规批注', badgeText: `【${label || '批注'}】` };
 }
+
+/**
+ * The model the 批注栏's filter knows a mark by (Issue #1604): an AI7 mark's model name as its card shows it, `AI7` when the card
+ * records none; `null` for the editor's and an imported author's marks, which no model filter passes. `findPendingMark` judges
+ * by the same function, so a step under a model filter lands where the pane's own filter would.
+ */
+export function editorialMarkFilterModel(source: Pick<EditorialMarkSourceProjection, 'kind' | 'modelLabel'>): string | null {
+  return source.kind === 'ai7' ? source.modelLabel ?? 'AI7' : null;
+}

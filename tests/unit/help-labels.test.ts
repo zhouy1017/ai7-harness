@@ -3,6 +3,9 @@ import {
   HELP_ABOUT_HEADING, HELP_ENTRY, HELP_LICENSE_TEXT_ABSENT, HELP_TABS, helpAboutLine, helpLicenseCount,
 } from '../../src/renderer/help-labels.js';
 import { HELP_PRIVACY_SECTIONS, helpUsageSections } from '../../src/renderer/help-text.js';
+import { COMMANDS } from '../../src/renderer/commands.js';
+import { visibleKnowledgeBaseTabs } from '../../src/renderer/knowledge-base-labels.js';
+import { EXPORT_MENU_LABEL } from '../../src/renderer/manuscript-export-labels.js';
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from '../../src/renderer/shell-labels.js';
 
 // #939 slice 11f: 帮助's words. The entry sits beside 设置, the tabs are fixed, the 关于 line carries the three version
@@ -37,6 +40,8 @@ describe('the 帮助 entry and tabs', () => {
   });
 });
 
+const sectionLabelOf = (key: string): string => SHELL_BOOK_GROUPS.flatMap((group) => group.sections).find((section) => section.key === key)!.label;
+
 describe('使用帮助', () => {
   const HELP_USAGE_SECTIONS = helpUsageSections(true);
   it('mirrors the destinations and Book sections with their exact labels', () => {
@@ -54,12 +59,12 @@ describe('使用帮助', () => {
     expect(text).toContain('新建图书');
     expect(text).toContain('导入稿件');
     expect(HELP_USAGE_SECTIONS.map((section) => section.heading)).toEqual([
-      '书库与稿件导入', '任务与运行', '审阅与评估', '交付物', '知识库与工序', '书系', '设置',
+      '第一次审稿', '书库与稿件导入', '任务与运行', '审阅与评估', '交付物', '知识库与工序', '书系', '设置',
     ]);
   });
 
   it('stays task-oriented: no marketing and at most 120 characters per paragraph', () => {
-    expect(HELP_USAGE_SECTIONS).toHaveLength(7);
+    expect(HELP_USAGE_SECTIONS).toHaveLength(8);
     for (const section of HELP_USAGE_SECTIONS) {
       expect(section.heading.length).toBeGreaterThan(0);
       expect(section.paragraphs.length).toBeGreaterThan(0);
@@ -67,6 +72,31 @@ describe('使用帮助', () => {
         expect([...paragraph].length).toBeLessThanOrEqual(120);
         for (const banned of ['最好', '免费', '强大', '立即体验', '😀']) expect(paragraph).not.toContain(banned);
       }
+    }
+  });
+
+  it('opens with 第一次审稿: five steps, each one sentence and a command the registry knows', () => {
+    const first = HELP_USAGE_SECTIONS[0]!;
+    expect(first.steps!.map((step) => step.title)).toEqual(['连接模型服务', '导入稿件', '新建审阅', '逐条处理建议', '导出']);
+    expect(first.steps!.map((step) => [step.command, step.needsBook])).toEqual([
+      ['nav.settings', false], ['nav.library', false], ['review.new', true], ['nav.book.findings', true], ['nav.book.deliverables', true],
+    ]);
+    for (const step of first.steps!) {
+      expect(COMMANDS.some((command) => command.id === step.command), step.command).toBe(true);
+      expect([...step.sentence].length).toBeLessThanOrEqual(120);
+      expect(step.sentence.endsWith('。')).toBe(true);
+    }
+    expect(first.steps!.map((step) => step.sentence).join('')).toContain(sectionLabelOf('findings'));
+    // The last step names the control 交付物 shows (「导出 ▾」), not the 导出… of a version's card.
+    expect(first.steps!.find((step) => step.key === 'export')!.sentence).toContain(`「${EXPORT_MENU_LABEL}」`);
+  });
+
+  it('says how many knowledge-base kinds it lists, in both modes', () => {
+    for (const developerMode of [false, true]) {
+      const paragraph = helpUsageSections(developerMode).find((section) => section.heading === '知识库与工序')!.paragraphs[0]!;
+      const listed = paragraph.split('：')[1]!.split('；')[0]!.split('、');
+      expect(listed).toEqual(visibleKnowledgeBaseTabs(developerMode).map((entry) => entry.label));
+      expect('零一二三四五六七八九十'.indexOf(/分为(.)类/u.exec(paragraph)![1]!), paragraph).toBe(listed.length);
     }
   });
 });

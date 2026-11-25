@@ -1,6 +1,6 @@
 import type { EditorialMarkCategoryKey } from '../editorial-mark-category.js';
 import type { FactualCorrectionLineageProjection } from './factual-verification.js';
-import type { ManuscriptWindowProjection } from './manuscript-window.js';
+import type { ManuscriptMarksPage, ManuscriptWindowProjection } from './manuscript-window.js';
 import type { EditorialMarkConflictProjection, ProposalConflictKind, ProposalConflictState } from './proposal-conflicts.js';
 
 /** Editorial Marks (修改建议, 批注, 备注, highlights), their Proposal Decisions, AI7 Apply, its receipts and reversal, and the proposal workspace (Issue #1536). */
@@ -253,7 +253,35 @@ export interface EditorialMarkCommandProjection {
   markId: string;
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
+  /** Present only when the window holds more than `MAX_WINDOW_MARKS` marks: this answer carries their first page. */
+  marksPage?: ManuscriptMarksPage;
   card: EditorialMarkCardProjection | null;
+}
+
+/**
+ * 上一条 / 下一条待处理 under a filter (Issue #1604, review #1541 一·3): the Book's next (or previous) pending mark after `from`
+ * — an open 修改建议, 批注 or 备注 standing in the text, the set and the reading order (paragraph, grapheme, mark identity) the
+ * position rail lists — whose category is one of `categories` and whose model is one of `models`; an empty list does not filter.
+ * Both are judged by the functions the 批注栏's filter uses; a mark that is not AI7's never passes a model filter.
+ * `from` is a place in reading order: `markId` is the selected card (its `fromGrapheme` as `grapheme`), `null` for the caret, and
+ * `grapheme: -1` is the start of `blockId`. With the caret on a mark's first grapheme (`markId: null`), 下一条 includes that mark
+ * and 上一条 skips it. A `from.blockId` the working state no longer holds is refused with `MARK_BINDING_CHANGED`. `null` in the
+ * answer means none further in that direction: nothing wraps.
+ */
+export interface FindPendingMarkInput {
+  manuscriptId: string;
+  branchId: string;
+  from: { blockId: string; grapheme: number; markId: string | null };
+  direction: 'next' | 'previous';
+  categories: ReadonlyArray<EditorialMarkCategoryKey>;
+  models: ReadonlyArray<string>;
+}
+
+/** Where the mark `findPendingMark` found stands; `null` in its answer when none passes in that direction. */
+export interface PendingMarkPlace {
+  markId: string;
+  blockId: string;
+  fromGrapheme: number;
 }
 
 /** One exact state of a manuscript: the Revision it rests on, the journal position, and the working digest. */
@@ -271,7 +299,7 @@ export interface ManuscriptStateProjection {
 export interface ManuscriptApplyProjection {
   effectId: string;
   kind: 'apply' | 'reverse-apply';
-  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply';
+  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply' | 'undo-step' | 'redo-step';
   approvalId: string;
   dispatchId: string;
   receiptId: string;

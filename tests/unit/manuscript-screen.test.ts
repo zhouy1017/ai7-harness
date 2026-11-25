@@ -7,11 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
 import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
-import { readReturnPlace } from '../../src/renderer/reading-return.js';
+import { readReturnPlace, preserveReturnPlace } from '../../src/renderer/reading-return.js';
+import { createStatusSurface, showTransientNotice } from '../../src/renderer/notifications.js';
+import { readFileSync } from 'node:fs';
 import { mountTaskDrawer, type MountTaskDrawerOptions } from '../../src/renderer/task-drawer.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
+import { ICON_IDS } from '../../src/renderer/components/icon-sprite.js';
+import { SHELL_AGENT_WORKSPACE_ROW, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_MORE_BOOKS_ICON, SHELL_SETTINGS } from '../../src/renderer/shell-labels.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
+
+const { watchReturnArrival } = await import(new URL('../../e2e/return-arrival.mjs', import.meta.url).href) as {
+  watchReturnArrival(chip: HTMLElement): { arrived(): boolean; disconnect(): void };
+};
 
 // The Manuscript screen's own lifecycle (Issue #1127, revision 3), on its actual mount with each child owner and the service
 // as a boundary double: a mount that throws after the shell attached it can still be read, settled and destroyed, once, and
@@ -24,9 +32,12 @@ type EditorState = Parameters<EditorOptions['onStateChange']>[0];
 const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   realParagraphAnalysis: false,
+  realReadingReturn: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
+  /** Where the editor reads once the caret has scrolled out of sight (Issue #1703); the caret otherwise. */
+  reading: null as { blockId: string; grapheme: number } | null,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn>; flush: ReturnType<typeof vi.fn> }>,
   marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
@@ -91,12 +102,14 @@ vi.mock('../../src/renderer/writing-task.js', () => ({
   },
 }));
 
-vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
-  readReturnPlace: vi.fn(async () => null),
-  preserveReturnPlace: async (place: unknown) => place,
-  consumeReturnPlace: async () => null,
-}));
+vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/renderer/reading-return.js')>();
+  return { ...original,
+    readReturnPlace: vi.fn((...args: Parameters<typeof original.readReturnPlace>) => children.realReadingReturn ? original.readReturnPlace(...args) : Promise.resolve(null)),
+    preserveReturnPlace: (place: Parameters<typeof original.preserveReturnPlace>[0]) => children.realReadingReturn ? original.preserveReturnPlace(place) : Promise.resolve(place),
+    consumeReturnPlace: (place: Parameters<typeof original.consumeReturnPlace>[0]) => children.realReadingReturn ? original.consumeReturnPlace(place) : Promise.resolve(null),
+  };
+});
 vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editor.js')>(),
   mountBoundedEditor: (options: EditorOptions) => {
@@ -107,13 +120,14 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
     const surface = {
       focus: vi.fn(), flush: vi.fn(async () => undefined), interrupt: vi.fn(), setOperationLocked: vi.fn(), setMarks: vi.fn(),
       captureContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
+      readingPoint: () => children.reading ?? point,
       captureNavigationContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       currentWindow: () => currentWindow,
       loadWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
       highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
-      inputModeValue: 'reading-revision' as 'reading-revision' | 'direct-edit',
+      inputModeValue: options.initialInputMode ?? 'reading-revision',
       inputMode() { return this.inputModeValue; },
       setInputMode: vi.fn(function (this: { inputModeValue: string }, mode: string) { this.inputModeValue = mode; }),
       selectedRange: vi.fn(() => ({ kind: 'none' })),
@@ -204,9 +218,11 @@ beforeEach(() => {
   }));
   children.failAt = null;
   children.realParagraphAnalysis = false;
+  children.realReadingReturn = false;
   children.destroyed.length = 0;
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
+  children.reading = null;
   children.protections.length = 0;
   children.rails.length = 0;
   children.marks.length = 0;
@@ -306,6 +322,85 @@ describe('the Manuscript screen lifecycle', () => {
     expect(editor.selectRange).not.toHaveBeenCalled();
     expect(editor.focus).not.toHaveBeenCalled();
     app.showing?.destroy();
+  });
+
+  it.each([true, false])('keeps arrival tied to this return when another notice replaces it (arrival emitted: %s)', async emitArrival => {
+    children.realReadingReturn = true;
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const records = new Map<string, unknown>();
+    const db = { close() {}, onversionchange: () => {}, transaction() {
+      const transaction = { oncomplete: () => {}, onabort: () => {}, onerror: () => {}, abort() { transaction.onabort(); }, objectStore: () => ({
+        get(key: string) { const request = { result: undefined as unknown, onsuccess: () => {} };
+          queueMicrotask(() => { request.result = records.get(key); request.onsuccess(); queueMicrotask(() => transaction.oncomplete()); }); return request; },
+        put(value: unknown, key: string) { records.set(key, value); }, delete(key: string) { records.delete(key); },
+      }) }; return transaction;
+    } };
+    vi.stubGlobal('indexedDB', { open() { const request = { result: db, onsuccess: () => {} }; queueMicrotask(() => request.onsuccess()); return request; } });
+    const initial = windowOf('book-one');
+    const place = { manuscriptId: initial.manuscriptId, branchId: initial.branchId, blockId: 'blk_3', place: '第一章' };
+    await preserveReturnPlace(place);
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? async () => initial : Reflect.get(target, key) }));
+    const status = createStatusSurface(app.persistenceStatus);
+    let emitted = false;
+    app.open(initial, { setStatus: (message, tone) => {
+      if (message === '已回到第一章。') {
+        if (emitArrival) { status(message, tone); emitted = true; }
+        showTransientNotice('合成任务已完成');
+      } else status(message, tone);
+    } });
+    let stopObservation = () => {};
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      const view = document.createElement('section'); view.dataset['screen'] = 'editor';
+      const prose = document.createElement('div'); prose.className = 'ProseMirror';
+      const block = document.createElement('p'); block.dataset['blockId'] = place.blockId; prose.append(block); view.append(prose); app.screen.append(view);
+      const back = app.contextView.querySelector<HTMLButtonElement>('[data-return-chip]')!;
+      expect(document.querySelector('.return-chip-host [data-return-chip]')).toBe(back);
+      // Request-boundary double for native MutationObserver delivery: removed addedNodes retain their text until the callback.
+      let changes: Array<{ target: MiniElement; addedNodes: MiniElement[] }> = [];
+      let deliver: (records: typeof changes) => void = () => {};
+      let watching = false;
+      vi.stubGlobal('MutationObserver', class {
+        constructor(callback: typeof deliver) { deliver = callback; }
+        observe() { watching = true; }
+        takeRecords() { const records = changes; changes = []; return records; }
+        disconnect() { watching = false; changes = []; }
+      });
+      const replace = MiniElement.prototype.replaceChildren;
+      const writes = vi.spyOn(MiniElement.prototype, 'replaceChildren').mockImplementation(function (this: MiniElement, ...nodes) {
+        replace.apply(this, nodes);
+        if (watching && this.hasAttribute('data-toast')) {
+          changes.push({ target: this, addedNodes: [...this.children] });
+          queueMicrotask(() => { const records = changes; changes = []; if (watching && records.length) deliver(records); });
+        }
+      });
+      const arrival = watchReturnArrival(back);
+      stopObservation = () => { arrival.disconnect(); writes.mockRestore(); };
+      vi.stubGlobal('__j16ReturnArrival', arrival);
+      // An identical old toast before the click must not satisfy this action's negative case.
+      status('已回到第一章。', 'success');
+      back.click();
+      await vi.advanceTimersByTimeAsync(80);
+      expect(await readReturnPlace(place.manuscriptId, place.branchId)).toBeNull();
+      expect(app.contextView.querySelector('[data-return-chip]')).toBeNull();
+      expect(document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id="blk_3"]')).not.toBeNull();
+      expect(emitted).toBe(emitArrival);
+      expect(arrival.arrived()).toBe(emitArrival);
+      expect(document.querySelector('[data-toast]')?.textContent).toBe('合成任务已完成');
+      const source = readFileSync(new URL('../../e2e/run-j16.mjs', import.meta.url), 'utf8');
+      const template = /await waitFor\(renderer, `([^`]+)`, 'chip-returned'/u.exec(source)?.[1];
+      expect(template).toBeDefined();
+      const expression = Function('CHIP', 'blockInView', 'chip', 'return `'+template+'`;')(
+        'document.querySelector(".return-chip-host [data-return-chip]")',
+        (id: string) => `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id="${id}"]') !== null`, { blockId: place.blockId });
+      const completed = () => Function('return ('+expression+')')();
+      expect(completed()).toBe(emitArrival);
+      if (emitArrival) {
+        block.remove(); expect(completed()).toBe(false); prose.append(block);
+        const host = app.contextView.querySelector<HTMLElement>('.return-chip-host')!;
+        host.append(back); expect(completed()).toBe(false); back.remove();
+      }
+    } finally { stopObservation(); app.showing?.destroy(); db.onversionchange(); }
   });
   it('keeps the full long outline heading available to assistive tools and its title', async () => {
     const style = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'style')!;
@@ -409,6 +504,43 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
+  it('stays in the window when the column measure put the reading block back at its edge', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const load = vi.fn(() => new Promise<never>(() => undefined));
+    const rendererApi = new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? load : Reflect.get(target, key) });
+    const app = shell(rendererApi);
+    app.open({ ...windowOf('book-one'), previousCursor: 'previous-window' });
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await vi.advanceTimersByTimeAsync(40);
+    // A right-hand column changed and the correction rests at the top of the loaded text: not a request for the previous page.
+    columnScroll.owned = true;
+    Object.assign(pane, { scrollTop: 0 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).not.toHaveBeenCalled();
+    columnScroll.owned = false;
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'cursor', cursor: 'previous-window' } }));
+    app.showing?.destroy();
+  });
+
+  it('remembers the paragraph being read when the manuscript is left, not a caret scrolled out of sight (#1703)', async () => {
+    const record = vi.fn(async () => undefined);
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'recordManuscriptEntryPosition' ? record : Reflect.get(target, key) }));
+    app.open(windowOf('book-one'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record).toHaveBeenLastCalledWith({ manuscriptId: 'book-one-manuscript', branchId: 'branch-main', blockId: 'blk_3', grapheme: 0 });
+    children.reading = { blockId: 'blk_read', grapheme: 0 };
+    await expect(app.showing!.settle()).resolves.toBe(true);
+    expect(record).toHaveBeenLastCalledWith({ manuscriptId: 'book-one-manuscript', branchId: 'branch-main', blockId: 'blk_read', grapheme: 0 });
+    app.showing?.destroy();
+  });
+
   it('keeps global destinations in the sidebar and editing actions in the toolbar', () => {
     const app = shell();
     app.open(windowOf('book-one'));
@@ -417,7 +549,105 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
+      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新', '新建 / 导入衍生稿件…', '管理全部衍生稿件（0）']);
+    app.showing?.destroy();
+  });
+
+  it('saves the words just typed before Ctrl+Z reads the history, so they are the step it takes back; a step set aside answers in the error tone (#1654)', async () => {
+    const calls: string[] = [];
+    let flushed = false;
+    let readable: () => void = () => undefined;
+    const read = new Promise<void>((resolve) => { readable = resolve; });
+    const typing = { stepId: 'step-1', kind: 'typing', label: '编辑文字', changeCount: 1, paragraph: 3, batch: null };
+    const answers = [{ blocked: false, completionLabel: '已撤销：编辑文字（第 3 段）' }, { blocked: true, completionLabel: '第 3 段在「编辑文字」之后又改过，这一步不能撤销。再按 Ctrl+Z 撤销更早的一步。' }];
+    const history = new Proxy({
+      platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => { calls.push('inspect'); await read; return { branchId: 'branch-main', undo: flushed ? typing : null, redo: null }; },
+      undoManuscript: async () => {
+        calls.push('undo');
+        return { action: 'undo', branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2', journalSequence: 6, workingDigest: 'c'.repeat(64), commandGroupId: null,
+          canUndo: true, canRedo: true, stepLabel: '编辑文字', anchorBlockId: null, paragraph: 3, ...answers.shift()! };
+      },
+      getManuscriptWindowAt: async () => ({ ...windowOf('book-one'), journalSequence: 6, workingDigest: 'c'.repeat(64) }),
+      getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi;
+    const tones: Array<[string, string | undefined]> = [];
+    const app = shell(history);
+    app.open(windowOf('book-one'), { setStatus: (message, tone) => { tones.push([message, tone]); } });
+    const editor = children.editors.at(-1) as EditorOptions;
+    const surface = children.editorSurfaces.at(-1)!;
+    // Typed within the auto-save delay: the edit is still local when Ctrl+Z comes.
+    editor.onStateChange(state({ dirty: true }));
+    surface.flush.mockImplementation(async () => { calls.push('flush'); flushed = true; editor.onStateChange(state({ journalSequence: 5 })); });
+    const undoButton = app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!;
+    const settle = async (): Promise<void> => { for (let index = 0; index < 50; index += 1) await Promise.resolve(); };
+    undoButton.click();
+    await settle();
+    // From the press on the controls stand busy, while the edit is saved and the step is read too: no second press starts.
+    expect(calls).toEqual(['flush', 'inspect']);
+    expect(undoButton.disabled).toBe(true);
+    readable();
+    await settle();
+    expect(calls.slice(0, 3)).toEqual(['flush', 'inspect', 'undo']);
+    expect(tones.at(-1)).toEqual(['已撤销：编辑文字（第 3 段）', 'success']);
+    undoButton.click();
+    await settle();
+    expect(tones.at(-1)).toEqual([expect.stringContaining('这一步不能撤销'), 'error']);
+    app.showing?.destroy();
+  });
+
+  it.each(['undo', 'redo'] as const)('reopens a valid window without repeating a committed restore %s if the first paragraph disappeared', async action => {
+    const initial = windowOf('book-one');
+    const next = { ...initial, revisionId: 'next', workingDigest: 'c'.repeat(64), blocks: initial.blocks.map(block => ({ ...block, blockId: 'replacement' })) };
+    const step = { stepId: 'restore-step', kind: 'restore', label: '恢复稿件版本', changeCount: 1 };
+    const history = vi.fn(async () => ({ revisionId: next.revisionId, journalSequence: next.journalSequence, workingDigest: next.workingDigest,
+      completionLabel: '稿件已刷新。', anchorBlockId: null, blocked: false }));
+    const load = vi.fn(async ({ target }: { target: { kind: string } }) => {
+      if (target.kind === 'window-start') throw { code: 'WINDOW_NOT_FOUND', message: '稿件位置不存在。' };
+      return next;
+    });
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: step, redo: step }), undoManuscript: history, redoManuscript: history,
+      getManuscriptWindowAt: load, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status });
+    const control = app.screen.querySelector<HTMLButtonElement>(action === 'undo' ? '[aria-label="撤销"]' : '[aria-label="重做"]')!;
+    control.click();
+    for (let tick = 0; tick < 60; tick += 1) await Promise.resolve();
+    expect(history).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls.map(([input]) => input.target.kind)).toEqual(['window-start', 'start']);
+    expect(status).toHaveBeenLastCalledWith('稿件已刷新。', 'success');
+    expect(control.disabled).toBe(false);
+    app.showing?.destroy();
+  });
+
+  it('reopens the later stable state only for the same editable book and branch, without replaying an acknowledged restore', async () => {
+    const initial = windowOf('book-one');
+    const committed = { ...initial, revisionId: 'restored', journalSequence: 5, completionLabel: '已撤销', anchorBlockId: null };
+    const later = { ...initial, revisionId: 'later', journalSequence: 6, workingDigest: 'c'.repeat(64) };
+    let reply = later;
+    let interrupted = false;
+    const send = vi.fn(async () => committed);
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: { kind: 'restore', changeCount: 1 } }), undoManuscript: send,
+      getManuscriptWindowAt: async () => reply, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status, interrupted: () => interrupted });
+    const retry = [...app.screen.querySelectorAll('button')].find(item => item.textContent === '重试权威刷新')!;
+    const settle = async () => { for (let tick = 0; tick < 60; tick += 1) await Promise.resolve(); };
+    app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!.click();
+    await settle();
+    expect(retry.hidden).toBe(false);
+    for (const invalid of [{ ...later, bookId: 'other' }, { ...later, branchId: 'other' }]) {
+      reply = invalid; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    }
+    reply = later; interrupted = true; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    interrupted = false; retry.click(); await settle();
+    expect(retry.hidden).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenLastCalledWith(expect.stringContaining('最新稿件'), 'success');
     app.showing?.destroy();
   });
 
@@ -440,6 +670,29 @@ describe('the Manuscript screen lifecycle', () => {
     await Promise.resolve();
     expect(getAutoApplyEditorRevisions()).toBe(false);
     expect(trigger.textContent).toBe('修订 · 待我确认 ▾');
+    app.showing?.destroy();
+    setAutoApplyEditorRevisions(true);
+  });
+
+  it('keeps the default with empty storage and remembers direct editing across books until changed back', async () => {
+    const saved = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => saved.set(key, value) });
+    setAutoApplyEditorRevisions(true);
+    const app = shell();
+    app.open(windowOf('book-one'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('reading-revision');
+    expect(saved.has('ai7.editor.directEditMode')).toBe(false);
+    app.screen.querySelector<HTMLElement>('[data-edit-method="direct"]')!.click();
+    expect(saved.get('ai7.editor.directEditMode')).toBe('true');
+    app.open(windowOf('book-two'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('direct-edit');
+    expect(app.screen.querySelector('[data-editor-input-mode-toggle]')!.textContent).toBe('直接改稿 · 不留痕 ▾');
+    app.screen.querySelector<HTMLElement>('[data-edit-method="confirm"]')!.click();
+    await Promise.resolve();
+    expect(saved.get('ai7.editor.directEditMode')).toBe('false');
+    app.open(windowOf('book-one'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('reading-revision');
+    expect(app.screen.querySelector('[data-editor-input-mode-toggle]')!.textContent).toBe('修订 · 待我确认 ▾');
     app.showing?.destroy();
     setAutoApplyEditorRevisions(true);
   });
@@ -687,8 +940,10 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
 
 vi.mock('../../src/renderer/right-column.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/right-column.js')>(),
-  mountColumnMeasure: () => ({ destroy: vi.fn() }),
+  mountColumnMeasure: () => ({ destroy: vi.fn(), ownsScroll: () => columnScroll.owned }),
 }));
+/** Whether the column measure says the pane's offset is the one it just put the reading block back at. */
+const columnScroll = vi.hoisted(() => ({ owned: false }));
 
 /** The shell around the screen with the real drawer, wired as `index.ts` wires them, and in `replaceScreen`'s order. */
 function columnShell() {
@@ -781,6 +1036,23 @@ describe('the one right-hand column (#1542)', () => {
     expect(setItem).not.toHaveBeenCalled();
     app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
     expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
+    app.showing!.destroy();
+  });
+
+  it('gives each right-edge entry its own symbol, none borrowed from a sidebar destination (#1554)', () => {
+    const app = columnShell();
+    app.open(windowOf('book-one'));
+    const ids = [...app.screen.querySelectorAll<HTMLElement>('[data-edge-entry]')]
+      .map((entry) => entry.querySelector<HTMLElement>('.icon')?.dataset['icon'] ?? '');
+    expect(ids).toEqual(['i-nav', 'i-paragraph-analysis', 'i-task', 'i-comment']);
+    for (const id of ids) expect(ICON_IDS).toContain(id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const sidebar = [
+      ...SHELL_DESTINATIONS.map((entry) => entry.icon),
+      ...SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.icon)),
+      SHELL_AGENT_WORKSPACE_ROW.icon, SHELL_SETTINGS.icon, SHELL_MORE_BOOKS_ICON,
+    ];
+    for (const id of ids) expect(sidebar).not.toContain(id);
     app.showing!.destroy();
   });
 

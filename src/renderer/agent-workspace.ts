@@ -106,7 +106,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   root.dataset['agentWorkspaceState'] = 'loading';
   const header = el('header', 'agent-workspace-header');
   const back = actionButton(words.back, 'back', 'quiet', () => options.back());
-  header.append(el('h2', undefined, words.heading), back);
+  header.append(el('h2', undefined, `${words.heading} · 多轮协作改稿`), back);
   const safety = el('p', 'agent-workspace-safety');
   safety.dataset['agentWorkspaceSafety'] = '';
   const body = el('div', 'agent-workspace-body');
@@ -144,7 +144,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   instruction.maxLength = MAX_DIALOGUE_QUESTION_CHARACTERS;
   instruction.dataset['agentWorkspaceField'] = 'instruction';
   instruction.value = remembered?.instruction ?? '';
-  const propose = actionButton(words.propose, 'propose', 'primary', () => void runPropose());
+  const propose = actionButton('让 AI 提出修改建议', 'propose', 'primary', () => void runPropose());
   form.append(label, instruction, propose);
 
   const proposalHost = el('section', 'agent-workspace-proposal');
@@ -247,7 +247,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       const done = el('p', 'success-note', promoted.label);
       done.dataset['agentWorkspacePromoted'] = String(promoted.markIds.length);
       const finished = promoted;
-      proposalHost.append(el('h3', undefined, words.proposal), done, actionButton(words.openMarks, 'open-marks', 'secondary', () => options.openMarks(finished)));
+      proposalHost.append(el('h3', undefined, words.proposal), done, actionButton('查看与处理这段话的修改建议', 'open-marks', 'secondary', () => options.openMarks(finished)));
       return;
     }
     if (proposal === null) {
@@ -323,7 +323,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       return;
     }
     if (!body.contains(pick)) {
-      body.replaceChildren(el('p', 'lede', words.lede), pick, form, proposalHost);
+      body.replaceChildren(el('p', 'lede', '在这里围绕选中段落反复提出要求，修改建议会放到稿件上，由你逐条处理。想直接润色或改写，可回到稿件，右键选择「让 AI 修改」。'), pick, form, proposalHost);
       void loadPage(null, true);
     }
     paintProposal(projection.proposal);

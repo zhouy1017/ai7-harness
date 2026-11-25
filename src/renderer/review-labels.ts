@@ -129,7 +129,7 @@ export const REVIEW_ACTION_LABELS = {
   'scope-cancel': '取消任务',
   // A Run whose 本社审阅偏好 version read a material later 停止今后使用 (Issue #912; LAUD-007, LAUD-008): the way on without it.
   'influence-redo': '重新执行（不含该影响）',
-  'influence-lineage': '查看学习来源链…',
+  'influence-lineage': '查看来源与用途…',
   'scope-cancel-confirm': '确认取消任务',
   'scope-cancel-keep': '不取消',
   /** 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2). */
@@ -229,12 +229,12 @@ export function reviewChangedScopeNotes(
 ): string[] {
   return coverage
     .filter((row) => chosen.has(row.categoryId) && row.state !== 'unavailable' && row.unavailableReason !== null)
-    .map((row) => `${row.label}：${row.unavailableReason}`);
+    .map((row) => `${row.label}：${serviceWords(row.unavailableReason)}`);
 }
 
 /** One entry of the 审阅记录: `第 N 次 · 类别 · 范围 · 状态`, newest first. */
 export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' | 'categoryLabels' | 'scopeLabel' | 'stateLabel'>): string {
-  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel.replaceAll('内容块', '段落')} · ${summary.stateLabel}`;
+  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel.replaceAll('内容块', '段落')} · ${serviceWords(summary.stateLabel)}`;
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
@@ -250,6 +250,12 @@ export function reviewRunsTruncatedLine(listed: number): string {
 export const REVIEW_SHEET_TITLE = '新建审阅';
 export const REVIEW_SHEET_NOTE = '选择审阅类别后即可开始，默认检查全书。';
 export const REVIEW_CATEGORY_LEGEND = '审阅类别 · 可多选';
+/** 本地文字检查 is a switch at the top of the form (0.7.4, I-2), not a category row. */
+export const REVIEW_LOCAL_SWITCH_NAME = '本地文字检查';
+export const REVIEW_LOCAL_SWITCH_SENTENCE = '单独在本机检查标点、规范字形与异形词。';
+export const REVIEW_LOCAL_ONLY_LINE = '本次只做本地文字检查；关闭后恢复已选的审阅类别。';
+export const REVIEW_NEEDS_MANUSCRIPT = '导入稿件后即可检查。';
+export const REVIEW_LEVEL_LEGEND = '核查力度';
 export const REVIEW_SCOPE_LEGEND = '审阅范围';
 export const REVIEW_CHAPTER_FROM = '从';
 export const REVIEW_CHAPTER_TO = '到';
@@ -326,7 +332,7 @@ export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: 
   if (selected.every((category) => category.modelFree)) return '只读基线分析的线索，不发送任何内容。';
   const free = selected.filter((category) => category.modelFree).map((category) => `「${category.label}」`);
   const sent = '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务';
-  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + (synthesis ? REVIEW_SYNTHESIS_PLAN_LINE : '');
+  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + (synthesis ? serviceWords(REVIEW_SYNTHESIS_PLAN_LINE) : '');
 }
 
 // ---- the plan ---------------------------------------------------------------------------------------
@@ -499,13 +505,17 @@ export function reviewIgnoreReasonCount(reason: string): string {
 
 // ---- the batch confirmation strip (V2-UX-REV-006, PDEC-012, EAPP-003) -----------------------------------
 
-export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入稿件：全部写入，或一条也不写。';
+export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入：全部写入，或一条也不写。';
 export const REVIEW_BATCH_NOTHING = '没有可以一起应用的修改建议：本类待处理、原文未变的修改建议已经都处理过了。';
 export const REVIEW_BATCH_REFUSED = '稿件没有改动。请另做一份预览：原文已变的修改建议不会再列入。';
 
-/** The write scope stated before 确认应用, exactly as the strip will send it. */
-export function reviewBatchScopeLine(count: number): string {
-  return `将把 ${count} 条修改建议写入稿件：`;
+/**
+ * The write scope stated before 确认应用, exactly as the strip will send it: one whole sentence. 批量采纳机械修正's strip (ADR 0106 §7)
+ * says in it how many of its suggestions rest on a table of each strength, by the strength's label.
+ */
+export function reviewBatchScopeLine(count: number, strengths: ReadonlyArray<{ readonly label: string; readonly count: number }> = []): string {
+  const among = strengths.length === 0 ? '' : `，其中 ${strengths.map((row) => `${row.label} ${row.count} 条`).join('、')}`;
+  return `将把 ${count} 条修改建议写入稿件${among}。`;
 }
 
 export function reviewBatchItemLine(quote: string, replacement: string): string {
@@ -681,7 +691,7 @@ export function reviewOverviewLine(workspace: Pick<ReviewWorkspaceProjection, 'r
   const stale = workspace.coverage.filter((row) => row.state === 'needs-review').length;
   const staleClause = stale === 0 ? '' : `；${stale} 类需复审`;
   if (latest === undefined) return `审阅 · 还没有审阅记录${staleClause}`;
-  return `审阅 · 最近一次是${latest.label}（${latest.stateLabel}），待处理 ${latest.findingCounts.pending} 条${staleClause}`;
+  return `审阅 · 最近一次是${latest.label}（${serviceWords(latest.stateLabel)}），待处理 ${latest.findingCounts.pending} 条${staleClause}`;
 }
 
 /** 查看任务 on a Mark Card while the mark's Review Run is looked up, and when there is none to open. */

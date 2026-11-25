@@ -1,4 +1,4 @@
-import { CONFIGURED_RUNTIME_MODEL_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../provider-configuration.generated.js';
+import { CONFIGURED_ALTERNATE_ROUTE_MODELS, CONFIGURED_RECOMMENDED_MODELS, CONFIGURED_RUNTIME_MODEL_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../provider-configuration.generated.js';
 
 /**
  * The six channels 设置 › 模型服务's one flow offers (ADR 0094 §1; Issue #1215), in the order it lists them. A channel is a
@@ -12,7 +12,21 @@ export type ModelServiceChannelId = (typeof MODEL_SERVICE_CHANNELS)[number];
 /** A production channel the editor saves a credential for and chooses a model on (Issues #811, #1044, #1225). */
 export type ModelServiceRouteId = ModelServiceChannelId;
 /** Account metadata only, never a response or credential. */
-export interface DiscoveredModel { modelId: string; modelLabel: string }
+export interface DiscoveredModel {
+  modelId: string;
+  modelLabel: string;
+  reasoningEvidence?: DiscoveredModelReasoningEvidence;
+}
+export const DISCOVERED_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const DISCOVERED_THINKING_MODES = ['adaptive', 'between_tools', 'enabled', 'disabled'] as const;
+export type DiscoveredEffortLevel = (typeof DISCOVERED_EFFORT_LEVELS)[number];
+export interface DiscoveredModelReasoningEvidence {
+  source: 'provider-model-list';
+  observedAt: string;
+  completeness: 'complete' | 'partial';
+  effort?: { supported?: boolean; levels?: readonly DiscoveredEffortLevel[]; unsupportedLevels?: readonly DiscoveredEffortLevel[] };
+  thinking?: { supported?: boolean; modes?: Partial<Record<(typeof DISCOVERED_THINKING_MODES)[number], boolean>> };
+}
 export type ModelDiscoveryFailureCode = 'MODEL_SERVICE_UNREACHABLE' | 'AI7_PROXY_UNREACHABLE' | 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' | 'MODEL_DISCOVERY_UNAVAILABLE' | 'MODEL_DISCOVERY_EMPTY' | 'MODEL_DISCOVERY_INVALID';
 export type ModelDiscoveryResult =
   | { status: 'success'; modelCount: number }
@@ -68,12 +82,36 @@ export const MODEL_SERVICE_CONNECTION_IDS: Readonly<Record<ModelServiceRouteId, 
   'opencode-zen': 'opencode-zen', 'anthropic-claude': 'anthropic-claude', 'google-gemini': 'google-gemini',
 };
 
-/** The reviewed runtime record a channel's model takes for a role: its configured route, endpoint and slot; `undefined` when none. */
+/** The further route of its channel a model is declared on only (Issue #1582), or `null` for a first-route or custom model. */
+function alternateRouteOf(route: ModelServiceRouteId, modelId: string): string | null {
+  return Object.entries(CONFIGURED_ALTERNATE_ROUTE_MODELS).find(([alternate, models]) => modelServiceChannelOf(alternate) === route && models.includes(modelId))?.[0] ?? null;
+}
+
+/**
+ * The reviewed runtime record a channel's model takes for a role: its own row, else the row of the further route it is declared
+ * on (Issue #1582), else — a first-route or custom model — the channel's default route; `undefined` when none serves it.
+ */
 export function modelServiceRuntimeBinding(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast'): ProductionBinding | undefined {
   if (!validModelServiceModelId(modelId)) return undefined;
   const rows = CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role];
-  const channel = rows.find((row) => row.model === modelId && modelServiceChannelOf(row.route) === route) ?? rows.find((row) => row.route === route);
+  const alternate = alternateRouteOf(route, modelId);
+  const channel = rows.find((row) => row.model === modelId && modelServiceChannelOf(row.route) === route) ??
+    rows.find((row) => row.route === (alternate ?? route));
   return channel === undefined ? undefined : { ...channel, model: modelId };
+}
+
+/** What AI7 says, before anything is sent, about a model its channel declares on a route this version cannot call (Issue #1582). */
+export const MODEL_ROUTE_NOT_SERVED_REASON = '这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。' as const;
+
+/** The refusal for a declared model no runtime row serves (Issue #1582); `null` for every model the channel can call. */
+export function modelServiceRouteRefusal(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' = 'main'): typeof MODEL_ROUTE_NOT_SERVED_REASON | null {
+  return validModelServiceModelId(modelId) && alternateRouteOf(route, modelId) !== null && modelServiceRuntimeBinding(route, modelId, role) === undefined
+    ? MODEL_ROUTE_NOT_SERVED_REASON : null;
+}
+
+/** A channel's recommended Pro and Flash models (Issue #1620), from its provider document; `undefined` when it names none. */
+export function modelServiceRecommendedModels(route: ModelServiceChannelId): { readonly pro: readonly string[]; readonly flash: readonly string[] } | undefined {
+  return CONFIGURED_RECOMMENDED_MODELS[route];
 }
 
 export function validModelServiceModelId(modelId: string): boolean {
@@ -102,7 +140,17 @@ export type ModelServiceModelDisposition =
   | 'family-not-admitted-by-selected-policy'
   | 'untested:text'
   | 'unsupported:text'
-  | 'channel-not-admitted-by-selected-policy';
+  | 'channel-not-admitted-by-selected-policy'
+  /** Declared on a further route of the channel that this version cannot call (Issue #1582). */
+  | 'route-not-served';
+
+export type ModelServiceEffortProvenance =
+  | { kind: 'discovered'; observedAt: string }
+  | { kind: 'documented'; source: string; readOn: string };
+
+export type ModelServiceSupportedEfforts =
+  | { status: 'supported'; levels: readonly string[]; completeness: 'complete' | 'partial'; provenance: ModelServiceEffortProvenance }
+  | { status: 'unsupported'; levels: readonly []; completeness: 'complete'; provenance: ModelServiceEffortProvenance };
 
 export interface ModelServiceChannelModelProjection {
   modelId: string;
@@ -110,6 +158,8 @@ export interface ModelServiceChannelModelProjection {
   /** The protocol family of the route that declares it. */
   family: string;
   capabilities: { text: ModelServiceCapabilityDisposition; stream: ModelServiceCapabilityDisposition; functionTools: ModelServiceCapabilityDisposition };
+  /** Omitted when there is no evidence for selectable levels or a conclusive denial. */
+  supportedEfforts?: ModelServiceSupportedEfforts;
   main: ModelServiceModelDisposition;
   fast: ModelServiceModelDisposition;
 }
@@ -121,4 +171,6 @@ export interface ModelServiceChannelProjection {
   route: ModelServiceRouteId | null;
   /** Account models (or offline defaults), including independently selected custom IDs. */
   models: readonly ModelServiceChannelModelProjection[];
+  /** The models its provider document recommends for the Pro and the Flash tier (Issue #1620); absent when it names none. */
+  recommended?: { readonly pro: readonly string[]; readonly flash: readonly string[] };
 }

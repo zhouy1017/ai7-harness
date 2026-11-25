@@ -15,11 +15,10 @@ import {
   PLATFORM_TOOL_NAMES,
   PLATFORM_TOOL_SCHEMAS,
   PLATFORM_TOOL_SCHEMA_DIGEST,
-  LOCAL_TOOL_NAMES,
-  LOCAL_TOOL_SCHEMA_DIGEST,
   ruleNamedToolSchemas,
   type PlatformToolSchema,
   toolSetEqualsPlatformSchemas,
+  type ToolSchemaVersion,
   type PlatformToolName,
   isLocalToolName,
 } from '../provider/platform-tools.js';
@@ -126,6 +125,8 @@ export interface CompositionOptions {
   /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
   readonly platformTools?: boolean;
   readonly localTools?: boolean | LocalToolsRule;
+  /** A frozen plan without this pin uses the original tool declarations. */
+  readonly toolSchemaVersion?: ToolSchemaVersion;
 }
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
@@ -136,8 +137,8 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
   const withTools = options.platformTools === true;
   const version = options.version ?? 1;
   const local = version === 1 ? options.localTools !== undefined && options.localTools !== false : options.localTools ?? false;
-  const schemas = ruleNamedToolSchemas(withTools, local);
-  const localSchemas = ruleNamedToolSchemas(false, local);
+  const schemas = ruleNamedToolSchemas(withTools, local, options.toolSchemaVersion);
+  const localSchemas = ruleNamedToolSchemas(false, local, options.toolSchemaVersion);
   const parallel = version !== 1 && typeof local === 'object' ? localToolParallelBound(local) : 1;
   const declaration = CHILD_DECLARATIONS[version];
   if (options.subagents !== undefined && (declaration === undefined || withTools || canonicalJson(options.subagents) !== canonicalJson(declaration))) {
@@ -167,8 +168,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),
     ...(withTools ? { platformTools: { names: PLATFORM_TOOL_NAMES, schemaDigest: PLATFORM_TOOL_SCHEMA_DIGEST } } : {}),
-    ...(localSchemas.length > 0 ? { localTools: version === 1 ? { names: LOCAL_TOOL_NAMES, schemaDigest: LOCAL_TOOL_SCHEMA_DIGEST }
-      : { names: localSchemas.map((schema) => schema.name), schemaDigest: sha256Hex(canonicalJson(localSchemas)),
+    ...(localSchemas.length > 0 ? { localTools: { names: localSchemas.map((schema) => schema.name), schemaDigest: sha256Hex(canonicalJson(localSchemas)),
         ...(typeof local === 'object' ? { callsPerUnit: local.targetedRetrieval.callsPerUnit, parallelCallsAllowed: local.parallelCallsAllowed === true } : {}) } } : {}),
   };
   const descriptor = { ...body, digest: sha256Hex(canonicalJson(body)) } as HarnessCompositionDescriptor;
@@ -362,7 +362,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
   const toolOwner = request.platformTools ?? request.localTools ?? null;
   const selectedLocal = request.localTools === undefined ? false : (request.compositionOptions?.version ?? 1) >= 2
     ? request.localToolsRule ?? request.compositionOptions?.localTools ?? true : true;
-  const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, selectedLocal);
+  const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, selectedLocal, request.compositionOptions?.toolSchemaVersion);
   const composition = describeComposition(request.route, request.model, request.promptContractDigest, {
     ...request.compositionOptions,
     sessionLog: request.sessionLogRoot !== undefined,

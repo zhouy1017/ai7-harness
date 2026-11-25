@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   AI_LOCK_TOOLTIP,
+  SCOPED_AI_EDIT_WORDS,
   aiLockBadge,
   openScopedAiEditComposer,
   selectionLocked,
@@ -100,6 +101,36 @@ it('offers only the unlocked ranges with nothing selected, and sends the chosen 
   miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!.dispatchEvent({ type: 'submit' });
   await settled;
   expect(started?.scope).toEqual({ mode: 'unlocked-only', range: { kind: 'section', headingBlockId: 'blk_h' } });
+});
+
+it.each(['selected', 'section'] as const)('polishes in one click using the current %s scope and remembered model (#1539 I-1b)', async mode => {
+  const startScopedAiEdit = vi.fn(async (_input: StartScopedAiEditInput) => projection('applied', ['polished']));
+  const { value, refreshed, flushed } = host({ startScopedAiEdit });
+  const model = { modelConnectionId: 'connection', modelId: 'chosen-model' };
+  value.preferences = async () => ({ ...preferenceDefaults(), 'model.dispatchChoices': { 'scoped-ai-edit': model } });
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: span, sectionHeadingBlockId: 'blk_h',
+    mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  for (const radio of miniDocument.body.querySelectorAll('[data-scoped-ai-edit-scope]')) radio.checked = radio.value === mode;
+  const polish = miniDocument.querySelector('[data-scoped-ai-edit="polish"]')!;
+  expect(polish.textContent).toBe('润色文字');
+  polish.click(); polish.click(); await settled;
+  expect(startScopedAiEdit).toHaveBeenCalledTimes(1);
+  expect(startScopedAiEdit).toHaveBeenCalledWith(expect.objectContaining({ instruction: SCOPED_AI_EDIT_WORDS.polishInstruction,
+    scope: mode === 'selected' ? { mode: 'selected-only', span: span.span } : { mode: 'unlocked-only', range: { kind: 'section', headingBlockId: 'blk_h' } },
+    executionConfig: model, rememberedChoice: true }));
+  expect(flushed).toHaveBeenCalledTimes(1); expect(refreshed).toHaveLength(1);
+});
+
+it('retries a failed polish with the same command and leaves custom instructions available (#1539 I-1b)', async () => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue(projection('unchanged'));
+  const { value, statuses } = host({ startScopedAiEdit });
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: span, mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  const polish = miniDocument.querySelector('[data-scoped-ai-edit="polish"]')!;
+  polish.click(); await vi.waitFor(() => expect(statuses.at(-1)?.[1]).toBe('error'));
+  expect(polish.disabled).toBe(false);
+  expect(miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.disabled).toBe(false);
+  polish.click(); await settled;
+  expect(startScopedAiEdit.mock.calls[1]![0]).toEqual(startScopedAiEdit.mock.calls[0]![0]);
 });
 
 it.each([new Error('response lost'), { code: 'SERVICE_RESPONSE_COMMITTED', message: '任务已经启动，偏好未能保存。' }])('retries an uncertain or committed response with the original pin and command after the visible window moves (%j)', async error => {

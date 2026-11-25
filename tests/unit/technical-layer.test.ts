@@ -32,6 +32,11 @@ describe('technical layer presentation (#1315)', () => {
     setTechnicalLayerVisible(false);
     expect(reviewBasisWords(basis)).toBe('依据：本社规范.txt · 文字审阅（不联网）');
     expect(reviewBasisWords({ ...basis, searchEngine: true })).toBe('依据：本社规范.txt · 文字审阅（联网）');
+    // 0.7.9 wording follow-up: AI7's fixed fact-check document reads 事实核查规则; a house document's title is never altered.
+    const factual = { ...basis, searchEngine: true, guidelineDocuments: [{ documentId: 'ai7-builtin/factual-review', title: '事实核查契约', issuer: 'AI7 内置默认', version: '1' }],
+      procedure: { title: '断言列举与引文定位', version: '1' } };
+    expect(reviewBasisWords(factual)).toBe('依据：事实核查规则 · 断言列举与引文定位（联网）');
+    expect(factual.guidelineDocuments[0]!.title).toBe('事实核查契约');
     const nativeSearchBasis = { ...basis, searchEngine: true, modelChannelSearchLabel: '编辑选择的通道' };
     expect(reviewBasisWords(nativeSearchBasis)).toBe('依据：本社规范.txt · 文字审阅（联网）');
     expect(basis.procedure.version).toBe('2');

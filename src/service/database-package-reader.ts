@@ -2,13 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { basename } from 'node:path';
 import { lstat, open, rm, type FileHandle } from 'node:fs/promises';
-import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
+import { ensureCanonicalDataDirectory, inspectCanonicalDataFile, isStorageFullError } from '../shared/data-root.js';
 import { EXPORT_STAGING_DIRECTORY } from './manuscript-export.js';
 import { Inflate, strFromU8 } from 'fflate';
 import type { DatabaseExportContentsProjection } from '../shared/protocol.js';
 import { DIGEST_PATTERN, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 import {
-  DATABASE_PACKAGE_EXCLUDED_ROOTS,
+  DATABASE_PACKAGE_EXCLUDED_ROOTS, isUpgradeDirectory,
   DATABASE_PACKAGE_MANIFEST_MEMBER,
   DATABASE_PACKAGE_SCHEMA,
   DATABASE_PACKAGE_STORE_MEMBER,
@@ -90,7 +90,7 @@ export function isPackageMemberPath(path: string): boolean {
   if (!MEMBER_PATH.test(path) || segments.some((segment) => segment.trim() !== segment || UNPORTABLE_SEGMENT.test(segment))) return false;
   const folded = path.toLowerCase();
   if (folded === DATABASE_PACKAGE_STORE_MEMBER) return path === DATABASE_PACKAGE_STORE_MEMBER;
-  return folded !== DATABASE_PACKAGE_MANIFEST_MEMBER && !DATABASE_PACKAGE_EXCLUDED_ROOTS.has(segments[0]!.toLowerCase());
+  return folded !== DATABASE_PACKAGE_MANIFEST_MEMBER && !isUpgradeDirectory(segments[0]!.toLowerCase()) && !DATABASE_PACKAGE_EXCLUDED_ROOTS.has(segments[0]!.toLowerCase());
 }
 
 function isContents(value: unknown): value is DatabaseExportContentsProjection {
@@ -99,7 +99,7 @@ function isContents(value: unknown): value is DatabaseExportContentsProjection {
       typeof value[key] === 'number' && Number.isSafeInteger(value[key]) && (value[key] as number) >= 0);
 }
 
-function isMember(value: unknown): value is DatabasePackageMember {
+export function isDatabasePackageMember(value: unknown): value is DatabasePackageMember {
   return isRecord(value) && Object.keys(value).length === 3 && typeof value.path === 'string' && isPackageMemberPath(value.path) &&
     typeof value.bytes === 'number' && Number.isSafeInteger(value.bytes) && value.bytes >= 0 &&
     typeof value.sha256 === 'string' && DIGEST_PATTERN.test(value.sha256);
@@ -120,7 +120,7 @@ function readManifest(bytes: Uint8Array): DatabasePackageManifest {
   requireShape(typeof value.createdAt === 'string' && !Number.isNaN(Date.parse(value.createdAt)) && new Date(value.createdAt).toISOString() === value.createdAt);
   requireShape(typeof value.origin === 'string' && ORIGINS.includes(value.origin));
   requireShape(isContents(value.contents));
-  requireShape(Array.isArray(value.members) && value.members.every(isMember));
+  requireShape(Array.isArray(value.members) && value.members.every(isDatabasePackageMember));
   const members = value.members as DatabasePackageMember[];
   // Two members one system would write as one file are not a package.
   requireShape(new Set(members.map((member) => member.path.toLowerCase())).size === members.length &&
@@ -260,6 +260,38 @@ export interface DatabasePackageReadOptions {
   readonly signal?: AbortSignal;
 }
 
+async function packageIndex(handle: FileHandle,size: number) {
+  const entries = await readDirectory(handle,size);
+  const header = entries.find(entry => entry.name === DATABASE_PACKAGE_MANIFEST_MEMBER);
+  requireShape(header !== undefined && header.size <= MAX_MANIFEST_BYTES);
+  const chunks: Uint8Array[] = [];
+  await streamEntry(handle,header,async chunk => { chunks.push(chunk); });
+  const manifest = readManifest(Buffer.concat(chunks));
+  const byName = new Map(entries.filter(entry => entry !== header).map(entry => [entry.name,entry]));
+  requireShape(byName.size === manifest.members.length && manifest.members.every(member => byName.get(member.path)?.size === member.bytes));
+  return {manifest,byName};
+}
+
+/** Read the inventory of an already authenticated backup through one handle, without allocating another archive on disk. */
+export async function readKnownPackageManifest(path: string,known: {byteLength:number;sha256:string}): Promise<DatabasePackageManifest> {
+  const handle = await open(path,constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    requireShape(info.isFile() && info.size === known.byteLength && info.size > 0 && info.size <= 0xffffffff);
+    const {manifest} = await packageIndex(handle,info.size);
+    const whole = createHash('sha256');
+    const chunk = Buffer.allocUnsafe(CHUNK_BYTES);
+    for (let offset = 0; offset < info.size;) {
+      const {bytesRead} = await handle.read(chunk,0,Math.min(chunk.length,info.size-offset),offset);
+      requireIntact(bytesRead > 0);
+      whole.update(chunk.subarray(0,bytesRead));
+      offset += bytesRead;
+    }
+    requireIntact(whole.digest('hex') === known.sha256);
+    return manifest;
+  } finally { await handle.close(); }
+}
+
 /**
  * Verify the package at `path`: a regular file, a ZIP whose entries are exactly its manifest and the members it names, each
  * member's size and digest as named. `visit` receives each member's bytes as they are verified, so a caller can take them
@@ -319,14 +351,7 @@ export async function verifyDatabasePackage(
     copy = undefined;
     await source.close();
     handle = await open(archivePath, 'r');
-    const entries = await readDirectory(handle, position);
-    const manifestEntry = entries.find((entry) => entry.name === DATABASE_PACKAGE_MANIFEST_MEMBER);
-    requireShape(manifestEntry !== undefined && manifestEntry.size <= MAX_MANIFEST_BYTES);
-    const manifestChunks: Uint8Array[] = [];
-    await streamEntry(handle, manifestEntry, async (chunk) => { manifestChunks.push(chunk); });
-    const manifest = readManifest(Buffer.concat(manifestChunks));
-    const byName = new Map(entries.filter((entry) => entry !== manifestEntry).map((entry) => [entry.name, entry]));
-    requireShape(byName.size === manifest.members.length && manifest.members.every((member) => byName.get(member.path)?.size === member.bytes));
+    const {manifest,byName} = await packageIndex(handle,position);
     for (const member of manifest.members) {
       signal?.throwIfAborted();
       const hash = createHash('sha256');
@@ -358,8 +383,9 @@ export async function verifyDatabasePackage(
         requireIntact(database.prepare('PRAGMA user_version').get()?.user_version === manifest.schemaRevision);
       } finally { database.close(); }
       await verifyCopiedPayloads(sqlitePath!, manifest.members, manifest.schemaRevision, signal);
-    } catch {
+    } catch (error) {
       signal?.throwIfAborted();
+      if (isStorageFullError(error)) throw error;
       requireIntact(false);
     }
     return { bytes: position, sha256, manifest };

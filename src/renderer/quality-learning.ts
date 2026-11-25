@@ -49,6 +49,8 @@ export function editorialPreferenceEditor(options: {
    */
   defaultBookId?: string | null;
   save(input: import('../shared/protocol.js').RecordLearningSupervisionInput): void;
+  /** The way out of an edit opened in place (0.7.9 review, BUG-19): 取消 and Escape leave without saving; the opener puts back what the editor replaced. */
+  cancel?(): void;
 }): HTMLElement {
   const form = el('form', 'preference-editor');
   form.dataset['preferenceEditor'] = options.existing?.itemId ?? 'new';
@@ -71,6 +73,16 @@ export function editorialPreferenceEditor(options: {
   }
   const save = el('button', 'button primary', options.existing ? '保存偏好' : '新增并启用偏好'); save.type = 'submit';
   form.append(category, scope, text, save);
+  const leave = options.cancel;
+  if (leave !== undefined) {
+    const cancel = el('button', 'button quiet', '取消'); cancel.type = 'button'; cancel.dataset['preferenceCancel'] = '';
+    cancel.addEventListener('click', () => leave());
+    form.append(cancel);
+    form.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      event.preventDefault(); event.stopPropagation(); leave();
+    });
+  }
   form.addEventListener('submit', (event) => {
     event.preventDefault(); if (!text.value.trim()) return;
     options.save({ actionId: crypto.randomUUID(), operation: options.existing ? 'correct' : 'create',

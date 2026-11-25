@@ -2,7 +2,8 @@ import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnaps
 import { CONFIGURED_ROUTE_REASONING, CONFIGURED_MODEL_REASONING } from '../../shared/provider-configuration.generated.js';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
-import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
+import { DISCOVERED_EFFORT_LEVELS, DISCOVERED_THINKING_MODES, validModelServiceModelId,
+  type DiscoveredEffortLevel, type DiscoveredModel, type DiscoveredModelReasoningEvidence } from '../../shared/protocol/model-service.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../dialogue/global-agent-session.js';
 import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
@@ -97,6 +98,8 @@ export interface ProviderRouteProfile {
    * declaring `null` refuses to assemble rather than inventing a number.
    */
   readonly maxOutputTokens: number | null;
+  /** Explicit cap of a bounded structured task. Omitted on retained request shapes. */
+  readonly taskOutputTokenLimit?: number;
   readonly statelessReasoning?: boolean;
   readonly reasoning?: { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string };
   /**
@@ -163,7 +166,7 @@ export interface ProviderRequestContext {
 function providerRequestBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload, stream: boolean): string {
   switch (model.capabilities.requestShape) {
     case 'openai-chat-completions': {
-      const body = chatCompletionsBody(model, payload);
+      const body = chatCompletionsBody(model, payload, profile.taskOutputTokenLimit);
       return stream ? chatCompletionsStreamBody(body) : body;
     }
     case 'anthropic-messages': {
@@ -191,7 +194,7 @@ function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelP
 }
 
 /** The stream reader of one model's family, aggregating to that family's buffered body. */
-function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
+export function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
   switch (model.capabilities.requestShape) {
     case 'openai-responses': return responsesSseEvents(response);
     case 'anthropic-messages': return messagesSseEvents(response);
@@ -326,10 +329,63 @@ export function providerModelsEndpoint(profile: ProviderRouteProfile): string {
     : profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
 }
 
+function supportedFlag(value: unknown): boolean | undefined {
+  return isRecord(value) && typeof value.supported === 'boolean' ? value.supported : undefined;
+}
+
+function catalogueReasoningEvidence(profile: ProviderRouteProfile, model: Record<string, unknown>,
+  observedAt: string): DiscoveredModelReasoningEvidence | undefined {
+  const base = { source: 'provider-model-list', observedAt, completeness: 'partial' } as const;
+  if (profile.credentialHeader === 'x-goog-api-key') {
+    return typeof model.thinking === 'boolean' ? { ...base, thinking: { supported: model.thinking } } : undefined;
+  }
+  if (!isRecord(model.capabilities)) return undefined;
+  if (profile.route === OPENCODE_GO_ROUTE) {
+    const reasoning = model.capabilities.reasoning;
+    if (!isRecord(reasoning)) return undefined;
+    const supported = supportedFlag(reasoning);
+    const raw = Array.isArray(reasoning.effort) ? reasoning.effort as unknown[] : undefined;
+    const normalized = raw?.map((level) => typeof level === 'string' ? level.toLowerCase() : level);
+    const levels = normalized === undefined ? undefined : DISCOVERED_EFFORT_LEVELS.filter((level) => normalized.includes(level));
+    const validList = normalized?.every((level) => DISCOVERED_EFFORT_LEVELS.includes(level as DiscoveredEffortLevel)) === true;
+    if (supported === undefined && (!levels?.length && !validList)) return undefined;
+    const complete = supported === false
+      ? reasoning.effort === undefined || validList && levels?.length === 0
+      : validList;
+    return { ...base, completeness: complete ? 'complete' : 'partial', effort: {
+      ...(supported === undefined ? {} : { supported }),
+      ...(levels === undefined ? {} : { levels }),
+    } };
+  }
+  if (profile.credentialHeader !== 'x-api-key') return undefined;
+  const effort = isRecord(model.capabilities.effort) ? model.capabilities.effort : {};
+  const supported = supportedFlag(effort);
+  const knownLevels = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+  const levels = knownLevels.filter((level) => supportedFlag(effort[level]) === true);
+  const unsupportedLevels = knownLevels.filter((level) => supportedFlag(effort[level]) === false);
+  const thinking = isRecord(model.capabilities.thinking) ? model.capabilities.thinking : {};
+  const thinkingSupported = supportedFlag(thinking);
+  const types = isRecord(thinking.types) ? thinking.types : {};
+  const modes = Object.fromEntries(DISCOVERED_THINKING_MODES.flatMap((mode) => {
+    const flag = supportedFlag(types[mode]);
+    return flag === undefined ? [] : [[mode, flag]];
+  }));
+  const hasEffort = supported !== undefined || levels.length > 0 || unsupportedLevels.length > 0;
+  const hasThinking = thinkingSupported !== undefined || Object.keys(modes).length > 0;
+  if (!hasEffort && !hasThinking) return undefined;
+  const knownReport = Object.keys(effort).every((field) => field === 'supported' || knownLevels.some((level) => level === field));
+  const complete = knownReport && (supported === false ? levels.length === 0 : levels.length + unsupportedLevels.length === knownLevels.length);
+  return { ...base, completeness: complete ? 'complete' : 'partial',
+    ...(hasEffort ? { effort: { ...(supported === undefined ? {} : { supported }), levels, unsupportedLevels } } : {}),
+    ...(hasThinking ? { thinking: { ...(thinkingSupported === undefined ? {} : { supported: thinkingSupported }), ...(Object.keys(modes).length === 0 ? {} : { modes }) } } : {}),
+  };
+}
+
 export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
   const url = new URL(providerModelsEndpoint(profile));
   const result = new Map<string, DiscoveredModel>();
   const signal = AbortSignal.timeout(10_000);
+  const observedAt = new Date().toISOString();
   const pages = new Set<string>();
   for (;;) {
     if (pages.has(url.href)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
@@ -365,7 +421,9 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
       const id = google && typeof model.name === 'string' ? model.name.replace(/^models\//u, '') : model.id;
       if (typeof id !== 'string' || !validModelServiceModelId(id)) continue;
       const label = model.displayName ?? model.display_name ?? id;
-      result.set(id, { modelId: id, modelLabel: typeof label === 'string' && label.trim().length > 0 ? label.trim().slice(0, 200) : id });
+      const reasoningEvidence = catalogueReasoningEvidence(profile, model, observedAt);
+      result.set(id, { modelId: id, modelLabel: typeof label === 'string' && label.trim().length > 0 ? label.trim().slice(0, 200) : id,
+        ...(reasoningEvidence === undefined ? {} : { reasoningEvidence }) });
     }
     if (google && typeof body.nextPageToken === 'string' && body.nextPageToken.length > 0) url.searchParams.set('pageToken', body.nextPageToken);
     else if (profile.credentialHeader === 'x-api-key' && body.has_more === true && typeof body.last_id === 'string') url.searchParams.set('after_id', body.last_id);
@@ -534,8 +592,10 @@ export interface DeepSeekAdapterDependencies extends Pick<import('../../shared/r
   readonly transport?: DeepSeekTransport;
   /** Recheck the consumer/source generation inside the broker callback, before transport admission. */
   readonly beforeSend?: () => void;
+  /** Observe the buffered response's own model identity during an explicit connection probe. */
+  readonly onProbeModel?: (model: string | undefined, family: ProviderModelProfile['capabilities']['requestShape']) => void;
   /** Exact-call observation from inside the adapter, before any native sender was entered. */
-  readonly onRequestNotSent?: () => void;
+  readonly onRequestNotSent?: (error?: unknown) => void;
   /** The route this adapter serves; the unchanged production route when absent. */
   readonly profile?: ProviderRouteProfile;
   /** The model this adapter speaks to; the production model when absent. Must belong to the bound route. */
@@ -749,6 +809,10 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
       const shape = this.#modelProfile.capabilities.requestShape;
+      if (this.#deps.onProbeModel) {
+        const reported = isRecord(body) ? body[shape === 'google-generate-content' ? 'modelVersion' : 'model'] : undefined;
+        this.#deps.onProbeModel(typeof reported === 'string' ? reported : undefined, shape);
+      }
       const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
           offeredToolNames: (options.tools ?? []).map((tool) => tool.name),
@@ -773,7 +837,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
     } catch (error) {
       this.#lastRequestNotSent = !sent || error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest;
-      if (this.#lastRequestNotSent) this.#deps.onRequestNotSent?.();
+      if (this.#lastRequestNotSent) this.#deps.onRequestNotSent?.(error);
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
         : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)

@@ -1,3 +1,5 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
+import { appendOnly } from '../append-only.js';
 import { editorialMemoryDigest } from '../learning/editorial-memory.js';
 import type { GlobalMemoryPin, LocalFixtureProfile, OrdinaryProductionRouteId, SelectedPolicyIdentity } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
@@ -5,7 +7,6 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from '../analysis/canonical.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
-import { POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from '../task-authorization.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_RULE_ID } from './global-agent-session.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import type { DialogueMessageInput } from './contract.js';
@@ -37,25 +38,28 @@ import { isSpanOf } from '../manuscript/selection-span.js';
  * developer-live attempts stay on the Go route only. Revision 103 (Issue #1225) admits every route Provider Processing v32 binds
  * for a production role, so a turn on an OpenAI, Claude 官方, Gemini 官方 or OpenCode Zen choice is recorded as a Go one is.
  */
-const LEGACY_DIALOGUE_SCHEMA_SQL = {
+export const DIALOGUE_SCHEMA_SQL = {
   dialogue_tasks: `CREATE TABLE dialogue_tasks (
   dialogue_id TEXT PRIMARY KEY,
-  book_id TEXT NOT NULL REFERENCES books(book_id),
-  manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-  branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-  revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-  journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
-  block_id TEXT NOT NULL CHECK(length(block_id) = 28),
-  from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-  to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
-  block_digest TEXT NOT NULL CHECK(length(block_digest) = 64),
+  book_id TEXT REFERENCES books(book_id),
+  manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
+  branch_id TEXT REFERENCES manuscript_branches(branch_id),
+  revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+  journal_sequence INTEGER CHECK(journal_sequence >= 0),
+  block_id TEXT CHECK(length(block_id) = 28),
+  from_grapheme INTEGER CHECK(from_grapheme >= 0),
+  to_grapheme INTEGER CHECK(to_grapheme > from_grapheme),
+  block_digest TEXT CHECK(length(block_digest) = 64),
   selection_sha256 TEXT NOT NULL CHECK(length(selection_sha256) = 64),
   question_sha256 TEXT NOT NULL CHECK(length(question_sha256) = 64),
   presentation_mode TEXT NOT NULL CHECK(presentation_mode = 'interactive-stream'),
   asked_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
-) STRICT`,
+, CHECK(
+    (book_id IS NULL AND manuscript_id IS NULL AND branch_id IS NULL AND revision_id IS NULL AND journal_sequence IS NULL AND block_id IS NULL AND from_grapheme IS NULL AND to_grapheme IS NULL AND block_digest IS NULL)
+    OR (book_id IS NOT NULL AND manuscript_id IS NOT NULL AND branch_id IS NOT NULL AND revision_id IS NOT NULL AND journal_sequence IS NOT NULL AND block_id IS NOT NULL AND from_grapheme IS NOT NULL AND to_grapheme IS NOT NULL AND block_digest IS NOT NULL)
+  )) STRICT`,
   dialogue_attempts: `CREATE TABLE dialogue_attempts (
   attempt_id TEXT PRIMARY KEY,
   dialogue_id TEXT NOT NULL REFERENCES dialogue_tasks(dialogue_id),
@@ -72,7 +76,7 @@ const LEGACY_DIALOGUE_SCHEMA_SQL = {
   dialogue_execution_bindings: `CREATE TABLE dialogue_execution_bindings (
   attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
   harness_session_id TEXT NOT NULL UNIQUE,
-  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go', 'deepseek-open-platform')),
+  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen', 'opencode-zen-messages', 'opencode-zen-responses')),
   model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
   operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live', 'ordinary-production')),
   behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
@@ -117,200 +121,14 @@ const LEGACY_DIALOGUE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DIALOGUE_TASKS_REVISION_86_SQL = LEGACY_DIALOGUE_SCHEMA_SQL.dialogue_tasks;
-/** `dialogue_execution_bindings` as revision 72 widened it: ordinary production's Go and DeepSeek routes. Kept to recognise such a store. */
-export const DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL = LEGACY_DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings;
-/** Revision 87 admits an all-null manuscript binding for an explicitly scoped Global Agent turn; revision 103 every v32 production route. */
-export const DIALOGUE_SCHEMA_SQL = {
-  ...LEGACY_DIALOGUE_SCHEMA_SQL,
-  dialogue_execution_bindings: DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL.replace("'opencode-go', 'deepseek-open-platform')),",
-    "'opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen', 'opencode-zen-messages', 'opencode-zen-responses')),"),
-  dialogue_tasks: DIALOGUE_TASKS_REVISION_86_SQL.replace(
-    /((?:book_id|manuscript_id|branch_id|revision_id|journal_sequence|block_id|from_grapheme|to_grapheme|block_digest) (?:TEXT|INTEGER)) NOT NULL/gu, '$1',
-  ).replace(') STRICT', `, CHECK(
-    (book_id IS NULL AND manuscript_id IS NULL AND branch_id IS NULL AND revision_id IS NULL AND journal_sequence IS NULL AND block_id IS NULL AND from_grapheme IS NULL AND to_grapheme IS NULL AND block_digest IS NULL)
-    OR (book_id IS NOT NULL AND manuscript_id IS NOT NULL AND branch_id IS NOT NULL AND revision_id IS NOT NULL AND journal_sequence IS NOT NULL AND block_id IS NOT NULL AND from_grapheme IS NOT NULL AND to_grapheme IS NOT NULL AND block_digest IS NOT NULL)
-  )) STRICT`),
-} as const;
-
-export const DIALOGUE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(DIALOGUE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DIALOGUE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DIALOGUE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const DIALOGUE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  dialogue_tasks: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  dialogue_attempts: [
-    'dialogue_id>dialogue_tasks.dialogue_id:NO ACTION/NO ACTION/NONE',
-    'prior_attempt_id>dialogue_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
-  ],
-  dialogue_execution_bindings: ['attempt_id>dialogue_attempts.attempt_id:NO ACTION/NO ACTION/NONE'],
-  dialogue_harness_spans: [
-    'attempt_id>dialogue_execution_bindings.attempt_id:NO ACTION/NO ACTION/NONE',
-    'harness_session_id>dialogue_execution_bindings.harness_session_id:NO ACTION/NO ACTION/NONE',
-  ],
-  dialogue_attempt_outcomes: ['attempt_id>dialogue_attempts.attempt_id:NO ACTION/NO ACTION/NONE'],
-  dialogue_conversions: [
-    'attempt_id>dialogue_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
-/** `dialogue_execution_bindings` as revision 60 created it: the local deterministic route only. Kept to recognise such a store. */
-export const DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL = `CREATE TABLE dialogue_execution_bindings (
-  attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
-  harness_session_id TEXT NOT NULL UNIQUE,
-  route TEXT NOT NULL CHECK(route = 'ai7-local-deterministic'),
-  model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
-  operational_scope TEXT NOT NULL CHECK(operational_scope = 'development-ci'),
-  behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
-  prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
-  fixture_sha256 TEXT NOT NULL CHECK(length(fixture_sha256) = 64),
-  bound_at TEXT NOT NULL,
-  canonical_json TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
-) STRICT`;
-
-/** `dialogue_execution_bindings` as revision 71 widened it: the developer-live Go route beside the local one. */
-export const DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL = `CREATE TABLE dialogue_execution_bindings (
-  attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
-  harness_session_id TEXT NOT NULL UNIQUE,
-  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go')),
-  model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
-  operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live')),
-  behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
-  prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
-  fixture_sha256 TEXT CHECK(fixture_sha256 IS NULL OR length(fixture_sha256) = 64),
-  bound_at TEXT NOT NULL,
-  canonical_json TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-  provider_processing_version TEXT CHECK(provider_processing_version IS NULL OR length(provider_processing_version) BETWEEN 2 AND 16),
-  policy_rule_id TEXT CHECK(policy_rule_id IS NULL OR length(policy_rule_id) BETWEEN 1 AND 128),
-  CHECK((route = 'opencode-go') = (operational_scope = 'developer-live')),
-  CHECK((route = 'opencode-go') = (fixture_sha256 IS NULL)),
-  CHECK((route = 'opencode-go') = (provider_processing_version IS NOT NULL)),
-  CHECK((provider_processing_version IS NULL) = (policy_rule_id IS NULL))
-) STRICT`;
-
-/** A relation's text with its whitespace folded, the way the other ledgers compare exact texts. */
-function foldedSql(value: string): string {
-  return value.trim().replace(/\s+/gu, ' ');
-}
-
-/**
- * Which of its four texts `dialogue_execution_bindings` holds: revision 60's, revision 71's that admits the developer-live
- * route, revision 72's that admits ordinary production's two routes, or revision 103's that admits every v32 production route.
- * No other text was ever created, so any other is refused.
- */
-export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'revision-71' | 'revision-72' | 'current' {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_execution_bindings'").get() as SqlRow | undefined;
-  const sql = row === undefined ? '' : foldedSql(text(row.sql));
-  if (sql === foldedSql(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings)) return 'current';
-  if (sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL)) return 'revision-72';
-  if (sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL)) return 'revision-71';
-  requireDialogue(sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL), 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表结构不兼容。');
-  return 'revision-60';
-}
-
-/**
- * Revision 60, 71 or 72 → 103 for `dialogue_execution_bindings` (Issue #52, S17c; Issues #811, #1225): the relation is rebuilt from its
- * current text, every row copied byte for byte, rowid included, in rowid order — from revision 60 the two columns revision 71
- * added stay empty, as a local binding's always are — and its two ledger triggers re-armed from their own texts. It runs in
- * the caller's transaction with foreign keys off, so the spans that name a binding keep their rows while the relation they
- * reference is re-created.
- */
-function widenDialogueExecutionBindings(db: DatabaseSync, from: 'revision-60' | 'revision-71' | 'revision-72'): void {
-  requireDialogue(
-    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
-    'SCHEMA_MIGRATION_FAILED',
-    '对话执行绑定表只能在停用引用校验的事务中重建。',
-  );
-  const columnsOf = (): string[] => (db.prepare("SELECT name FROM pragma_table_info('dialogue_execution_bindings') ORDER BY cid").all() as SqlRow[])
-    .map((row) => text(row.name));
-  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM dialogue_execution_bindings').get() as SqlRow).total);
-  const columns = columnsOf();
-  const before = rows();
-  const attached = (db.prepare(
-    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'dialogue_execution_bindings' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
-  ).all() as SqlRow[]).map((row) => text(row.sql));
-  db.exec('CREATE TEMP TABLE migrate_dialogue_execution_bindings AS SELECT rowid AS migrate_rowid, * FROM dialogue_execution_bindings');
-  db.exec('DROP TABLE dialogue_execution_bindings');
-  db.exec(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings);
-  requireDialogue(columnsOf().join(', ') === (from === 'revision-60' ? [...columns, 'provider_processing_version', 'policy_rule_id'] : columns).join(', '),
-    'SCHEMA_MIGRATION_FAILED', '对话执行绑定表迁移前后的列不一致。');
-  const list = columns.join(', ');
-  db.exec(`INSERT INTO dialogue_execution_bindings(rowid, ${list})
-    SELECT migrate_rowid, ${list} FROM temp.migrate_dialogue_execution_bindings ORDER BY migrate_rowid`);
-  db.exec('DROP TABLE temp.migrate_dialogue_execution_bindings');
-  for (const sql of attached) db.exec(sql);
-  requireDialogue(rows() === before, 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表迁移未保留全部记录。');
-}
-
-/**
- * Revision 60's relations, created once: a store that predates them gains six empty relations and nothing existing moves.
- * A store that has them at revision 60's or 71's text has `dialogue_execution_bindings` widened for revision 72, in one
- * transaction.
- */
-export function initializeDialogueSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_tasks'").get() !== undefined;
-  const shape = existing ? dialogueExecutionBindingsShape(db) : null;
-  const taskSql = existing ? String(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get()!.sql) : null;
-  const legacyTasks = taskSql !== null && foldedSql(taskSql) === foldedSql(DIALOGUE_TASKS_REVISION_86_SQL);
-  if (shape === 'current' && !legacyTasks) return;
-  const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
-  const restoreForeignKeys = existing && foreignKeys() === 1;
-  if (existing) {
-    db.exec('PRAGMA foreign_keys = OFF');
-    requireDialogue(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
-  }
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      if (shape !== null) {
-        if (shape !== 'current') widenDialogueExecutionBindings(db, shape);
-        if (legacyTasks) {
-          db.exec('CREATE TEMP TABLE migrate_global_dialogue_tasks AS SELECT rowid AS migrate_rowid, * FROM dialogue_tasks');
-          db.exec('DROP TABLE dialogue_tasks');
-          db.exec(DIALOGUE_SCHEMA_SQL.dialogue_tasks);
-          db.exec('INSERT INTO dialogue_tasks SELECT dialogue_id, book_id, manuscript_id, branch_id, revision_id, journal_sequence, block_id, from_grapheme, to_grapheme, block_digest, selection_sha256, question_sha256, presentation_mode, asked_at, canonical_json, sha256 FROM temp.migrate_global_dialogue_tasks ORDER BY migrate_rowid');
-          db.exec('DROP TABLE temp.migrate_global_dialogue_tasks');
-          db.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_update!);
-          db.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_delete!);
-        }
-        requireDialogue(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      } else {
-        for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
-        for (const sql of Object.values(DIALOGUE_TRIGGER_SQL)) db.exec(sql);
-      }
-      db.exec('COMMIT');
-    } catch (error) {
-      try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Dialogue schema rollback failed.');
-      }
-      throw error;
-    }
-  } finally {
-    if (restoreForeignKeys) {
-      db.exec('PRAGMA foreign_keys = ON');
-      requireDialogue(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
-    }
-  }
-}
+export const DIALOGUE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  dialogue_tasks: 'DIALOGUE_LEDGER_IMMUTABLE',
+  dialogue_attempts: 'DIALOGUE_LEDGER_IMMUTABLE',
+  dialogue_execution_bindings: 'DIALOGUE_LEDGER_IMMUTABLE',
+  dialogue_harness_spans: 'DIALOGUE_LEDGER_IMMUTABLE',
+  dialogue_attempt_outcomes: 'DIALOGUE_LEDGER_IMMUTABLE',
+  dialogue_conversions: 'DIALOGUE_LEDGER_IMMUTABLE',
+});
 
 export class DialogueError extends Error {
   constructor(readonly code: string, message: string) {
@@ -338,7 +156,7 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
-  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
+  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35' | 'v36';
   /** The no-tools rule, or v31's scoped tool rule (#1171); a record never moves between them. */
   readonly policyRuleId: 'ordinary-production-global-agent-dialogue' | typeof GLOBAL_AGENT_SCOPED_RULE_ID;
   readonly route: OrdinaryProductionRouteId;
@@ -362,7 +180,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
-  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34' && identity.providerProcessingVersion !== 'v35')) || value.textProcessing !== 'qualified-original-fields' ||
+  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34' && !supportsEditorialMemoryPolicy(identity.providerProcessingVersion))) || value.textProcessing !== 'qualified-original-fields' ||
       (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
         identity.providerProcessingVersion === 'v30')) || value.modelRole !== 'Fast Interaction Role' ||
       typeof route !== 'string' || typeof value.model !== 'string' || value.model.length === 0 ||
@@ -582,7 +400,7 @@ export class DialogueLedger {
   askGlobal(scope: import('../../shared/protocol.js').TrustedOperationalScope, sources: ReadonlyArray<GlobalMemoryPin>, questionSha256: string, now: Date,
     qualification?: QualifiedGlobalAttemptMetadata): { task: StoredGlobalDialogueTask; attemptId: string } {
     requireDialogue(DIGEST_PATTERN.test(questionSha256) && sources.length <= 12, 'DIALOGUE_INVALID', '全域对话范围无效。');
-    if (qualification !== undefined) requireDialogue(scope === 'ordinary-production' && this.#currentReader() &&
+    if (qualification !== undefined) requireDialogue(scope === 'ordinary-production' &&
       qualifiedGlobalAttemptMetadataOf(qualification) !== null, 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const task: StoredGlobalDialogueTask = { dialogueId: randomUUID(), bookId: null, sources, operationalScope: scope,
       sourcesSha256: sha256Hex(canonicalJson(sources)), questionSha256, askedAt: now.toISOString() };
@@ -729,7 +547,7 @@ export class DialogueLedger {
     let qualification: QualifiedGlobalAttemptMetadata | undefined;
     if (raw.schema === 'ai7.dialogue-attempt/2') {
       const metadata = qualifiedGlobalAttemptMetadataOf(Object.fromEntries(QUALIFIED_GLOBAL_FIELDS.map((key) => [key, raw[key]])));
-      requireDialogue(this.#currentReader() && metadata !== null && this.globalTask(base.dialogueId)?.operationalScope === 'ordinary-production',
+      requireDialogue(metadata !== null && this.globalTask(base.dialogueId)?.operationalScope === 'ordinary-production',
         'DIALOGUE_RECORD_INVALID', INVALID);
       qualification = metadata;
     }
@@ -757,7 +575,7 @@ export class DialogueLedger {
         if (isRecord(record) && record.schema === 'ai7.dialogue-execution-binding/2') {
           const selected = selectedPolicyIdentityOf(record.selectedPolicyIdentity);
           const profile = selected === null ? null : localFixtureProfileOf(record.localFixtureProfile, selected);
-          requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' && profile !== null,
+          requireDialogue(selected?.providerProcessingVersion === 'v29' && profile !== null,
             'DIALOGUE_RECORD_INVALID', INVALID);
           binding = { ...binding, selectedPolicyIdentity: selected, localFixtureProfile: profile };
           this.#verifyLocalProfile(base.dialogueId, binding);
@@ -783,10 +601,6 @@ export class DialogueLedger {
     return binding;
   }
 
-  #currentReader(): boolean {
-    return Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
-  }
-
   #verifyLocalProfile(dialogueId: string, binding: StoredLocalDialogueBinding): void {
     const expected = binding.promptContractSha256 === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST ? 'workspace'
       : binding.promptContractSha256 === DIALOGUE_PROMPT_CONTRACT_DIGEST || binding.promptContractSha256 === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST ? 'dialogue' : null;
@@ -804,7 +618,7 @@ export class DialogueLedger {
 
   #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date,
     qualification?: QualifiedGlobalAttemptMetadata): string {
-    if (qualification !== undefined) requireDialogue(this.#currentReader() && qualifiedGlobalAttemptMetadataOf(qualification) !== null &&
+    if (qualification !== undefined) requireDialogue(qualifiedGlobalAttemptMetadataOf(qualification) !== null &&
       this.globalTask(dialogueId)?.operationalScope === 'ordinary-production', 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const attempt = { attemptId: randomUUID(), dialogueId, ordinal, kind, priorAttemptId, createdAt: now.toISOString() };
     const seal = sealed({ schema: qualification === undefined ? ATTEMPT_SCHEMA : 'ai7.dialogue-attempt/2', ...attempt, ...qualification });
@@ -839,7 +653,7 @@ export class DialogueLedger {
     if (binding.route === 'ai7-local-deterministic' &&
         (Object.hasOwn(binding, 'selectedPolicyIdentity') || Object.hasOwn(binding, 'localFixtureProfile'))) {
       const selected = selectedPolicyIdentityOf(binding.selectedPolicyIdentity);
-      requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' &&
+      requireDialogue(selected?.providerProcessingVersion === 'v29' &&
         localFixtureProfileOf(binding.localFixtureProfile, selected) !== null, 'DIALOGUE_INVALID', '本地对话的确定性配置无效。');
       this.#verifyLocalProfile(attempt.dialogueId, binding);
     }

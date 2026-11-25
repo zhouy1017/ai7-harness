@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { DatabaseSync } from 'node:sqlite';
 import { setImmediate } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import {
   HOUSE_PAGE_SIZE, MAX_HOUSE_BYTES, HouseWordListError, houseUtf8Bytes, previewHousePaste, validateHouseEntries,
   validateInspectHouseWordListInput, validateSaveHouseWordListInput, type HouseWordListApi, type HouseWordListDraftEntry,
 } from '../../src/shared/protocol/house-word-list.js';
-import { HouseWordLists, houseWordListPin, initializeHouseWordListSchema, validateHouseWordListSnapshot } from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, houseWordListPin, HOUSE_WORD_LIST_SCHEMA_SQL, validateHouseWordListSnapshot } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { mountHouseWordList } from '../../src/renderer/house-word-list.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
@@ -65,7 +66,7 @@ describe('editor-authored House input bounds', () => {
 
 describe('standalone House panel through its two-operation interface', () => {
   it('keeps saved entries while omitting version technical details in ordinary mode', async () => {
-    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db); owner.save(input([entry('合成词', '合成说明')]));
     const root = document.createElement('div');
     const panel = mountHouseWordList({ root, api: { inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) }, setStatus: vi.fn() });
@@ -78,7 +79,7 @@ describe('standalone House panel through its two-operation interface', () => {
     } finally { panel.destroy(); db.close(); setTechnicalLayerVisible(true); restore(); }
   });
   it('keeps a known committed save truthful after a failed read and retries only the read', async () => {
-    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db); const status = vi.fn(); let failRead = false;
     const api: HouseWordListApi = {
       inspectHouseWordList: vi.fn(async (value) => { if (failRead) { failRead = false; throw new Error('synthetic read failure'); } return owner.inspect(value); }),
@@ -104,7 +105,7 @@ describe('standalone House panel through its two-operation interface', () => {
     } finally { panel.destroy(); db.close(); restore(); }
   });
   it('authors/pastes/saves immutable versions, preserves a stale draft and shows historical versions read-only', async () => {
-    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db); const status = vi.fn();
     const api: HouseWordListApi = { inspectHouseWordList: vi.fn(async (value) => owner.inspect(value)), saveHouseWordList: vi.fn(async (value) => owner.save(value)) };
     const root = document.createElement('div'); document.body.append(root);
@@ -135,7 +136,7 @@ describe('standalone House panel through its two-operation interface', () => {
     } finally { panel.destroy(); db.close(); restore(); }
   });
   it('loads a bounded current draft page by page and keeps its DOM page at fifty rows', async () => {
-    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
     const owner = new HouseWordLists(db); owner.save(input(Array.from({ length: 53 }, (_, index) => entry(`词${index}`))));
     const inspect = vi.fn(async (value: Parameters<HouseWordListApi['inspectHouseWordList']>[0]) => owner.inspect(value));
     const root = document.createElement('div'); document.body.append(root);

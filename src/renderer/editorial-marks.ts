@@ -1,11 +1,15 @@
+import { createDraftComposers } from './mark-draft-composers.js';
+import { markDrafts, type DraftScope, type DraftPlace } from './mark-drafts.js';
 import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard, setEditorialMarkCardExpanded } from './editorial-mark-card.js';
-import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
+import { EDITORIAL_MARK_CATEGORIES, editorialMarkFilterModel, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
+import { createMarksPaging } from './marks-paging.js';
 import { showToast } from './components/toast.js';
 import { shortcutHint } from './commands.js';
 import { inTextEntry, triageKeyAction } from './triage-keys.js';
 import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { modelEffortWords } from './model-effort-labels.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -15,8 +19,6 @@ import type { AskAboutSelectionInput, DialogueProjection, DialogueSelectionInput
 import {
   DIALOGUE_ASK,
   DIALOGUE_COMPOSER_TITLE,
-  DIALOGUE_MENU_HINT,
-  DIALOGUE_MENU_LABEL,
   DIALOGUE_QUESTION_LABEL,
   DIALOGUE_SENDS_NOTE,
   DIALOGUE_STATUS,
@@ -41,6 +43,7 @@ import type {
   EditorialMarkCommandProjection,
   EditorialMarkKind,
   ManuscriptApplyCommandProjection,
+  ManuscriptMarksPage,
   ManuscriptWindowProjection,
   PersonalHighlightColor,
   ProposalItemDecisionProjection,
@@ -68,7 +71,6 @@ import {
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
   markDriftNote,
-  markSourceMark,
   markIsHandled,
   markDisplayNote,
   markTimeLabel,
@@ -77,7 +79,7 @@ import {
 import { applyOnce } from './manuscript-apply.js';
 import { type EditorInputMode } from './editor-input-mode.js';
 import {
-  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_ENTRY_LABELS, SCOPED_AI_EDIT_MENU_LABEL, SCOPED_AI_EDIT_WORDS, openScopedAiEditComposer,
+  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_ENTRY_LABELS, SCOPED_AI_EDIT_MENU_LABEL, SCOPED_AI_EDIT_MENU_HINT, SCOPED_AI_EDIT_WORDS, openScopedAiEditComposer,
   selectionLockTargets, selectionLocked, setAiLocks, type ScopedAiEditHost,
 } from './scoped-ai-edit.js';
 import {
@@ -89,22 +91,15 @@ import { spanGraphemes } from '../shared/selection-span.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 import { sheetChosenApartLine } from './captured-procedure-labels.js';
 import {
-  SELECTION_POLISH_HINT,
-  SELECTION_POLISH_LABEL,
-  SELECTION_POLISH_READING,
-  SELECTION_POLISH_STATUS,
   SELECTION_TASK_CHOSEN_APART_LEGEND,
   SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
-  SELECTION_SPAN_PROCEDURE_REASON,
-  SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
   SELECTION_TASK_PICK_RANGE,
   SELECTION_TASK_PREPARE,
   SELECTION_TASK_STATUS,
   SELECTION_TASK_TITLE,
   selectionTaskContextLine,
-  selectionTaskGroupNote,
   type SelectionProcedureEntry,
   type SelectionTaskChoice,
   type SelectionTaskChoices,
@@ -183,7 +178,7 @@ interface MountOptions {
   editor: BoundedEditor;
   api: Pick<
     RendererApi,
-    'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
+    'createEditorialMark' | 'getEditorialMarkCard' | 'getManuscriptWindowAt' | 'findPendingMark' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'reverseAppliedChangeSuggestion' |
     'inspectProposalWorkspace' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
     // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
@@ -214,15 +209,14 @@ interface MountOptions {
   /** The question was asked: its dialogue comes to the foreground beside the manuscript. */
   onAsked?(dialogue: DialogueProjection): void;
   /**
-   * 润色这段 (Issue #842): whether this launch can run it, the request on the selected words — no plan and no 开始任务 — read
-   * again until it settles, and the window's marks read again once it placed its 修改建议. Without it (a Production Document)
-   * the item stays disabled with its reason.
+   * Legacy host wiring for the former standalone polish entry. I-1b uses the scoped-edit preset; callers may still supply
+   * these callbacks until their next host wiring change.
    */
   polish?: {
     routes(): Promise<FastInteractionRoutesProjection>;
     polish(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
     inspect(taskId: string): Promise<EditorialPolishProjection>;
-    marks(): Promise<{ readonly journalSequence: number; readonly marks: ReadonlyArray<EditorialMarkAnchorProjection>; readonly truncated: boolean } | null>;
+    marks(): Promise<{ readonly journalSequence: number; readonly marks: ReadonlyArray<EditorialMarkAnchorProjection>; readonly truncated: boolean; readonly page: ManuscriptMarksPage | undefined } | null>;
   };
   /**
    * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): the Tasks the selected words' paragraph can start now, and the one
@@ -484,11 +478,8 @@ export function pickEditorialComment(marks: readonly EditorialMarkAnchorProjecti
     .sort((a, b) => (a.toGrapheme - a.fromGrapheme) - (b.toGrapheme - b.fromGrapheme))[0];
 }
 
-/** How often 润色这段 reads its request again while it is in flight (Issue #842). */
-const POLISH_READ_AGAIN_MS = 400;
 
 /** A composer whose paragraph left the window as another one was loaded (Issue #423 review, P2-3). */
-export const COMPOSER_LEFT_WINDOW = '撰写框所在的段落已不在当前稿件窗口中，撰写框已关闭；没有记下任何内容。';
 
 interface FormField {
   name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure' | 'chosenApart';
@@ -513,7 +504,9 @@ interface FormConfig {
   fields: ReadonlyArray<FormField>;
   submitLabel: string;
   note?: string;
-  submit(values: Readonly<Record<FormField['name'], string>>): Promise<void>;
+  draft?: { scope: DraftScope; place: DraftPlace };
+  autofocus?: boolean;
+  submit(values: Readonly<Record<FormField['name'], string>>): Promise<void | boolean>;
   cancel(): void;
 }
 
@@ -655,6 +648,21 @@ export function seriesMembership(
   };
 }
 
+/** Selection-menu mark actions; the AI group has its own unchanged owner. */
+export function editorialMarkMenuGroup(why: string | undefined, act: {
+  compose(kind: 'annotation' | 'editor-note' | 'change-suggestion'): void;
+  highlight(color: PersonalHighlightColor): void;
+}): MenuGroup {
+  return { label: '编辑标记', ...(why ? { note: why } : {}), items: [
+    ...([['change-suggestion', '提出修改建议', '替换原文，待接受'], ['annotation', '添加批注', '可导出'], ['editor-note', '添加备注', '仅自己可见']] as const).map(([kind, label, hint]): MenuItem => ({
+      action: `add-${kind}`, label, hint, ...(why ? { disabledReason: why } : { run: () => act.compose(kind) }),
+    })),
+    ...([1, 2, 3] as const).map((color): MenuItem => ({ action: `add-highlight-${color}`, label: `加高亮 · ${HIGHLIGHT_COLOR_LABELS[color]}`, swatch: color,
+      ...(why ? { disabledReason: why } : { run: () => act.highlight(color) }),
+    })),
+  ] };
+}
+
 export function mountEditorialMarks(options: MountOptions): EditorialMarksSurface {
   const { editor, api } = options;
   const layer = el('div', 'editorial-mark-layer');
@@ -668,6 +676,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let destroyed = false;
   let menu: HTMLElement | undefined;
   let floating: HTMLElement | undefined;
+  let draftComposers: ReturnType<typeof createDraftComposers> | undefined;
   let floatingBlockId: string | undefined;
   /**
    * Composers asked for and not on screen yet (Issue #423 review, P2-3, P3-8): from the menu's choice, through the settled selection
@@ -770,6 +779,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   filterPopover.addEventListener('toggle', () => filterButton.setAttribute('aria-expanded', String(filterPopover.matches(':popover-open'))));
   const disclosureLine = el('p', 'editorial-mark-disclosure', '以下 AI 建议未联网核查');
   disclosureLine.hidden = true;
+  disclosureLine.title = disclosureLine.textContent ?? '';
   const bookPending = el('span', 'manuscript-comments-book-pending');
   bookPending.dataset['commentsBookPending'] = '';
   bookPending.title = COMMENTS_TRIAGE_WORDS.bookPendingTitle;
@@ -789,22 +799,42 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const nextStep = stepButton('next', '↓');
   /** A pointer decision reached the page's end: 下一条待处理 is the one click on (Issue #1523); any step or other card ends the offer. */
   const offerNextStep = (offered: boolean): void => { if (offered) nextStep.dataset['offered'] = 'true'; else delete nextStep.dataset['offered']; };
-  for (const node of [bookPending, stepButton('previous', '↑'), nextStep, filterButton]) {
+  const addButtons = (['annotation', 'editor-note'] as const).map(kind => {
+    const label = kind === 'annotation' ? '批注' : '备注';
+    const add = el('button', 'quiet', `+ ${label}`); add.type = 'button'; add.dataset['commentsAdd'] = kind;
+    add.addEventListener('click', () => {
+      if (editor.selectedRange().kind === 'none') { options.setStatus(`先选中一段文字，再添加${label}。`, 'error'); return; }
+      void composeNewMark(kind);
+    }); return add;
+  });
+  for (const node of [bookPending, stepButton('previous', '↑'), nextStep, ...addButtons, filterButton]) {
     if (heading) heading.insertBefore(node, heading.lastElementChild);
     else filterBar.append(node);
   }
-  filterBar.append(disclosureLine, filterSummary, filterPopover);
+  /** 「已显示 N / M 条」 and 显示更多 while the window holds more marks than the pane has loaded (Issue #1604). */
+  const paging = createMarksPaging({
+    window: () => editor.currentWindow(),
+    setMarks: (marks, truncated, page) => editor.setMarks(marks, truncated, page),
+    read: (input) => api.getManuscriptWindowAt(input),
+    changed: () => refreshComments(),
+    alive: () => !destroyed,
+    focusAfter: () => filterButton.focus(),
+    errorMessage: (error, fallback) => options.errorMessage(error, fallback),
+    setStatus: (message, tone) => options.setStatus(message, tone),
+  });
+  filterBar.append(filterSummary, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
   commentsScroll.append(commentsCanvas);
-  options.comments?.host.append(filterBar, commentsScroll);
+  options.comments?.host.append(filterBar, disclosureLine, paging.row, commentsScroll);
   const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   leaders.classList.add('manuscript-comments-leaders');
   leaders.setAttribute('aria-hidden', 'true');
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let preservePanePositions = false;
+  let commentsFocus: Element | null = null;
   let commentsFrameScroll = 0;
   let pressedComment: string | undefined;
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
@@ -856,37 +886,43 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     editor.selectRange(card.blockId, card.fromGrapheme, card.fromGrapheme);
     editor.focus();
   };
-  function openCommentReply(markId: string): void {
+  function openCommentReply(markId: string, focus = true): void {
+    const scope = editor.currentWindow();
+    const place = { kind: 'reply', markId } as const;
     const entry = commentNodes.get(markId);
     if (!entry) return;
     const existing = entry.node.querySelector<HTMLTextAreaElement>('[data-comment-reply]');
-    if (existing) { existing.focus(); return; }
+    if (existing) { if (focus) { existing.focus({ preventScroll: true }); existing.setSelectionRange(existing.value.length, existing.value.length); } return; }
     const form = el('form', 'manuscript-comments-reply');
     const input = el('textarea');
     input.rows = 2;
     input.dataset['commentReply'] = markId;
+    input.value = markDrafts.read(scope, place);
     input.setAttribute('aria-label', '回复内容');
     const send = el('button', 'secondary', '发送回复');
     send.type = 'submit';
     send.dataset['markAction'] = 'send-reply';
     const problem = el('p', 'manuscript-comments-problem');
     problem.setAttribute('role', 'alert');
-    form.append(input, send, problem);
+    const cancel = el('button', 'quiet', '取消'); cancel.type = 'button'; cancel.dataset['markAction'] = 'cancel-reply';
+    cancel.addEventListener('click', () => { markDrafts.discard(scope, place); input.value = ''; form.remove(); entry.node.focus({ preventScroll: true }); scheduleCommentsLayout(); });
+    form.append(input, send, cancel, problem);
     let generation = 0;
     let composing = false;
-    input.addEventListener('input', () => { generation++; scheduleCommentsLayout(); });
-    input.addEventListener('compositionstart', () => { composing = true; form.dataset['composing'] = 'true'; generation++; });
-    input.addEventListener('compositionend', () => { composing = false; form.dataset['composing'] = 'false'; generation++; scheduleCommentsLayout(); });
+    input.addEventListener('input', () => { generation++; markDrafts.write(scope, place, input.value); scheduleCommentsLayout(); });
+    input.addEventListener('compositionstart', () => { composing = true; form.dataset['composing'] = 'true'; generation++; markDrafts.write(scope, place, input.value); });
+    input.addEventListener('compositionend', () => { composing = false; form.dataset['composing'] = 'false'; generation++; markDrafts.write(scope, place, input.value); scheduleCommentsLayout(); });
     form.addEventListener('focusout', scheduleCommentsLayout);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      if (!input.value.trim() || send.disabled || composing) return;
+      if (!input.value.trim() || send.disabled || composing || markDrafts.sending(scope, place)) return;
       if (!cardCache.cards.has(markId)) { problem.textContent = '批注正在更新，请稍候再发送。'; return; }
       send.disabled = true;
       form.dataset['sending'] = 'true';
       const body = input.value;
       const submitted = generation;
-      void change(markId, 'reply', { body }, '已回复。', false).then((done) => {
+      markDrafts.write(scope, place, body);
+      void markDrafts.send(scope, place, () => change(markId, 'reply', { body }, '已回复。', false)).then((done) => {
         if (done) {
           if (input.value === body && generation === submitted && !composing) input.value = '';
           problem.textContent = '';
@@ -901,7 +937,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
     });
     entry.node.append(form);
-    input.focus({ preventScroll: true });
+    if (focus) { input.focus({ preventScroll: true }); input.setSelectionRange(input.value.length, input.value.length); }
     scheduleCommentsLayout();
   }
   function filterChanged(): void {
@@ -964,9 +1000,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const book = options.bookPending?.read();
     const text = book === undefined ? '' : bookPendingLabel(book.places.length, book.truncated);
     if (bookPending.textContent !== text) bookPending.textContent = text;
+    bookPending.title = book === undefined ? COMMENTS_TRIAGE_WORDS.bookPendingTitle : `全书${book.truncated ? '至少' : ''}还有 ${book.places.length} 条修改建议、批注和备注待处理`;
+    bookPending.setAttribute('role', 'note');
+    bookPending.setAttribute('aria-label', bookPending.title);
   }
   function layoutComments(): void {
     paintBookPending();
+    // Pages are being read back after a reload: the window holds only part of the list, so the pane keeps what it shows until the rest is there.
+    if (paging.restoring()) return;
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
@@ -998,13 +1039,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const sources = new Set(comments.flatMap(mark => {
       const card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;
-      return card?.source.kind === 'ai7' ? [markSourceMark(card.source)] : [];
+      const model = card === undefined ? null : editorialMarkFilterModel(card.source);
+      return model === null ? [] : [model];
     }));
     for (const source of new Set([...sources, ...markFilter.selectedModels])) {
       let button = modelButtons.get(source);
       if (!button) {
-        button = el('button', 'quiet', source);
-        button.type = 'button'; button.dataset['markModelFilter'] = source; button.title = source;
+        // The chip is keyed by the recorded label and says it as the cards do.
+        button = el('button', 'quiet', modelEffortWords(source));
+        button.type = 'button'; button.dataset['markModelFilter'] = source; button.title = modelEffortWords(source);
         button.addEventListener('click', () => {
           if (!markFilter.selectedModels.delete(source)) markFilter.selectedModels.add(source);
           filterChanged();
@@ -1017,8 +1060,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const activeFilters = markFilter.selectedCategories.size + markFilter.selectedModels.size + (markFilter.keyword.trim() ? 1 : 0) + (markFilter.status === 'all' ? 0 : 1);
     filterButton.textContent = activeFilters ? `筛选 ${activeFilters}` : '筛选';
     filterSummary.hidden = !filtering;
-    const summary = `已筛选 ${matching.size} / ${comments.length}${matching.size === 0 ? ' · 没有匹配的批注' : ''}`;
+    const summary = `筛选出 ${matching.size} 条 · 已载入 ${comments.length} 条${matching.size === 0 ? ' · 没有匹配的批注' : ''}`;
     if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
+    filterSummary.title = summary;
     const viewport = options.scroll.getBoundingClientRect();
     const listed = comments.flatMap(mark => {
       if (!matching.has(mark.markId)) return [];
@@ -1151,10 +1195,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (focused && document.activeElement !== focused) {
           const target = reply?.contains(focused) ? focused : action ? entry.node.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(action)}"]`)
             : focused.tagName === 'SUMMARY' ? entry.node.querySelector<HTMLElement>('.editorial-mark-more summary') : entry.node;
-          target?.focus({ preventScroll: true });
+          const enabled = target?.tagName !== 'BUTTON' || !(target as HTMLButtonElement).disabled;
+          const restored = enabled ? target : null;
+          (restored ?? (mark.markId === activeComment ? entry.node : null))?.focus({ preventScroll: true });
           if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
         }
       }
+      if (card.kind === 'annotation' && markDrafts.read(editor.currentWindow(), { kind: 'reply', markId: mark.markId })) openCommentReply(mark.markId, false);
       const replyForm = entry.node.querySelector<HTMLFormElement>('.manuscript-comments-reply');
       const replyInput = replyForm?.querySelector<HTMLTextAreaElement>('[data-comment-reply]');
       const replyOpen = replyForm !== null && (Boolean(replyInput?.value.length) || replyForm.contains(document.activeElement) || replyForm.dataset['sending'] === 'true' || replyForm.dataset['composing'] === 'true');
@@ -1181,7 +1228,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     for (const pending of commentsCanvas.querySelectorAll<HTMLElement>('[data-comment-pending]')) if (!present.has(pending.dataset['commentPending']!)) pending.remove();
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
-    const holdingFrame = preservePanePositions || (activeComment === undefined && paneTop > 0);
+    const selectedNode = activeComment === undefined ? undefined : commentNodes.get(activeComment)?.node;
+    const holdingControl = selectedNode !== undefined && selectedNode.getBoundingClientRect().height > commentsScroll.clientHeight && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
+    const focusMoved = document.activeElement !== commentsFocus;
+    commentsFocus = document.activeElement;
+    const holdingFrame = preservePanePositions || holdingControl || (activeComment === undefined && paneTop > 0);
     const placed = holdingFrame ? (() => {
       const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
         .sort((a, b) => Number.parseFloat(a.node.style.top) - Number.parseFloat(b.node.style.top));
@@ -1194,10 +1245,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       for (const item of items) if (!existing.includes(item)) {
         held.push({ ...item, top: bottom }); bottom += item.measuredHeight + 10;
       }
+      if (holdingControl) {
+        const pivot = existing.findIndex(item => item.node === selectedNode);
+        if (pivot >= 0) {
+          // A preceding card can finish reading at a different fractional height. Keep the
+          // focused card at the position the reader chose and make room around it instead.
+          held[pivot]!.top = Number.parseFloat(selectedNode!.style.top);
+          for (let index = pivot - 1; index >= 0; index--) held[index]!.top = Math.min(held[index]!.top, held[index + 1]!.top - held[index]!.measuredHeight - 10);
+          for (let index = pivot + 1; index < held.length; index++) held[index]!.top = held[index - 1]!.top + held[index - 1]!.measuredHeight + 10;
+        }
+      }
       return held;
     })() : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
-    const shift = selectedIndex < 0 || preservePanePositions ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    const neededShift = Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    // Integer canvas/scroll shifts cancel exactly even where the engine rounds scrollTop.
+    const shift = holdingControl ? Math.ceil(neededShift) : selectedIndex < 0 || preservePanePositions ? 0 : neededShift;
     for (const item of placed) item.top += shift;
     const forward = revealed?.pending ? placed.find(item => item.mark.markId === revealed!.markId) : undefined;
     if (forward && revealed) { revealed = { markId: revealed.markId, pending: false }; forward.node.focus({ preventScroll: true }); }
@@ -1221,10 +1284,30 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
-    if (activeComment !== undefined && !preservePanePositions) commentsFrameScroll = paneTop + shift;
+    if (holdingControl && shift) commentsFrameScroll += shift;
+    if (activeComment !== undefined && !preservePanePositions && !holdingControl) commentsFrameScroll = paneTop + shift;
     if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
     if (active) {
+      // Expansion can change the height after the stack measured it. Correct only cards
+      // that fit their final visible box; taller cards retain the stack's head alignment.
+      if (!preservePanePositions && (!holdingControl || focusMoved)) {
+        const pane = commentsScroll.getBoundingClientRect();
+        const box = (holdingControl ? document.activeElement! : active.node).getBoundingClientRect();
+        if (box.height <= commentsScroll.clientHeight) {
+          const focusRoom = holdingControl ? 5 : 0;
+          const visibleTop = pane.top + focusRoom;
+          const visibleBottom = pane.top + commentsScroll.clientHeight - focusRoom;
+          const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < visibleTop ? box.top - visibleTop : 0;
+          // Browser scroll offsets can round fractional pixels back outside the visible box.
+          if (delta) {
+            const step = delta > 0 ? Math.ceil(delta) : Math.floor(delta);
+            commentsCanvas.style.height = `${Math.max(Number.parseFloat(commentsCanvas.style.height), commentsScroll.scrollTop + step + commentsScroll.clientHeight)}px`;
+            commentsScroll.scrollTop += step;
+          }
+          commentsFrameScroll = commentsScroll.scrollTop;
+        }
+      }
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {
@@ -1259,13 +1342,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const identity = JSON.stringify([current.bookId, current.manuscriptId, current.branchId]);
     if (identity !== commentsIdentity) {
       commentsIdentity = identity;
+      draftComposers?.fold();
+      draftComposers?.restore();
       for (const entry of commentNodes.values()) { commentsResize.unobserve(entry.node); entry.node.remove(); }
       commentNodes.clear();
       for (const node of commentsCanvas.querySelectorAll('[data-comment-pending]')) node.remove();
       activateComment(undefined);
     }
+    // A reload that brought only the first page of a dense window reads the pages the editor had loaded again (Issue #1604).
+    paging.observe();
     // While the pane's own command or Apply is under way the reload answers it; any other snapshot reads every card again.
-    cardCache.sync(current, !working);
+    if (!paging.restoring()) cardCache.sync(current, !working);
     scheduleCommentsLayout();
     if (!options.comments?.enabled()) { activateComment(undefined); return; }
     for (const mark of current.marks) {
@@ -1345,6 +1432,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * holds one. A mark decided or gone while its page loaded is passed over, and the walk goes on from where it stood.
    */
   async function walkPending(direction: 'next' | 'previous', from: PendingKey): Promise<void> {
+    // A category or model filter, or a window that holds marks the pane has not loaded, is answered by the service in one read,
+    // however dense the stretch (Issue #1604). A keyword is on the card and keeps the probing; an ordinary window reads nothing more.
+    const unloaded = editor.currentWindow().marksPage?.nextOrdinal != null;
+    if (options.bookPending !== undefined && markFilter.keyword.trim() === '' && markFilter.status !== 'handled' && (unloaded || markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0)) {
+      await walkFilteredPending(direction, from, options.bookPending);
+      return;
+    }
     const forward = direction === 'next';
     let origin = from;
     // One bound for the whole step: the pages read beyond the page, and the cards a model or keyword filter reads.
@@ -1371,7 +1465,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (found === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
       let arrived = false;
       jumping += 1;
-      try { arrived = await book.go(found.mark.blockId); } finally { jumping -= 1; }
+      try {
+        arrived = await book.go(found.mark.blockId);
+        // A mark beyond the first page of a dense window is read before the pane looks for it.
+        if (arrived && !destroyed) { const born = paging.generation(); await paging.hold(found.mark.markId); if (paging.generation() !== born) return; }
+      } finally { jumping -= 1; }
       if (!arrived || destroyed) return;
       const now = editor.currentWindow().marks.find((mark) => mark.markId === found.mark.markId);
       if (now !== undefined && !markIsHandled(now)) {
@@ -1385,6 +1483,35 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       origin = found.key;
     }
     options.setStatus(noFurtherPendingLine(direction, filtering()), 'success');
+  }
+  /**
+   * 下一条 / 上一条待处理 under a category or model filter (Issue #1604): the service names the mark, the text goes to its paragraph,
+   * and pages are read until the pane holds it, so the mark that is drawn is the mark that is handled. `null` is the end: nothing wraps.
+   */
+  async function walkFilteredPending(direction: 'next' | 'previous', from: PendingKey, book: NonNullable<MountOptions['bookPending']>): Promise<void> {
+    const start = editor.currentWindow();
+    const origin = start.blocks.find((block) => block.position === from[0]);
+    const moved = (): boolean => destroyed || editor.currentWindow().blocks[0]?.blockId !== start.blocks[0]?.blockId;
+    const { mark } = await api.findPendingMark({
+      manuscriptId: start.manuscriptId, branchId: start.branchId,
+      from: origin === undefined ? { blockId: start.blocks[0]!.blockId, grapheme: -1, markId: null } : { blockId: origin.blockId, grapheme: from[1], markId: from[2] === '' ? null : from[2] },
+      direction, categories: [...markFilter.selectedCategories], models: [...markFilter.selectedModels],
+    });
+    if (moved()) return;
+    if (mark === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
+    let held = false;
+    // The window the mark is held in: if the editor was anywhere else meanwhile, even if it came back, this step is over.
+    let born = -1;
+    jumping += 1;
+    try {
+      if (!editor.currentWindow().blocks.some((block) => block.blockId === mark.blockId) && !(await book.go(mark.blockId))) return;
+      if (destroyed) return;
+      born = paging.generation();
+      held = await paging.hold(mark.markId);
+    } finally { jumping -= 1; }
+    if (destroyed || paging.generation() !== born) return;
+    if (held) bringPending(mark.markId);
+    else options.setStatus(COMMENTS_TRIAGE_WORDS.searchFailed, 'error');
   }
   /**
    * The pages beyond `start` that hold pending marks, nearest first, read without moving the text until one holds a mark that
@@ -1419,14 +1546,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return null;
   }
   /** A reply being written, or a composer open over the text: a keyboard decision does not carry the editor off this page. */
-  const liveDraft = (): boolean => floating?.dataset['markComposer'] !== undefined
-    || Array.from(commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')).some((field) => field.value.length > 0);
+  const liveDraft = (): boolean => (floating?.dataset['markComposer'] !== undefined && floating.contains(document.activeElement))
+    || Array.from(commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')).some((field) => document.activeElement === field && field.value.length > 0);
   /**
    * After a decision on a pane card (Issue #1523): never away from a field being typed in. A keyboard decision walks on as
    * 下一条待处理 does, across pages, from where the decided card stood. A pointer decision stays on the page: the next pending card
    * here, else the card stays and 下一条待处理 is offered — or, at the Book's end, that is said once.
    */
   function advanceAfter(decided: EditorialMarkCardProjection, input: DecisionInput): void {
+    // The next pending card is looked for in the whole list: after the pages the editor had loaded are read back (Issue #1604).
+    if (paging.restoring()) { void paging.settled().then(() => advanceAfter(decided, input)); return; }
     if (destroyed || !options.comments?.enabled() || (activeComment !== undefined && activeComment !== decided.markId) || inTextEntry(document.activeElement)) return;
     const current = editor.currentWindow();
     const now = current.marks.find((mark) => mark.markId === decided.markId);
@@ -1504,13 +1633,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     options.host.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`);
 
   /** Below the paragraph and aligned to the text column (V2-UX-MARK-003). */
-  const placeBelowBlock = (node: HTMLElement, blockId: string): void => {
+  const placeBelowBlock = (node: HTMLElement, blockId: string, offset = 0): void => {
     const block = blockElement(blockId);
     const base = options.scroll.getBoundingClientRect();
     const rect = (block ?? options.host).getBoundingClientRect();
-    node.style.top = `${rect.bottom - base.top + options.scroll.scrollTop + 6}px`;
-    node.style.left = `${rect.left - base.left + options.scroll.scrollLeft}px`;
-    node.style.width = `${rect.width}px`;
+    const styles = { top: `${rect.bottom - base.top + options.scroll.scrollTop + 6 + offset}px`, left: `${rect.left - base.left + options.scroll.scrollLeft}px`, width: `${rect.width}px` };
+    for (const key of ['top', 'left', 'width'] as const) if (node.style[key] !== styles[key]) node.style[key] = styles[key];
   };
 
   const closeMenu = (): void => {
@@ -1518,20 +1646,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     menu = undefined;
   };
 
+  const guardClosedScroll = (): void => {
+    const mark = { top: options.scroll.scrollTop };
+    closedAt = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (closedAt === mark) closedAt = undefined; }));
+  };
   const closeFloating = (): void => {
+    const wasFloating = floating !== undefined;
+    const folded = draftComposers?.fold() ?? false;
     floatingRefresh = undefined;
     if (floating !== undefined) {
       const details = floating.querySelector<HTMLDetailsElement>('.editorial-mark-more');
       if (details && floating.dataset['markCard']) moreOpen.set(floating.dataset['markCard'], details.open);
       floating.remove();
-      // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
-      // frame that dispatches the `scroll` event of that adjustment, exactly as the editor's own does.
-      const mark = { top: options.scroll.scrollTop };
-      closedAt = mark;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (closedAt === mark) closedAt = undefined;
-      }));
     }
+    if (wasFloating && !folded) guardClosedScroll();
     floating = undefined;
     floatingBlockId = undefined;
     promptFor = null;
@@ -1558,9 +1687,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
     if (destroyed) return;
-    editor.setMarks(result.marks, result.marksTruncated);
-    // The pane's own command: its card comes back with the answer, and the others need no second read for it.
-    cardCache.sync(editor.currentWindow(), false);
+    editor.setMarks(result.marks, result.marksTruncated, result.marksPage);
+    // The pane's own command: its card comes back with the answer, and the others need no second read for it. A dense window reads
+    // its other pages back first, and its cards are looked at once the whole list is there.
+    paging.observe();
+    if (!paging.restoring()) cardCache.sync(editor.currentWindow(), false);
     if (result.card) {
       const card = result.card;
       cardCache.put(card);
@@ -1644,7 +1775,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         input = area;
       }
       input.name = field.name;
-      input.value = field.value;
+      input.value = config.draft && field.name === 'body' ? markDrafts.read(config.draft.scope, config.draft.place) : field.value;
+      if (config.draft && field.name === 'body') {
+        const draft = config.draft;
+        input.addEventListener('input', () => markDrafts.write(draft.scope, draft.place, input.value));
+      }
       input.required = field.required;
       input.dataset['markField'] = field.name;
       label.append(input);
@@ -1673,7 +1808,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const cancel = el('button', 'quiet', '取消');
     cancel.type = 'button';
     cancel.dataset['markAction'] = 'cancel';
-    cancel.addEventListener('click', () => config.cancel());
+    cancel.addEventListener('click', () => { if (config.draft) markDrafts.discard(config.draft.scope, config.draft.place); config.cancel(); });
     const row = el('div', 'button-row');
     row.append(submit, cancel);
     // What the action will do is said before the button that does it.
@@ -1685,12 +1820,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     // Ctrl/Cmd+Enter submits from any field (Issue #1411: 修改此处 applies with it); Enter alone stays a line break.
     form.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' || event.isComposing || !(event.ctrlKey || event.metaKey)) return;
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || (!(event.ctrlKey || event.metaKey) && !(config.id === 'reply' && !event.shiftKey))) return;
       event.preventDefault();
       form.requestSubmit();
     });
     form.addEventListener('submit', (event) => {
       event.preventDefault();
+      if (submit.disabled || (config.draft && markDrafts.sending(config.draft.scope, config.draft.place))) return;
       const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '', chosenApart: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       for (const { field, boxes } of boxGroups) values[field.name] = boxes.filter((entry) => !entry.row.hidden && entry.box.checked).map((entry) => entry.box.value).join('\n');
@@ -1702,12 +1838,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         return;
       }
       problem.hidden = true;
+      draftComposers?.submitStarted(submit);
       submit.disabled = true;
-      void config.submit(values).finally(() => {
+      const sending = config.draft ? (markDrafts.write(config.draft.scope, config.draft.place, values.body), markDrafts.send(config.draft.scope, config.draft.place, async () => (await config.submit(values)) !== false)) : config.submit(values);
+      void sending.finally(() => {
         submit.disabled = false;
       });
     });
-    queueMicrotask(() => inputs.values().next().value?.focus());
+    if (config.autofocus !== false) queueMicrotask(() => { const input = inputs.values().next().value; input?.focus({ preventScroll: true }); if (input instanceof HTMLTextAreaElement) input.setSelectionRange(input.value.length, input.value.length); });
     return form;
   };
 
@@ -1715,6 +1853,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     close();
     const composer = el('section', 'editorial-mark-composer');
     composer.setAttribute('role', 'dialog');
+    composer.tabIndex = -1;
     composer.setAttribute('aria-label', config.title);
     composer.dataset['markComposer'] = config.id;
     composer.append(buildForm(config));
@@ -1722,6 +1861,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     layer.append(composer);
     floating = composer;
     floatingBlockId = blockId;
+    if (config.draft && config.draft.place.kind !== 'reply') draftComposers?.attach(composer, config.draft.place);
     composer.scrollIntoView({ block: 'nearest' });
   };
 
@@ -1748,7 +1888,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       ...content,
     });
     applyCommand(result);
-    options.setStatus(done, 'success');
+    if (!destroyed) options.setStatus(done, 'success');
   }, '标记未能添加。');
 
   /** The words selected now, settled first — one block's range, or a span across paragraphs (Issue #1176); `null` once the reason was said. */
@@ -1847,13 +1987,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     });
   };
 
-  const composeNewMark = async (kind: 'annotation' | 'editor-note' | 'change-suggestion'): Promise<void> => {
+  const composeNewMark = async (kind: 'annotation' | 'editor-note' | 'change-suggestion', keptRange?: Extract<SelectedWords, { kind: 'range' }>): Promise<void> => {
     if (refuseWhileBusy()) return;
-    const range = await settledRange();
+    const range = keptRange ?? await settledRange();
     if (range === null) return;
+    const scope = { ...editor.currentWindow() };
     const suggestion = kind === 'change-suggestion';
     openComposer(range.blockId, {
       id: `create-${kind}`,
+      ...(!suggestion ? { draft: { scope, place: { kind, range } } } : {}),
       title: suggestion ? '提出修改建议' : kind === 'annotation' ? '添加批注' : '添加备注',
       quote: range.text,
       fields: suggestion
@@ -1875,10 +2017,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           range,
           suggestion ? '已提出修改建议；稿件本身未改动。' : kind === 'annotation' ? '已添加批注。' : '已添加备注。',
         );
-        if (made) {
+        if (made && !destroyed && (suggestion || draftComposers?.isOpen({ kind, range }))) {
+          const returnFocus = floating?.contains(document.activeElement) || document.activeElement === document.body;
           closeFloating();
-          editor.focus();
+          if (returnFocus) editor.focus();
         }
+        return made;
       },
       cancel: () => {
         closeFloating();
@@ -2011,9 +2155,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     extra: Parameters<typeof update>[2],
     done: string,
     reveal = true,
-  ): Promise<boolean> => command(async () => {
+  ): Promise<boolean> => {
+    const scope = { ...editor.currentWindow() };
+    return command(async () => {
     const result = await update(markId, action, extra);
-    if (destroyed) return;
+    if (action === 'remove' || action === 'convert') markDrafts.discard(scope, { kind: 'reply', markId });
+    if (destroyed || editor.currentWindow().bookId !== scope.bookId || editor.currentWindow().manuscriptId !== scope.manuscriptId || editor.currentWindow().branchId !== scope.branchId) return;
     applyCommand(result);
     options.setStatus(done, 'success');
     if (reveal) {
@@ -2021,6 +2168,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       else closeFloating();
     }
   }, '标记未能更新。', markId);
+  };
 
   const convertForm = (
     source: { markId: string; kind: EditorialMarkKind; blockId: string; pinnedText: string; body: string },
@@ -2440,11 +2588,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         disposition.append(
           cardAction('reply', '回复', 'secondary', () => { if (inline) { openCommentReply(card.markId); return; } showCard(card, (cancel) => ({
             id: 'reply',
+            draft: { scope: { ...editor.currentWindow() }, place: { kind: 'reply', markId: card.markId } },
             title: '回复',
             quote: null,
             fields: [{ name: 'body', label: '回复内容', value: '', required: true }],
             submitLabel: '发送回复',
-            submit: async (values) => { await change(card.markId, 'reply', { body: values.body }, '已回复。'); },
+            submit: async (values) => change(card.markId, 'reply', { body: values.body }, '已回复。'),
             cancel,
           })); }),
           card.status === 'open'
@@ -2514,19 +2663,28 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
       return panel;
     }
+    draftComposers?.fold();
     floating?.remove();
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
     floating = panel;
     floatingBlockId = card.blockId;
     openCardId = card.markId;
-    panel.scrollIntoView({ block: 'nearest' });
     const previews = card.suggestion !== null && card.status !== 'applied' && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
     inlinePreviewId = undefined;
     editor.setActiveMark({
       markId: card.markId,
       previewText: previews ? card.suggestion!.decision?.editedText ?? card.suggestion!.proposedText : null,
     });
+    if (!form && card.kind === 'annotation' && markDrafts.read(editor.currentWindow(), { kind: 'reply', markId: card.markId })) {
+      panel.append(buildForm({ id: 'reply', title: '回复', quote: null, autofocus: false,
+        draft: { scope: { ...editor.currentWindow() }, place: { kind: 'reply', markId: card.markId } },
+        fields: [{ name: 'body', label: '回复内容', value: '', required: true }], submitLabel: '发送回复',
+        submit: values => change(card.markId, 'reply', { body: values.body }, '已回复。'), cancel: () => showCard(card),
+      }));
+    }
+    // Fit the final card, including a retained reply: fitting before appending it leaves the field below the window.
+    panel.scrollIntoView({ block: 'nearest' });
     if (!form) {
       const restore = focusMore ? more.querySelector<HTMLElement>('summary') : focusAction ? panel.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(focusAction)}"]`) : null;
       (restore ?? dismiss).focus({ preventScroll: true });
@@ -2749,6 +2907,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       section.setAttribute('role', 'group');
       section.setAttribute('aria-label', group.label);
       section.append(el('p', 'section-label', group.label));
+      let swatchRow: HTMLElement | undefined;
       for (const item of group.items) {
         const control = el('button', 'editorial-mark-menu-item');
         control.type = 'button';
@@ -2760,6 +2919,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (item.swatch !== undefined) {
           control.dataset['markColor'] = String(item.swatch);
           caption.append(el('span', 'editorial-mark-swatch'));
+          control.setAttribute('aria-label', item.label);
+          control.title = item.label;
+          control.classList.add('editorial-mark-swatch-item');
         }
         caption.append(el('span', undefined, item.label));
         if (item.hint) caption.append(el('small', 'muted', item.hint));
@@ -2768,7 +2930,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         const shortcut = clipboardShortcuts[item.action];
         const key = el('kbd', 'menu-shortcut', shortcut ?? '');
         key.setAttribute('aria-hidden', 'true');
-        control.append(key);
+        if (shortcut !== undefined) control.append(key);
         if (item.disabledReason !== undefined || item.run === undefined) {
           control.disabled = true;
           control.setAttribute('aria-disabled', 'true');
@@ -2791,7 +2953,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           });
         }
         controls.push(control);
-        section.append(control);
+        if (item.swatch !== undefined) {
+          if (!swatchRow) { swatchRow = el('div', 'editorial-mark-swatch-row'); swatchRow.append(el('span', undefined, item.action.startsWith('recolor-') ? '换颜色' : '加高亮')); section.append(swatchRow); }
+          swatchRow.append(control);
+        } else { swatchRow = undefined; section.append(control); }
       }
       if (group.note) section.append(el('small', 'muted', group.note));
       panel.append(section);
@@ -2802,6 +2967,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       let next: HTMLButtonElement | undefined;
       if (event.key === 'ArrowDown') next = enabled[(index + 1) % enabled.length];
       else if (event.key === 'ArrowUp') next = enabled[(index - 1 + enabled.length) % enabled.length];
+      else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && enabled[index]?.dataset['markColor']) {
+        const row = enabled[index]!.parentElement;
+        const swatches = enabled.filter(control => control.parentElement === row);
+        const at = swatches.indexOf(enabled[index]!);
+        next = swatches[(at + (event.key === 'ArrowRight' ? 1 : swatches.length - 1)) % swatches.length];
+      }
       else if (event.key === 'Home') next = enabled[0];
       else if (event.key === 'End') next = enabled.at(-1);
       else if (event.key === 'Escape' || event.key === 'Tab') {
@@ -2824,60 +2995,34 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // 就这段提问… (Issue #52, S17a), 就这段发起任务… (Issue #423, S77b) and the house's 可复用工序 on the selection (S77 deferred item a)
-  // are connected; 润色这段 waits for a polishing 工序. A Production Document's manuscript offers no selection Task (its surface
-  // passes no way to start one; the Owner, 2026-10-09).
+  // Keep the existing action hooks; saved procedures remain in the selection task composer (#1539, I-1b). Its entry carries
+  // the title of the draft it opens and says which outcome that draft starts on (stage 4/5 rework R4).
   const AI7_TASK_REASON = SELECTION_TASK_DOCUMENT_REASON;
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
   const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
     action: 'task-on-selection',
-    label: SELECTION_TASK_MENU_LABEL,
+    label: SELECTION_TASK_TITLE,
+    hint: '默认审阅，也可改为分析、事实核查或写作。',
     ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
       : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
   });
-  /** Whether this launch can run 润色这段 (Issue #842), as the service says it: read again for each selection menu. */
-  const polishOptions = options.polish;
-  const polishRoute = polishOptions === undefined ? null : latestAnswer(() => polishOptions.routes(), () => !destroyed);
-  void polishRoute?.refresh();
-  const polishItem = (selectionReason: string | undefined): MenuItem => {
-    const route = polishRoute?.current()?.editorialPolish ?? null;
-    return {
-      action: 'preset-polish', label: SELECTION_POLISH_LABEL, hint: SELECTION_POLISH_HINT,
-      ...(polishOptions === undefined ? { disabledReason: AI7_TASK_REASON }
-        : selectionReason !== undefined ? { disabledReason: selectionReason }
-          : route === null ? { disabledReason: SELECTION_POLISH_READING }
-            : !route.available ? { disabledReason: route.reason ?? SELECTION_POLISH_READING } : { run: () => void polishSelection() }),
-    };
-  };
-  /** The house's 可复用工序 as they apply to a selection of this Book: read again for each selection menu, drawn once read. */
-  const startOnSelection = options.startTaskOnSelection;
-  const houseProcedures = startOnSelection === undefined ? null : latestAnswer(() => startOnSelection.procedures(), () => !destroyed);
-  void houseProcedures?.refresh();
-  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null, spanned = false): MenuGroup => ({
+  const aiTaskGroup = (selectionReason: string | undefined): MenuGroup => ({
     label: 'AI7 任务',
-    note: selectionTaskGroupNote(options.startTaskOnSelection === undefined ? null : procedures),
     items: [
+      { action: 'scoped-ai-edit', label: SCOPED_AI_EDIT_MENU_LABEL, hint: SCOPED_AI_EDIT_MENU_HINT,
+        ...(options.scopedAiEdit === undefined ? { disabledReason: AI7_TASK_REASON }
+          : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeScopedOnSelection() }) },
       taskOnSelection(selectionReason, () => void composeTask()),
       {
-        action: 'ask-on-selection', label: DIALOGUE_MENU_LABEL, hint: DIALOGUE_MENU_HINT,
+        action: 'ask-on-selection', label: '问 AI 助手', hint: '带着选中文字提问或讨论，不直接改稿。',
         ...(options.askAboutSelection === undefined ? { disabledReason: AI7_TASK_REASON }
           : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeQuestion() }),
       },
-      // One entry per enabled procedure (as 新建审阅's 按已保存的工序 lists them): it opens the same composer with that procedure chosen.
-      ...(options.startTaskOnSelection === undefined ? [] : procedures ?? []).map((entry): MenuItem => ({
-        action: entry.value,
-        label: entry.label,
-        ...(entry.hint === null ? {} : { hint: entry.hint }),
-        ...(selectionReason !== undefined ? { disabledReason: selectionReason } : spanned ? { disabledReason: SELECTION_SPAN_PROCEDURE_REASON }
-          : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
-      })),
-      polishItem(selectionReason),
-      ...scopedAiEditItems(selectionReason),
     ],
   });
 
-  /** 就选中部分让 AI 修改… and the selection's 🔒 (Issue #1412): offered wherever the surface passes the scoped edit. */
-  const scopedAiEditItems = (selectionReason: string | undefined): MenuItem[] => {
+  /** Locking protects manuscript text; it is separate from the three AI requests. */
+  const aiLockItems = (selectionReason: string | undefined): MenuItem[] => {
     const scoped = options.scopedAiEdit;
     if (scoped === undefined) return [];
     const range = editor.selectedRange();
@@ -2885,7 +3030,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const reading = words === null ? null : selectionInputOf(words);
     const locked = reading !== null && selectionLocked(editor.currentWindow(), reading);
     return [
-      { action: 'scoped-ai-edit', label: SCOPED_AI_EDIT_MENU_LABEL, ...(selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeScopedOnSelection() }) },
       { action: locked ? 'ai-unlock-selection' : 'ai-lock-selection', label: locked ? AI_UNLOCK_SELECTION_LABEL : AI_LOCK_SELECTION_LABEL,
         ...(selectionReason !== undefined || reading === null ? { disabledReason: selectionReason ?? '先选中文字' }
           : { run: () => void setAiLocks(scoped.host, selectionLockTargets(reading), !locked) }) },
@@ -2913,45 +3057,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const reading = await spanNow();
     if (reading === null) return;
     openScopedComposer(reading.span.blockId, reading.span, reading.span.selectedText);
-  };
-
-  /**
-   * 润色这段 (Issue #842; the Owner's decision 18 of 2026-10-13): the selected words go to the model at once with their paragraph's
-   * context, and what comes back is 修改建议 on those words — open, attributed to the polish, never accepted or applied. The
-   * request is read again until it settles; the editor keeps working meanwhile, and a suggestion whose words changed is not placed.
-   */
-  const polishSelection = async (): Promise<void> => {
-    if (refuseWhileBusy() || polishOptions === undefined) return;
-    const range = await settledWords();
-    if (range === null || destroyed) return;
-    closeMenu();
-    options.setStatus(SELECTION_POLISH_STATUS.requesting, 'busy');
-    let settled: EditorialPolishProjection;
-    try {
-      settled = await polishOptions.polish({ selection: selectionInputOf(range) });
-    } catch (error) {
-      options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.failed), 'error');
-      return;
-    }
-    try {
-      while (settled.state === 'requesting' && !destroyed) {
-        await new Promise((resolve) => window.setTimeout(resolve, POLISH_READ_AGAIN_MS));
-        settled = await polishOptions.inspect(settled.taskId);
-      }
-    } catch (error) {
-      if (!destroyed) options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.unreadable), 'error');
-      return;
-    }
-    if (destroyed) return;
-    options.setStatus(settled.label, settled.state === 'suggested' || settled.state === 'nothing-to-suggest' ? 'success' : 'error');
-    if (settled.markIds.length === 0) return;
-    // The new 修改建议 are drawn from the window as the service holds it once the editor's own typing is written.
-    await editor.flush();
-    const read = await polishOptions.marks().catch(() => null);
-    if (read === null || destroyed || read.journalSequence !== editor.currentWindow().journalSequence) return;
-    editor.setMarks(read.marks, read.truncated);
-    refreshComments();
-    options.marksChanged?.();
   };
 
   /**
@@ -3203,15 +3308,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : range.kind === 'span' ? `已选 ${spanGraphemes(range)} 字 · ${range.span.length} 段` : range.kind === 'none' ? '未选中文字' : '已选中文字';
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
-    const shownProcedures = houseProcedures?.current() ?? null;
     const paragraph = range.kind === 'none' && contextParagraph ? editor.currentWindow().blocks.find((block) => block.blockId === contextParagraph) : undefined;
-    const taskGroup = aiTaskGroup(paragraph ? undefined : range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span');
+    const taskGroup = aiTaskGroup(paragraph ? undefined : range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind));
     if (paragraph) for (const item of taskGroup.items) {
       if (!item.run) continue;
       const run = item.run;
       item.run = () => { if (editor.selectRange(paragraph.blockId, 0, [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(paragraph.text)].length)) run(); };
-      if (item.action === 'task-on-selection') item.label = '就本段发起任务…';
-      if (item.action === 'ask-on-selection') item.label = '就本段提问…';
     }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
@@ -3233,42 +3335,25 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           { action: 'paste-plain-text', label: '粘贴为纯文本', ...writes(() => void runClipboard('paste-plain-text')) },
         ],
       },
-      ...(range.kind === 'none' ? [] : [{
-        label: '编辑标记',
-        ...(why ? { note: why } : {}),
-        items: [
-          { action: 'add-change-suggestion', label: '提出修改建议', hint: '替换原文，待接受', ...(why ? { disabledReason: why } : { run: () => void composeNewMark('change-suggestion') }) },
-          { action: 'add-annotation', label: '添加批注', hint: '可导出', ...(why ? { disabledReason: why } : { run: () => void composeNewMark('annotation') }) },
-          { action: 'add-editor-note', label: '添加备注', hint: '仅自己可见', ...(why ? { disabledReason: why } : { run: () => void composeNewMark('editor-note') }) },
-          ...([1, 2, 3] as const).map((color): MenuItem => ({
-            action: `add-highlight-${color}`,
-            label: `加高亮 · ${HIGHLIGHT_COLOR_LABELS[color]}`,
-            swatch: color,
-            ...(why ? { disabledReason: why } : {
-              run: () => void (async () => {
-                if (refuseWhileBusy()) return;
-                const settled = await settledRange();
-                if (settled === null) return;
-                await createFromSelection('personal-highlight', { highlightColor: color, body: '', proposedText: null, rationale: null }, settled, '已加高亮。');
-                editor.focus();
-              })(),
-            }),
-          })),
-        ],
-      }]),
+      ...(range.kind === 'none' ? [] : [editorialMarkMenuGroup(why, {
+        compose: kind => void composeNewMark(kind),
+        highlight: color => void (async () => {
+          if (refuseWhileBusy()) return;
+          const settled = await settledRange();
+          if (settled === null) return;
+          await createFromSelection('personal-highlight', { highlightColor: color, body: '', proposedText: null, rationale: null }, settled, '已加高亮。');
+          editor.focus();
+        })(),
+      })]),
       // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
       taskGroup,
+      ...(options.scopedAiEdit === undefined || range.kind === 'none' ? [] : [{ label: '保护文字', items: aiLockItems(range.kind === 'span' ? undefined : why) }]),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
-    if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
+    if (!reread || inSeries === null) return;
     const drawn = menu;
-    const shownPolish = JSON.stringify(polishRoute?.current()?.editorialPolish ?? null);
-    // The Book's Series, the house's procedures and whether 润色这段 can run are read again together; the menu is drawn again once
-    // when any of them moved.
-    void Promise.all([inSeries?.refresh(), houseProcedures?.refresh(), polishRoute?.refresh()]).then(() => {
-      if (drawn === undefined || menu !== drawn) return;
-      if (sameSeriesGroup(shown, inSeries?.current() ?? null) && sameProcedureEntries(shownProcedures, houseProcedures?.current() ?? null) &&
-        shownPolish === JSON.stringify(polishRoute?.current()?.editorialPolish ?? null)) return;
+    void inSeries.refresh().then(() => {
+      if (drawn === undefined || menu !== drawn || sameSeriesGroup(shown, inSeries.current())) return;
       // The answer differs from what this menu shows: draw it again from the corner it stands at — it moves only if it no
       // longer fits the window — keeping the item the editor is on, a 书系 entry by its Series (Issue #642 review).
       const active = document.activeElement;
@@ -3512,6 +3597,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   // paragraph follows it, and a menu opened at a pointer position that no longer means anything goes.
   const reflow = new ResizeObserver(() => {
     if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
+    draftComposers?.restore();
   });
   // A menu points at a place on screen: once the reader scrolls the text from under it — a wheel or a touch moving over
   // the pane — it points at nothing and goes (a drag on the pane's scrollbar is a mousedown, which closes it already).
@@ -3540,6 +3626,28 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   document.addEventListener('mousedown', onDocumentMouseDown);
   document.addEventListener('keydown', onDocumentKeyDown);
 
+  draftComposers = createDraftComposers({
+    scope: () => editor.currentWindow(), block: blockElement, layer, scroll: options.scroll, place: placeBelowBlock,
+    expand: place => void composeNewMark(place.kind, { kind: 'range', ...place.range }),
+    closed: () => { guardClosedScroll(); floating = undefined; floatingBlockId = undefined; },
+  });
+  const stopDrafts = markDrafts.subscribe(() => {
+    for (const input of commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')) {
+      if (input.closest('form')?.dataset['composing'] !== 'true') {
+        const body = markDrafts.read(editor.currentWindow(), { kind: 'reply', markId: input.dataset['commentReply']! });
+        if (input.value !== body) input.value = body;
+      }
+    }
+    const floatingReply = floating?.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea');
+    if (floatingReply && openCardId) {
+      const body = markDrafts.read(editor.currentWindow(), { kind: 'reply', markId: openCardId });
+      if (floatingReply.value !== body) floatingReply.value = body;
+    }
+    draftComposers?.restore(); scheduleCommentsLayout();
+  });
+  const draftReflow = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(() => draftComposers?.restore());
+  draftReflow?.observe(options.host, { childList: true, subtree: true });
+  draftComposers.restore();
   refreshComments();
 
   return {
@@ -3548,6 +3656,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     reanchor: () => {
       refreshComments();
       closeMenu();
+      draftComposers?.restore();
       if (floating === undefined) return;
       const blockId = floatingBlockId;
       if (floating.dataset['markComposer'] !== undefined && blockId !== undefined && blockElement(blockId) !== null) {
@@ -3557,9 +3666,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
       const composer = floating.dataset['markComposer'] !== undefined;
       closeFloating();
-      if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
+      if (composer) draftComposers?.restore();
     },
-    holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
+    holdsFloating: () => menu !== undefined || (floating !== undefined && (!draftComposers?.owns(floating) || floating.contains(document.activeElement))) || composersPending > 0,
     selectionSpan: async () => {
       if (!['range', 'span'].includes(editor.selectedRange().kind)) return SELECTION_TASK_PICK_RANGE;
       return (await spanNow()) ?? SELECTION_TASK_PICK_RANGE;
@@ -3593,10 +3702,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     },
     stepPending,
     bookPendingChanged: paintBookPending,
-    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top) ||
+    ownsScroll: () => composersPending > 0 || (floating !== undefined && (!draftComposers?.owns(floating) || floating.contains(document.activeElement))) || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top) ||
       (revealScroll !== undefined && options.scroll.scrollTop === revealScroll.top),
     destroy: () => {
       destroyed = true;
+      stopDrafts(); draftReflow?.disconnect(); draftComposers?.destroy();
       cardCache.clear();
       commentNodes.clear();
       commentsResize.disconnect();
@@ -3608,6 +3718,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       document.removeEventListener('click', releaseCommentPress);
       window.removeEventListener('blur', cancelCommentPress);
       filterButton.remove();
+      for (const add of addButtons) add.remove();
       if (heading) statusChips.remove();
       commentsScroll.removeEventListener('scroll', scrollCommentsPane);
       window.removeEventListener('resize', scheduleCommentsLayout);
@@ -3616,6 +3727,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.host.removeEventListener('pointerdown', onTextPointerDown, { capture: true });
       options.host.removeEventListener('pointerout', onMarkHover);
       filterBar.remove();
+      disclosureLine.remove();
+      paging.row.remove();
       leaders.remove();
       editor.setLinkedMark(null);
       editor.setVisibleMarkIds(null);

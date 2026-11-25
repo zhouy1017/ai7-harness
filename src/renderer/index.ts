@@ -1,4 +1,5 @@
 import { leaveReviewReturn } from './review-return.js';
+import { createImportWindow } from './import-window.js';
 import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
@@ -9,7 +10,7 @@ import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFa
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
 import { createStatusSurface, followBottomControls, reportResult } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
-import { ScreenReturnHistory } from './screen-return.js';
+import { BOOK_SCREEN_SECTIONS, ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
 import { createModelServiceSettings } from './model-service-settings.js';
 import { createKnowledgeBase } from './knowledge-base.js';
@@ -17,9 +18,9 @@ import { createDataStorage } from './data-storage.js';
 import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from './manuscript-screen.js';
 import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
-import { mountFindingsCenter } from './findings-center.js';
+import { mountFindingsCenter, type FindingTextTarget } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { goBack } from './command-usable.js';
+import { commandUsable, goBack, refreshCommandEntries, type UsableScreen } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
 
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -52,7 +53,6 @@ import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountSeries, mountSeriesList, seriesListHead } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
 import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
-import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
@@ -90,11 +90,12 @@ import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 
 
 
-import { SHELL_LABELS } from './shell-labels.js';
+import { SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { mountTaskNavigationBadge } from './task-navigation-badge.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -105,7 +106,8 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
-const api = reconcileBookWorkbenchApi(window.ai7, {
+const importWindow = createImportWindow(window.ai7);
+const api = reconcileBookWorkbenchApi(importWindow.api, {
   bookOnScreen: () => navigation.bookId,
   editorOnScreen: () => manuscriptOnScreen === null ? null : { manuscriptId: manuscriptOnScreen.manuscriptId, branchId: manuscriptOnScreen.branchId },
   left: () => shell.leaveBook(),
@@ -141,7 +143,7 @@ const overviewApi = taskOverviewApi(api, () => overviewDrawerBookId);
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
   shell: document.body,
-  api: overviewApi,
+  api: overviewApi, overviewApiForBook: bookId => overviewDrawerBookId === null ? undefined : taskOverviewApi(api, () => bookId),
   openTaskOverview: () => void leaveThen(async () => renderTaskOverview()),
   technicalDetails,
   errorMessage: rendererErrorMessage,
@@ -173,6 +175,7 @@ const taskDrawer = mountTaskDrawer({
     if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
     else openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi);
   },
+  configureBookTask: (bookId, kind) => configureBookTask(bookId, kind),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -673,6 +676,7 @@ commandDispatcher.register({
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
   'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
+  'help.open': () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   'nav.back': () => goBack({ screen, press: clickCommandEntry, returnToOrigin: () => void returnToOrigin() }),
   'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
   'view.openTasks': () => {
@@ -681,13 +685,13 @@ commandDispatcher.register({
   },
 });
 
+const usableScreen: UsableScreen = { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined };
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
-  screen: { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined },
+  screen: usableScreen,
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
-  openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,
   status: setStatus,
 });
@@ -701,22 +705,6 @@ function applyKeyboardBindings(bindings: Parameters<typeof configureCommandLabel
   refreshShortcutLabels(document);
 }
 void api.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
-
-/** Each shortcut hint is derived from the same registry that dispatches it (KEY-011). */
-function refreshCommandEntries(): void {
-  for (const entry of document.querySelectorAll<HTMLElement>('[data-nav-destination]')) entry.dataset['shortcutCommand'] = `nav.${entry.dataset['navDestination']}`;
-  for (const [id, , section] of BOOK_SECTION_COMMANDS) {
-    const entry = document.querySelector<HTMLElement>(`[data-nav-book-section="${section}"]`);
-    if (entry !== null) entry.dataset['shortcutCommand'] = id;
-  }
-  const settings = document.querySelector<HTMLElement>('[data-nav-settings]');
-  if (settings !== null) settings.dataset['shortcutCommand'] = 'nav.settings';
-  requiredElement('#sidebar-toggle').dataset['shortcutCommand'] = 'view.toggleSidebar';
-  for (const entry of screen.querySelectorAll<HTMLButtonElement>('button')) {
-    if ((BACK_COMMAND_ENTRIES as readonly string[]).includes(entry.textContent?.trim() ?? '')) entry.dataset['shortcutCommand'] = 'nav.back';
-  }
-  refreshShortcutLabels(document);
-}
 
 /**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
@@ -832,22 +820,8 @@ const shell = mountShell({
   },
 });
 
-// 任务's sidebar badge follows the same read-only projection as the page (Issue #1328).
-const taskNavigationBadge = element('span', 'task-navigation-badge');
-taskNavigationBadge.setAttribute('aria-hidden', 'true');
-const taskNavigationLink = document.querySelector<HTMLElement>('[data-nav-destination="tasks"]');
-if (taskNavigationLink !== null) {
-  taskNavigationLink.append(taskNavigationBadge);
-  const refreshTaskBadge = (): void => {
-    void api.inspectTaskOverview().then((projection) => {
-      const count = projection.runningCount + projection.queuedCount + projection.actionableCount;
-      taskNavigationBadge.textContent = count > 0 ? String(count) : '';
-      taskNavigationBadge.hidden = count === 0;
-    }, () => undefined);
-  };
-  taskNavigationBadge.hidden = true;
-  globalAttentionReader.subscribe((reading) => { if (reading.kind === 'projection') refreshTaskBadge(); });
-}
+// 任务's sidebar badge: the tasks in progress, from the same read-only projection as the page (Issue #1328, #1680).
+const taskNavigationBadge = mountTaskNavigationBadge(document.querySelector<HTMLElement>('[data-nav-destination="tasks"]'), globalAttentionReader, () => element('span'));
 
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
@@ -979,17 +953,18 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const content = screen.firstElementChild;
   const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
   if (restore !== undefined) return restore;
-  const state = screen.dataset['screen'];
-  if (state === 'help') return renderHelp;
-  if (state === 'data-storage') return renderDataAndStorage;
+  const state = screen.dataset['screen'] ?? '';
+  // 帮助 and every page of 设置 open again as the settings navigation opens them.
+  const settingsPage = settingsPages()[state as SettingsRoute];
+  if (settingsPage !== undefined) return settingsPage;
   if (state === 'quality-learning') return () => renderQualityLearning();
   if (state === 'knowledge-base') return () => renderKnowledgeBase();
-  if (state === 'model-service') return renderModelServiceSettings;
   if (state === 'series-list' || state === 'series') return () => renderSeriesList(null);
-  if (state === 'evaluation-calibration') return () => renderEvaluationCalibration(null);
   const book = shell.currentBook();
-  if (book !== null && content instanceof HTMLElement && content.dataset['bookId'] === book.bookId) return () => openBookSection(book, 'overview');
-  return initializeStartup;
+  if (book === null || !(content instanceof HTMLElement) || content.dataset['bookId'] !== book.bookId) return initializeStartup;
+  // A Book page with no way back of its own opens again on its own tab, not on 工作概览.
+  if (state === 'agent-workspace') return () => openAgentWorkspace(book.bookId, agentWorkspaceReturn(book.bookId, book.title));
+  return () => openBookSection(book, BOOK_SCREEN_SECTIONS[state] ?? 'overview');
 }
 
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
@@ -1046,7 +1021,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   globalAttentionReader.refresh();
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
-  refreshCommandEntries();
+  refreshCommandEntries(screen);
 }
 
 /**
@@ -1285,7 +1260,7 @@ async function renderGlobalAgent(dialogueId?: string): Promise<void> {
     await api.leaveBookWorkbench();
     if (!navigationRoute.isCurrent()) return;
     replaceScreen('global-agent', mountGlobalAgent({ api: api, setStatus, errorMessage: rendererErrorMessage,
-      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
+      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)), openModelService: () => void leaveThen(() => renderModelServiceSettings()) }));
   } catch (error) {
     if (navigation.errorIsCurrent(error, navigationRoute)) throw error;
   }
@@ -2429,7 +2404,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   content.append(host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
-  mountFindingsCenter(host, (offset) => api.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
+  mountFindingsCenter(host, (input) => api.inspectBookFindings(input), (item: BookFindingProjection) => {
     const target = item.target;
     if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
     else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
@@ -2439,7 +2414,8 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     if (!suggestions.length) return;
     try { return await applyFindingBatches(suggestions, api); }
     catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
-  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
+  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); },
+  (target) => goToReviewText(bookId, bookTitle, target, { name: FINDINGS_CENTER_WORDS.heading, back: () => renderBookFindings(bookId, bookTitle) }));
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }
 
@@ -2523,6 +2499,19 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
   focusAfterLoad(item, { preventScroll: true });
 }
 
+/** 回到原文 from a finding: the manuscript at its paragraph, leaving the way back to the page it was pressed on — 审阅 unless `from` names another. */
+async function goToReviewText(bookId: string, bookTitle: string, target: FindingTextTarget, from?: { name: string; back: () => void }): Promise<void> {
+  const current = navigation.begin();
+  const origin = screen.firstElementChild;
+  const opened = await api.getManuscriptWindowAt({
+    manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId },
+  });
+  if (!current.isCurrent()) return;
+  leaveReviewReturn(bookId, target, () => { void leaveThen(async () => (from?.back ?? (() => renderBookReview(bookId, bookTitle)))()); }, from?.name);
+  if (!current.isCurrent() || screen.firstElementChild !== origin) return;
+  await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
+}
+
 /**
  * ②B 审阅 as its own Book destination under 工作 (editor-surfaces §4, V2-UX-REV-001). The surface is
  * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
@@ -2559,19 +2548,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
     },
-    goToText: async (target) => {
-      const current = navigation.begin();
-      const origin = screen.firstElementChild;
-      const opened = await api.getManuscriptWindowAt({
-        manuscriptId: target.manuscriptId,
-        branchId: target.branchId,
-        target: { kind: 'block', blockId: target.blockId },
-      });
-      if (!current.isCurrent()) return;
-      leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
-      if (!current.isCurrent() || screen.firstElementChild !== origin) return;
-      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
-    },
+    goToText: (target) => goToReviewText(bookId, bookTitle, target),
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     openRules: () => void renderKnowledgeBase('guidelines'),
@@ -2804,12 +2781,12 @@ function renderDerivativesWorkspace(bookId: string, bookTitle: string): void {
   const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: api,
     setStatus, errorMessage: rendererErrorMessage,
     openDocument: (doc, type, notice) => openProductionDocument(doc, type, bookTitle, notice),
+    writing: { awaitServiceJob, openLaunch: (request) => taskDrawer.openLaunch(request, () => null), openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note) },
   });
   replaceScreen('book-derivatives', content, { bookId, title: bookTitle, section: 'derivatives' });
   derivativesSurface = surface;
   agentWorkspaceReturns.set(content, () => renderDerivativesWorkspace(bookId, bookTitle));
   surface.start();
-  setStatus('衍生稿件');
 }
 
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
@@ -3210,19 +3187,6 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
   }
 }
 
-/** The Book sections a 返回 from the Agent 工作区 goes back to, by the screen the editor left (Issue #90, slice 13a). */
-const AGENT_WORKSPACE_RETURN_SECTIONS: Readonly<Record<string, ShellBookSection>> = Object.freeze({
-  'book-overview': 'overview',
-  imported: 'overview',
-  'book-analysis': 'analysis',
-  'book-review': 'review',
-  'book-evaluation': 'evaluation',
-  'book-deliverables': 'deliverables',
-  'book-derivatives': 'derivatives',
-  'book-findings': 'findings',
-  'book-sources': 'sources',
-});
-
 /**
  * Where 返回 leaves the Agent 工作区 for (Issue #90, slice 13a; AGENT-002): the work the editor left, read before the workspace
  * replaces it — the manuscript where it was being read, or the Book section on screen; 工作概览 otherwise.
@@ -3233,7 +3197,7 @@ function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
   const onScreen = content?.dataset['bookId'] ?? null;
   const restore = content !== null && onScreen === bookId ? agentWorkspaceReturns.get(content) : undefined;
   const reading = state === 'editor' && onScreen === bookId ? manuscriptOnScreen?.readingPlace() ?? null : null;
-  const section = onScreen === bookId ? AGENT_WORKSPACE_RETURN_SECTIONS[state] ?? null : null;
+  const section = onScreen === bookId ? BOOK_SCREEN_SECTIONS[state] ?? null : null;
   return () => void leaveThen(async () => {
     let current = navigation.route();
     try {
@@ -3424,7 +3388,9 @@ function renderEditorWindow(
       leaveGuard = () => surface.settle();
       agentWorkspaceReturns.set(content, async () => {
         const current = navigation.begin();
-        const opened = await api.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
+        // Where it was last read (RET-002, Issue #1703); its first page only when another manuscript was read since.
+        const { manuscriptId, branchId } = initialWindow, read = lastReadingPlace?.manuscriptId === manuscriptId && lastReadingPlace.branchId === branchId ? lastReadingPlace.blockId : null;
+        const opened = read === null ? await api.getManuscriptWindow({ manuscriptId, branchId, cursor: null }) : await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: read } });
         if (!current.isCurrent()) return;
         await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId, undefined, current);
       });
@@ -3486,7 +3452,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
-const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+const { configureBookTask, openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
   technicalDetails,
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
@@ -3514,6 +3480,7 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
   requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
   jumpToSelectionText: (...args) => jumpToSelectionText(...args),
   renderBookReview: (...args) => renderBookReview(...args),
+  openManuscriptWriting: () => manuscriptOnScreen?.openWriting(),
   renderBookManuscript: (...args) => renderBookManuscript(...args),
   button: (...args) => button(...args),
   element: (...args) => element(...args),
@@ -3544,6 +3511,7 @@ const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, r
   screen,
   renderRunReport: (...args) => renderRunReport(...args),
   applyKeyboardBindings: (...args) => applyKeyboardBindings(...args),
+  commands: { run: (id) => commandDispatcher.execute(id), usable: (id) => commandUsable(id, usableScreen) },
   get keyboardSettingsOff() { return keyboardSettingsOff; },
   set keyboardSettingsOff(value) { keyboardSettingsOff = value; },
   renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
@@ -3588,8 +3556,6 @@ const { renderBookOverview } = createBookOverviewScreen({
   set authorityInterrupted(value) { authorityInterrupted = value; },
   get statusRevision() { return statusRevision; },
 });
-
-
 const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine, reimportLandingSection, installDropHandlers } = createLibraryScreen({
   element: (...args) => element(...args),
   button: (...args) => button(...args),
@@ -3613,7 +3579,7 @@ const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine,
   returnToRecoveryComparison: (...args) => returnToRecoveryComparison(...args),
   appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
   replaceScreen: (...args) => replaceScreen(...args),
-  screen,
+  screen, importWindow,
   settleScreen: (...args) => settleScreen(...args),
   renderEditorWindow: (...args) => renderEditorWindow(...args),
   get statusRevision() { return statusRevision; },

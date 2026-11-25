@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
-import { dialogueSseEvents, isProviderAccountLimit, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { dialogueSseEvents, familyStreamEvents, isProviderAccountLimit, parseProviderResponse, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { observedRecordingEffort, recordingSendObserver, type RecordingSendResult } from './recording-send-observer.js';
+import { modelProfileFor } from './model-profile.js';
 import {
   NO_INCURRED_USAGE,
   ProviderResultCache,
@@ -22,6 +24,7 @@ import {
   type ProviderValidationRecord,
 } from './provider-result-cache.js';
 import type { ResearchSnapshot, ResearchSnapshotCache } from './research-snapshot-cache.js';
+import { identityForm, identityRemap, remapResponse } from './identity-replay.js';
 
 /**
  * The once-only live transmission (ADR 0067, ADR 0070, ADR 0089), shared by every path that sends to a model or a platform tool
@@ -53,6 +56,7 @@ export interface LiveModelValidation {
   readonly step: string;
   /** The wire shape of the request body, as the model profile declares it. */
   readonly requestShape: string;
+  readonly stream?: boolean;
 }
 
 /** What a live model call hands back: the response, and whether it was a replay that sent nothing and incurred nothing. */
@@ -66,6 +70,7 @@ export interface LiveModelResponse {
 
 type RequestIdentity = Pick<Required<ProviderLedgerLine>, 'route' | 'endpoint' | 'requestShape' | 'cacheKey' | 'claimKey' | 'semanticDigest' | 'generation' | 'evidencePosition'>;
 type ClaimFacts = Omit<ProviderClaim, 'schema' | 'state'>;
+type ObserveRecording = (result: RecordingSendResult, code: string) => void;
 
 const CONFIGURATION_FIELDS = ['route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest'] as const;
 
@@ -79,8 +84,9 @@ function itemList(lines: ReadonlyArray<{ readonly itemId: string }>): string {
 
 /**
  * Decide one development validation call against verified capture provenance and the current ledger.
- * Exact requests replay only under their original namespace and active generation. Equivalent or
- * similar validation selects prior evidence, never another input's response. A substantive declared
+ * Exact requests replay only under their original namespace and active generation; the same request
+ * asked with other minted identities replays its capture mapped onto them (Issue #1585). Similar
+ * validation selects prior evidence, never another input's response. A substantive declared
  * delta permits new evidence; a possibly billed request instead needs a necessary retry reason and a
  * stopped sender. Claims are never moved out from under an active process: each attempt exclusively
  * creates the fixed successor of the attempt it observed. Original and incurred usage remain distinct.
@@ -96,6 +102,7 @@ export async function transmitOnce(
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ): Promise<LiveModelResponse> {
   const { intent } = validation;
+  const observer = recordingSendObserver(intent);
   const step = validationStep(validation.step, init.body);
   const namespace: ProviderRequestNamespace = { route: profile.route, endpoint: url, requestShape: validation.requestShape, model };
   const requestDigest = providerRequestDigest(init.body);
@@ -113,6 +120,7 @@ export async function transmitOnce(
   // A refusal sends nothing; its line says why and which items it rests on, so the report can tell a call the evidence
   // answered from one that was captured or replayed. The error carries the same reason to the turn.
   const refusal = async (code: string, message: string, evidence: ReadonlyArray<string>): Promise<ProviderResultCacheError> => {
+    observer?.refuse(code);
     await cache.record({
       itemId: await cache.reserveItemId(item.purpose, item.slice), purpose: item.purpose, model, promptContractDigest: item.promptContractDigest,
       ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
@@ -146,7 +154,8 @@ export async function transmitOnce(
     if (exact.state === 'corrupt') {
       throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '缓存证据无法核实；未重新发送可能已经计费的请求。', []);
     }
-    const evidence = await cache.validEvidence();
+    const captures = await cache.validCaptures();
+    const evidence = captures.map(({ line }) => line);
     const claim = await cache.readClaim(claimKey);
     if (exact.state === 'present' && exact.entry.streamedAnswer?.complete !== false && exact.entry.generation === generation && !retiredCapture(cache, exact.entry)) {
       const recorded = evidence.some((line) => line.itemId === exact.entry.itemId && line.cacheKey === cacheKey);
@@ -163,7 +172,20 @@ export async function transmitOnce(
           '旧证据没有可核实的路由、端点和请求格式，不能当作当前配置的答案或新请求许可；请核查并明确作废后再验证。', items(captured));
       }
     }
-    // 2. The same question asked again under the same configuration.
+    // 2. The same question asked again under the same configuration. Asked with newly minted identities only, the newest such
+    // capture answers it, mapped onto this request in memory (Issue #1585); its entry is never touched. One it cannot map
+    // safely still refuses: nothing is sent for a question the evidence already answers. Every valid capture answered whole:
+    // a partial stream's line is `failed`, never evidence.
+    const form = identityForm(init.body);
+    if (form !== null) {
+      for (const capture of captures.filter(({ line }) => line.generation === generation).reverse()) {
+        const remap = identityRemap(capture.entry.requestBody, form);
+        const response = remap === null ? null : remapResponse(capture.entry.response, remap);
+        if (response === null) continue;
+        return replay(cache, item, model, requestDigest, identity, { ...capture.entry, response },
+          decided('identity-replay', [capture.line.itemId]), null);
+      }
+    }
     const repeated = evidence.filter((line) => line.generation === generation && line.semanticDigest === identity.semanticDigest);
     if (repeated.length > 0) {
       throw await refusal('PROVIDER_VALIDATION_EVIDENCE_EXISTS',
@@ -224,21 +246,30 @@ export async function transmitOnce(
         record = decided('first-capture', []);
       }
     }
-    const itemId = await cache.reserveItemId(item.purpose, item.slice);
-    cache.claimItem(itemId);
-    const claimFacts: ClaimFacts = {
-      cacheKey: cache.successorKey(claim), itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step,
-      processId: process.pid, generation, semanticDigest: identity.semanticDigest,
-      evidencePosition: identity.evidencePosition,
-      retryRationales: [
-        ...('claim' in claim ? claim.claim.retryRationales ?? [] : []),
-        ...(record.decision === 'retry-unknown' ? [intent.delta!.rationale] : []),
-      ],
-    };
-    if (!(await cache.claim(claimFacts))) {
-      throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
+    const observe = observer === null ? undefined : await observer.enter({ family: intent.family, case: intent.case, step, model, route: profile.route,
+      shape: validation.requestShape, effort: observedRecordingEffort(init.body) });
+    if (observe === null) throw new ProviderResultCacheError('RECORDING_RUNBOOK_PAUSED', '录制暂停，未发送这次请求。');
+    try {
+      const itemId = await cache.reserveItemId(item.purpose, item.slice);
+      cache.claimItem(itemId);
+      const claimFacts: ClaimFacts = {
+        cacheKey: cache.successorKey(claim), itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step,
+        processId: process.pid, generation, semanticDigest: identity.semanticDigest,
+        evidencePosition: identity.evidencePosition,
+        retryRationales: [
+          ...('claim' in claim ? claim.claim.retryRationales ?? [] : []),
+          ...(record.decision === 'retry-unknown' ? [intent.delta!.rationale] : []),
+        ],
+      };
+      if (!(await cache.claim(claimFacts))) {
+        throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
+      }
+      return await send(cache, nativeFetch, item, profile, model, url, init,
+        { itemId, requestDigest, identity, record, claimFacts, stream: validation.stream === true }, observe);
+    } catch (error) {
+      observe?.('refused', 'RECORDING_CALL_FAILED');
+      throw error;
     }
-    return send(cache, nativeFetch, item, profile, model, url, init, { itemId, requestDigest, identity, record, claimFacts });
   });
 }
 
@@ -262,10 +293,15 @@ function evidenceStep(step: string): string {
 function validationStep(step: string, body: string): string {
   const base = step.replace(/\/(?:turn|tool-turn)-\d+$/u, '');
   try {
-    const request: unknown = JSON.parse(body);
-    if (request === null || typeof request !== 'object' || !('messages' in request) || !Array.isArray(request.messages)) return base;
-    const tools = request.messages.filter((message: unknown) => message !== null && typeof message === 'object' &&
-      'role' in message && message.role === 'tool').length;
+    const request = JSON.parse(body) as { messages?: unknown[]; input?: unknown[]; contents?: unknown[] };
+    const turns = request.messages ?? request.input ?? request.contents ?? [];
+    const tools = turns.reduce<number>((count, turn) => {
+      if (turn === null || typeof turn !== 'object') return count;
+      const message = turn as { role?: string; type?: string; content?: unknown; parts?: unknown };
+      if (message.role === 'tool' || message.type === 'function_call_output') return count + 1;
+      const parts = message.parts ?? message.content;
+      return count + (Array.isArray(parts) ? parts.filter(part => part?.type === 'tool_result' || part?.functionResponse !== undefined).length : 0);
+    }, 0);
     return tools === 0 ? base : `${base}/tool-turn-${tools}`;
   } catch { return base; }
 }
@@ -278,7 +314,8 @@ async function send(
   model: string,
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
-  facts: { readonly itemId: string; readonly requestDigest: string; readonly identity: RequestIdentity; readonly record: ProviderValidationRecord; readonly claimFacts: ClaimFacts },
+  facts: { readonly itemId: string; readonly requestDigest: string; readonly identity: RequestIdentity; readonly record: ProviderValidationRecord; readonly claimFacts: ClaimFacts; readonly stream: boolean },
+  observe?: ObserveRecording,
 ): Promise<LiveModelResponse> {
   const { itemId, requestDigest, identity, record, claimFacts } = facts;
   const line = (settled: Pick<ProviderLedgerLine, 'outcome' | 'status' | 'usage' | 'incurredUsage' | 'classification' | 'resetWindow'>): ProviderLedgerLine => ({
@@ -291,12 +328,14 @@ async function send(
   try {
     response = await nativeFetch(url, init);
   } catch (error) {
+    observe?.('sent', 'TRANSPORT_OUTCOME_UNKNOWN');
     // Fetch rejection/abort does not prove that the server received or billed nothing.
     await cache.holdUnknown(claimFacts);
     await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
     throw error;
   }
-  if (identity.requestShape === 'editorial-dialogue-sse' && (response.status >= 200 && response.status < 300)) {
+  if ((identity.requestShape === 'editorial-dialogue-sse' || facts.stream) && (response.status >= 200 && response.status < 300)) {
+    const streamProfile = identity.requestShape === 'editorial-dialogue-sse' ? null : modelProfileFor(profile.route, model);
     let consumed = false;
     return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')), stream: async function* () {
       if (consumed) throw new Error('AI7_OUTCOME_UNKNOWN');
@@ -307,7 +346,8 @@ async function send(
       let streamError: Extract<DialogueStreamEvent, { kind: 'error' }> | null = null;
       let kept = false;
       try {
-        for await (const event of response.stream?.() ?? dialogueSseEvents(response, model)) {
+        for await (const event of response.stream?.() ?? (streamProfile === null
+          ? dialogueSseEvents(response, model) : familyStreamEvents(response, streamProfile))) {
           if (event.kind === 'text') chunks.push(event.text);
           // The capture keeps the chat-completions aggregate alone; an in-stream refusal is never a whole answer here.
           else if (event.kind === 'complete') { aggregate = event.response; complete = true; }
@@ -322,7 +362,7 @@ async function send(
           // or send again. The Harness alone owns the editor's preserved complete fragments.
           await cache.holdUnknown(claimFacts);
         }
-        const usage = usageOfResponse(aggregate);
+        const usage = usageOfResponse(aggregate, identity.requestShape);
         try {
           await cache.keep({
             model, requestDigest, requestBody: init.body, status: response.status, response: aggregate, usage, transmittedAt,
@@ -337,6 +377,9 @@ async function send(
         await cache.record(line({ outcome: complete ? 'transmitted' : 'failed', status: response.status, usage, incurredUsage: usage,
           ...(!complete || !kept ? { classification: 'outcome-unknown' as const } : {}) }));
         if (complete && kept) await cache.settle(claimFacts, 'completed');
+        if (!complete) observe?.('protocol-error', 'INCOMPLETE_PROVIDER_STREAM');
+        else if (!kept) observe?.('refused', 'CAPTURE_NOT_DURABLE');
+        else observe?.('answered', 'OK');
       }
       // A complete event reaches the adapter only after its protected capture and ledger are durable.
       if (streamError !== null) yield streamError;
@@ -352,11 +395,12 @@ async function send(
     if ((response.status >= 200 && response.status < 300)) {
       await cache.holdUnknown(claimFacts);
       await cache.record(line({ outcome: 'failed', status: response.status, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
+      observe?.('protocol-error', 'INVALID_PROVIDER_JSON');
       return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')) };
     }
     body = null;
   }
-  const usage = usageOfResponse(body);
+  const usage = usageOfResponse(body, identity.requestShape);
   // Only a 200 is kept. Explicit refusals settle; uncertain timeout/server outcomes remain held. The entry is kept before the
   // claim is settled; a crash between the two leaves both, and verified evidence answers. A 200 that cannot be kept leaves its claim
   // standing, so an answer that was paid for is never paid for again by accident.
@@ -389,6 +433,19 @@ async function send(
     ...(resetWindow === null ? {} : { resetWindow }),
   }));
   if (kept) await cache.settle(claimFacts, (response.status >= 200 && response.status < 300) ? 'completed' : 'failed');
+  if (observe !== undefined) {
+    const configuredModel = modelProfileFor(profile.route, model);
+    if (response.status < 200 || response.status >= 300) observe('refused', `HTTP_${response.status}`);
+    else if (!kept) observe('refused', 'CAPTURE_NOT_DURABLE');
+    else if (configuredModel === null) observe('protocol-error', 'UNRECOGNIZED_PROVIDER_MODEL');
+    else {
+      const answer = parseProviderResponse(response.status, body,
+        { INVALID_CREDENTIAL_CODE: 'INVALID_CREDENTIAL', QUOTA_EXCEEDED_CODE: 'QUOTA_EXCEEDED', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT_WINDOW_EXCEEDED' }, profile, configuredModel);
+      if (answer.kind === 'answer' || answer.kind === 'tool-calls') observe('answered', 'OK');
+      else if (answer.kind === 'failure') observe('refused', answer.code);
+      else observe('protocol-error', 'INVALID_PROVIDER_ANSWER');
+    }
+  }
   return { status: response.status, json: () => Promise.resolve(body) };
 }
 

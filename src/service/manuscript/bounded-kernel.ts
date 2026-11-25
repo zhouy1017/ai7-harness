@@ -4,10 +4,18 @@ import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES } from '../../shared/protocol
 
 /**
  * The bounded manuscript store's own primitives (Issue #1175 moved them out of `bounded-manuscript.ts` for its structural
- * edit owner): the store's errors and row readers, canonical digests, graphemes, the working state's Fenwick offset index
- * and the one transaction shape every write takes.
+ * edit owner): the store's errors and row readers, canonical digests, graphemes and the one transaction shape every write
+ * takes. The working state's positions are `working-positions.ts`'s (Issue #1654).
  */
 export type SqlRow = Record<string, SQLOutputValue>;
+
+export const REVISION_IMPORT_LINEAGE = `lineage AS (
+  SELECT revision_id, parent_revision_id, source_version_id, revision_digest, branch_id FROM manuscript_revisions WHERE revision_id = ? AND branch_id = ?
+  UNION SELECT p.revision_id, p.parent_revision_id, p.source_version_id, p.revision_digest, p.branch_id FROM manuscript_revisions p
+    JOIN lineage child ON p.revision_id = child.parent_revision_id AND p.source_version_id = child.source_version_id AND p.branch_id = child.branch_id
+    WHERE NOT EXISTS (SELECT 1 FROM manuscript_block_sources b WHERE b.revision_id = child.revision_id)
+      AND NOT EXISTS (SELECT 1 FROM manuscript_note_sources n WHERE n.revision_id = child.revision_id)
+)`;
 
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -69,87 +77,6 @@ const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 export function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
 }
-
-export interface OffsetSegment {
-  size: number;
-  total: number;
-}
-
-export function fenwickSpan(position: number): number {
-  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引位置无效。');
-  let remainder = position;
-  let span = 1;
-  while (remainder % 2 === 0) {
-    remainder /= 2;
-    span *= 2;
-  }
-  return span;
-}
-
-export function appendOffsetSegment(stack: OffsetSegment[], position: number, length: number): number {
-  requireBounded(Number.isSafeInteger(length) && length >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引长度无效。');
-  let segment: OffsetSegment = { size: 1, total: length };
-  while (stack.at(-1)?.size === segment.size) {
-    const previous = stack.pop()!;
-    const total = previous.total + segment.total;
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移索引总量无效。');
-    segment = { size: segment.size * 2, total };
-  }
-  requireBounded(segment.size === fenwickSpan(position), 'OFFSET_INDEX_INVALID', '稿件偏移索引范围无效。');
-  stack.push(segment);
-  return segment.total;
-}
-
-export function lastWorkingPosition(db: DatabaseSync, branchId: string): number {
-  const row = db.prepare(
-    'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
-  ).get(branchId) as SqlRow | undefined;
-  requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
-  return asNumber(row.position);
-}
-
-export function workingOffsetPrefix(db: DatabaseSync, branchId: string, throughPosition: number): number {
-  requireBounded(Number.isSafeInteger(throughPosition) && throughPosition >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
-  let position = throughPosition;
-  let total = 0;
-  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
-  while (position > 0) {
-    const row = read.get(branchId, position) as SqlRow | undefined;
-    requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
-    total += asNumber(row.span_graphemes);
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
-    position -= fenwickSpan(position);
-  }
-  return total;
-}
-
-export function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, position: number, delta: number): number {
-  requireBounded(Number.isSafeInteger(delta), 'OFFSET_INDEX_INVALID', '稿件偏移变化无效。');
-  if (delta === 0) return 0;
-  const totalBlocks = lastWorkingPosition(db, branchId);
-  requireBounded(position <= totalBlocks, 'OFFSET_INDEX_INVALID', '稿件偏移更新位置无效。');
-  const update = db.prepare(
-    'UPDATE working_offset_nodes SET span_graphemes = span_graphemes + ? WHERE branch_id = ? AND position = ?',
-  );
-  let nodePosition = position;
-  let changes = 0;
-  while (nodePosition <= totalBlocks) {
-    requireBounded(
-      update.run(delta, branchId, nodePosition).changes === 1,
-      'OFFSET_INDEX_INVALID',
-      '稿件偏移索引节点无法更新。',
-    );
-    changes += 1;
-    nodePosition += fenwickSpan(nodePosition);
-  }
-  requireBounded(
-    changes <= Math.ceil(Math.log2(totalBlocks)) + 1,
-    'OFFSET_INDEX_INVALID',
-    '稿件偏移索引更新超出对数边界。',
-  );
-  return changes;
-}
-
 
 let nestedTransactions = 0;
 

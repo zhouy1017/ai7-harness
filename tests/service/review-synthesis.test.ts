@@ -1,8 +1,10 @@
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
 import { appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
+import { createUpgradeSample1 } from '../support/upgrade-sample1.js';
+import { beginUpgrade, resumeUpgrade } from '../../src/service/in-app-upgrade.js';
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
-import { basename, dirname, resolve, relative, isAbsolute } from 'node:path';
-import { unzipSync } from 'fflate';
+import { writeFile, cp } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -21,10 +23,10 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDig
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
+import { sample1Seed } from '../support/sample1-seed.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
-import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
 import { SYNTHESIS_TEXT_LIMIT } from '../../src/service/review/run-synthesis-contract.js';
 import { TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION } from '../support/review-categories.js';
@@ -41,8 +43,13 @@ interface Session { store: EditorialStore; owner: ReturnType<typeof capturedOrdi
 beforeEach(async () => { roots = await createServiceTestRoots('ai7-review-synthesis-'); requestGovernor = new ModelRequestGovernor(); heldReleases = []; restatedBranch = null; });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); await roots.dispose(); });
 
+// A case whose first act is the import starts from a copy of one imported sample1 store (#1621); the case that imports a second Book keeps
+// `importSample1Book`.
+const seeded = sample1Seed({ title: 'sample1 全书审阅统合' });
+
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot, restatedSynopses = false): Promise<Session> {
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot, restatedSynopses = false, seed = false): Promise<Session> {
+  if (seed) (await seeded()).place(dataRoot);
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-controls');
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)], ...(literary ? [['literary-expression', reviewCategoryKindDefinition(LITERARY_EXPRESSION)] as const] : [])]);
@@ -91,14 +98,16 @@ async function closeCapturedSession(session: Session): Promise<void> {
   const stopped = session.driver.dispose(); await session.owner.dispose(); await stopped;
   try { session.capture.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
+function openSeededSession(synthesisAnswer = sample1SynthesisAnswer, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<Session> {
+  return openCapturedSession(synthesisAnswer, controls, false, false, false, 0, roots.dataRoot, false, true);
+}
 async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer,
   controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, restatedSynopses = false): Promise<void> {
-  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit, roots.dataRoot, restatedSynopses);
+  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit, roots.dataRoot, restatedSynopses, true);
   try {
-    const book = await importSample1Book(session.store, roots.codeRoot, 'sample1 全书审阅统合');
-    restatedBranch = book.branchId;
-    await pinEditorialWorkspaceProfileRevision2(session.store, book.bookId);
+    const { book } = await seeded();
     recordMissingCredentialConnection(session.store, '统合正式请求捕获');
+    restatedBranch = book.branchId;
     await body(session, book);
   } finally { await closeCapturedSession(session); }
 }
@@ -112,6 +121,33 @@ function synthesisOutcome(session: Session, book: Book): string {
     return JSON.stringify(events);
   } finally { db.close(); }
 }
+
+it('reads the archived SampleBook report and continues its paused review after an in-app upgrade', async () => {
+  await createUpgradeSample1(roots.dataRoot, roots.codeRoot);
+  await beginUpgrade(roots.dataRoot);
+  await resumeUpgrade(roots.dataRoot,'0.7.9');
+  const session = await openCapturedSession();
+  try {
+    const runs = session.store.listBooks(null).items.map(b => session.store.inspectReviewWorkspace(b.bookId,null).run!);
+    const archived = runs.find(r => r.report !== null && r.report !== undefined)!.report!;
+    expect(canonicalRecord(archived.record).digest).toBe(archived.digest);
+    const paused = runs.find(r => r.canContinue)!;
+    const book = session.store.listBooks(null).items.find(b => session.store.inspectReviewWorkspace(b.bookId,null).run?.reviewRunId === paused.reviewRunId)!;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    let runId: string;
+    try {
+      const row = db.prepare("SELECT json_extract(canonical_json, '$.runRecordId') AS id FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? AND state = 'dispatched'").get(paused.reviewRunId, TYPOS)!;
+      runId = String(row.id);
+    } finally { db.close(); }
+    const ledger = session.store.executionLedgerForRun(runId);
+    const bound = ledger.executionBindingOf(runId)!;
+    expect(bound.binding.policyPin.providerProcessingVersion).toBe('v35');
+    expect(ledger.loadExecutionPlan(runId).retainedPolicyPin).toEqual(bound.binding.policyPin);
+    await session.driver.continue(paused.reviewRunId);
+    expect(ledger.executionBindingOf(runId)?.bindingDigest).toBe(bound.bindingDigest);
+    expect(session.store.inspectReviewWorkspace(book.bookId,paused.reviewRunId).run?.state).toBe('settled');
+  } finally { await closeCapturedSession(session); }
+},180_000);
 
 it('sends one structured synthesis request in ordinary production, preserves findings, and replays without resending (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
@@ -252,11 +288,10 @@ it('synthesizes settled findings with editorial disclosure of a failed category 
 });
 
 it('resumes a synthesis waiting for its turn after restart under its launched model (#1433)', async () => {
-  let session = await openCapturedSession();
+  let session = await openSeededSession();
   let book!: Book, runId!: string, launchedModel!: string;
   try {
-    book = await importSample1Book(session.store, roots.codeRoot, 'sample1 统合排队重启');
-    await pinEditorialWorkspaceProfileRevision2(session.store, book.bookId); recordMissingCredentialConnection(session.store, '统合排队重启');
+    book = (await seeded()).book; recordMissingCredentialConnection(session.store, '统合排队重启');
     runId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     const categoryOnly = new ReviewRunDriver({ ...session.store.reviewRunDriveSteps, begin: id => session.store.reviewRunDriveSteps.begin(id).filter(category => category === TYPOS) }, session.owner);
     try { await categoryOnly.drive(runId); } finally { await categoryOnly.dispose(); }
@@ -351,6 +386,7 @@ it.each([0, 1])('keeps the pre-dispatch ceiling rule with %i tokens remaining an
 
 it('waits offline and reconnects the final synthesis on the launched ordinary model exactly once (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
+    seedModelEfforts(session.store, 'opencode-go', { 'frozen-offline-model': ['high'] });
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, executionConfig: { modelId: 'frozen-offline-model', reasoningEffort: 'high' } };
     const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');
@@ -373,11 +409,10 @@ it('settles a graceful stop during the ordinary transport request without resend
   let reached!: () => void, release!: () => void;
   const held = new Promise<void>(resolve => { reached = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; }); heldReleases.push(release);
-  const first = await openCapturedSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
+  const first = await openSeededSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
   let book!: Book, runId!: string;
   try {
-    book = await importSample1Book(first.store, roots.codeRoot, 'sample1 统合运行重启');
-    await pinEditorialWorkspaceProfileRevision2(first.store, book.bookId); recordMissingCredentialConnection(first.store, '统合运行重启');
+    book = (await seeded()).book; recordMissingCredentialConnection(first.store, '统合运行重启');
     runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     const driving = first.driver.drive(runId); await held;
     await first.owner.dispose(); await driving;
@@ -392,61 +427,6 @@ it('settles a graceful stop during the ordinary transport request without resend
     expect(workspace(second, book, runId).run!.synthesis?.state).toBe('missing');
     expect(second.capture.requests).toHaveLength(0);
   } finally { await closeCapturedSession(second); }
-});
-
-it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a paused 0.7.1 run without synthesis, and merges that legacy Book (#1433)', async () => {
-  const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
-  const probeRoot = join(roots.inputRoot, 'legacy-direct-open');
-  for (const [name, bytes] of Object.entries(unzipSync(await readFile(source)))) {
-    if (name === 'manifest.json') continue;
-    const destination = resolve(probeRoot, name), path = relative(probeRoot, destination);
-    if (path.startsWith('..') || isAbsolute(path)) throw new Error('Invalid compatibility fixture member');
-    await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, bytes);
-  }
-  const probe = await EditorialStore.open(probeRoot, roots.codeRoot);
-  probe.markCleanShutdown(); probe.close();
-  let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  const session = await openCapturedSession();
-  let archivedId!: string, archivedRunId!: string, archivedDigest!: string;
-  try {
-    const books = session.store.listBooks(null).items;
-    expect(books.map(book => book.title), JSON.stringify(await session.store.inspectDatabaseReplacements())).toContain('sample1 · 0.7.1 已归档审阅');
-    const archived = books.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
-    const paused = books.find(book => book.title === 'sample1 · 0.7.1 暂停审阅')!;
-    archivedId = archived.bookId;
-    const original = session.store.inspectReviewWorkspace(archived.bookId, null).run!;
-    archivedRunId = original.reviewRunId; archivedDigest = original.report!.digest;
-    // No member and no request; an eligible 0.7.1 Run offers 生成统合总结 (Issue #1506).
-    expect(original.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(original.categories).toHaveLength(1);
-    expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
-    const contentDigest = reportContentDigest(original.report!.record);
-    const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
-    expect(reportContentDigest(repeated.record)).toBe(contentDigest);
-    const archive = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
-    try {
-      const row = archive.prepare('SELECT canonical_json,sha256 FROM review_reports WHERE report_id=?').get(original.report!.reportId)!;
-      expect(row.sha256).toBe(archivedDigest); expect(canonicalRecord(JSON.parse(String(row.canonical_json))).digest).toBe(archivedDigest);
-    } finally { archive.close(); }
-    const pending = session.store.inspectReviewWorkspace(paused.bookId, null).run!;
-    expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
-    await session.driver.continue(pending.reviewRunId);
-    const completed = session.store.inspectReviewWorkspace(paused.bookId, pending.reviewRunId).run!;
-    expect(completed.state).toBe('settled'); expect(completed.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true });
-    expect(completed.categories).toHaveLength(1);
-    expect(session.capture.requests.every(request => request.stage !== 'cross-unit-reduction')).toBe(true);
-  } finally { await closeCapturedSession(session); }
-  const mergedRoot = join(roots.inputRoot, 'legacy-merge-data');
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { await target.prepareDatabaseMerge((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try {
-    const merged = target.inspectReviewWorkspace(archivedId, archivedRunId).run!;
-    expect(merged.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(merged.report!.digest).toBe(archivedDigest);
-    expect(canonicalRecord(merged.report!.record).digest).toBe(archivedDigest);
-  } finally { target.markCleanShutdown(); target.close(); }
 });
 
 it('uses identical synthesis wording in the pre-start plan and the frozen launched plan (#1433)', async () => {
@@ -667,12 +647,11 @@ it('reconciles a crash snapshot taken inside the synthesis transport at startup 
   let reached!: () => void, release!: () => void;
   const held = new Promise<void>(resolve => { reached = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; }); heldReleases.push(release);
-  const first = await openCapturedSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
+  const first = await openSeededSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
   const crashRoot = join(roots.inputRoot, 'crash-data');
   let book!: Book, runId!: string, findings: unknown;
   try {
-    book = await importSample1Book(first.store, roots.codeRoot, 'sample1 统合崩溃快照');
-    await pinEditorialWorkspaceProfileRevision2(first.store, book.bookId); recordMissingCredentialConnection(first.store, '统合崩溃快照');
+    book = (await seeded()).book; recordMissingCredentialConnection(first.store, '统合崩溃快照');
     runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     void first.driver.drive(runId); await held;
     findings = workspace(first, book).run!.findings;

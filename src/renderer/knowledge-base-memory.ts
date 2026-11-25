@@ -1,8 +1,13 @@
+import { renderReviewPreferenceGroups, type PreferenceLifecycleState } from './review-preference-groups.js';
+import { rendererErrorCode, rendererErrorMessage } from './error-words.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel, REVIEW_PREFERENCES_NOTE } from './quality-learning-labels.js';
 import { editorialPreferenceEditor, mountWordTrackedEditDetail } from './quality-learning.js';
+
+/** A retired entry (Issue #1655) is never listed, so its history never reaches these labels. */
+type ListedState = 'proposed' | 'active' | 'inactive' | 'frozen';
 
 /** Both entrances use the same controls and current preference/memory owners (#1377). */
 export async function mountReviewPreferences(root: HTMLElement, api: RendererApi,
@@ -53,20 +58,46 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
   let busy = false; let refreshFailed = false;
   const selected = new Map<string, EditorialLearningProjection['signals'][number]>();
   const status = el('p', ''); status.setAttribute('role', 'status');
-  const run = (operation: () => Promise<EditorialLearningProjection>): void => {
-    if (busy || refreshFailed) return;
+  const lifecycleState: PreferenceLifecycleState = { confirmId: null, confirmSentence: '', confirmError: '', focusId: null, focusLabel: '', refusalLabel: '' };
+  const run = (operation: () => Promise<EditorialLearningProjection>, message = '学习记录已更新。', deleteItemId?: string): void => {
+    if (busy || refreshFailed || !section.isConnected) return;
     busy = true; paint();
-    let changed = false;
+    let changed = false; let completed = false;
     void operation().then(async (next) => {
+      if (!section.isConnected) return;
       changed = true; page = next;
       [global, house] = await Promise.all([api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
-      selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。';
+      if (!section.isConnected) return;
+      lifecycleState.confirmId = null; lifecycleState.confirmError = '';
+      selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = message; completed = true;
     })
-      .catch(() => { refreshFailed = changed && !technicalLayerVisible; status.textContent = refreshFailed ? '记录已更新，请重新打开此页以读取最新状态。' : '无法更新学习记录，请重新查看。'; })
-      .finally(() => { busy = false; if (section.isConnected) paint(); });
+      .catch(async (error: unknown) => {
+        if (!section.isConnected) return;
+        status.textContent = changed ? '记录已更新，请重新打开此页以读取最新状态。'
+          : !technicalLayerVisible && rendererErrorCode(error) === 'LEARNING_SUPERVISION_INVALID'
+            ? '无法更新学习记录，请重新查看。' : rendererErrorMessage(error, '无法更新学习记录，请重新查看。');
+        if (!changed && deleteItemId === lifecycleState.confirmId) lifecycleState.confirmError = status.textContent;
+        try {
+          const next = await Promise.all([api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }), api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
+          if (section.isConnected) { [page, global, house] = next; signalOffset = 0; itemOffset = 0; exclusionOffset = 0; }
+        } catch { refreshFailed = changed && !technicalLayerVisible; }
+      })
+      .finally(() => { busy = false; if (section.isConnected) {
+        paint();
+        if (lifecycleState.focusId) {
+          const row = Array.from(section.querySelectorAll<HTMLElement>('article')).find((node) => node.dataset['memoryItem'] === lifecycleState.focusId || node.dataset['reviewPreference'] === lifecycleState.focusId);
+          const buttons = Array.from(row?.querySelectorAll('button') ?? []);
+          const label = completed ? lifecycleState.focusLabel : lifecycleState.refusalLabel;
+          const target = !completed && deleteItemId ? section.querySelector<HTMLButtonElement>('[data-delete-cancel]')
+            : label === '' ? buttons[0] : buttons.find((button) => button.textContent === label) ?? buttons.find((button) => button.textContent === '删除…');
+          (target ?? section.querySelector<HTMLElement>('[data-disabled-preferences] h4') ?? section.querySelector<HTMLElement>('[data-memory-preferences] h4'))?.focus();
+          lifecycleState.focusId = null;
+        }
+      } });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
     const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy || refreshFailed;
+    button.addEventListener('keydown', (event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); });
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {
@@ -89,84 +120,19 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     if (!technicalLayerVisible && global !== null) {
       section.classList.add('review-preferences-ordinary');
       section.append(el('p', REVIEW_PREFERENCES_NOTE));
-      const candidates = el('section', ''); candidates.dataset['memoryCandidates'] = '';
-      candidates.append(el('h4', '待你确认的审阅偏好（AI 归纳）'));
-      const active = el('section', ''); active.dataset['memoryPreferences'] = '';
-      active.append(el('h4', '已启用的审阅偏好'));
-      const category = (id: string): string => global!.categories.find((entry) => entry.categoryId === id)?.label ?? '其他编辑维度';
-      const bookTitle = (id: string): string => global!.books.find((book) => book.bookId === id)?.title ?? page.signals.find((signal) => signal.source.bookId === id)?.bookTitle ?? '来源图书';
-      for (const { current, usable, history, sources, nextHistoryOffset, nextSourceOffset } of page.items) {
-        const state = current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation;
-        const item = el('article', ''); item.className = 'learning-material preference-row'; item.dataset['memoryItem'] = current.itemId;
-        const scope = current.schema === 'ai7.global-editorial-memory/2' && current.applicability.kind === 'book' ? `《${bookTitle(current.applicability.bookId)}》` : '本社';
-        item.append(el('p', current.title), el('p', `${category(current.editorialDimension)} · ${scope} · ${state === 'proposed' ? '待你确认' : state === 'inactive' ? '已停用' : state === 'frozen' ? '已冻结' : usable ? '已启用' : '来源受限，暂停使用'}`));
-        const controls = el('div', ''); controls.className = 'preference-actions';
-        const stop = () => run(() => api.deactivateEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId,
-          ...(current.schema === 'ai7.global-editorial-memory/2' ? { actionId: crypto.randomUUID() } : {}) }));
-        if (current.schema === 'ai7.global-editorial-memory/2' && state === 'proposed') {
-          controls.append(action('接受记忆', () => run(() => api.acceptEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId, actionId: crypto.randomUUID() }))), action('排除', stop));
-        } else if (state === 'active') controls.append(action('停用', stop));
-        if (state === 'active') controls.append(action('编辑偏好', () => {
-          controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
-            existing: { itemId: current.itemId, revisionId: current.versionId, kind: 'memory', text: current.title,
-              categoryId: current.editorialDimension, bookId: current.schema === 'ai7.global-editorial-memory/2' && current.applicability.kind === 'book' ? current.applicability.bookId : null,
-              state: 'active', lineage: [] }, save: savePreference }));
-        }));
-        const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
-        const titles = new Set((sources ?? []).map((source) => source.bookTitle));
-        for (const source of [...current.positiveExamples, ...current.negativeExamples]) titles.add(bookTitle(source.bookId));
-        for (const title of titles) lineage.append(el('p', `来自《${title}》`));
-        for (const version of history) lineage.append(el('p', `${localInstantLabel(version.recordedAt)} · ${{ proposed: '待确认', active: '已启用', inactive: '已停用', frozen: '已冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]}`));
-        if (history.length === 0) lineage.append(el('p', current.recordedAt));
-        if (nextHistoryOffset != null) lineage.append(action('更早历史', () => {
-          void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
-            .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早历史。'; });
-        }));
-        if (nextSourceOffset != null) lineage.append(action('更多来源', () => {
-          void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, sourceOffset: nextSourceOffset })
-            .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更多来源。'; });
-        }));
-        controls.append(lineage); item.append(controls);
-        (state === 'proposed' ? candidates : active).append(item);
-      }
-      for (const preference of global.items.filter((item) => item.kind === 'preference')) {
-        const item = el('article', ''); item.className = 'learning-material preference-row';
-        item.dataset['reviewPreference'] = preference.itemId;
-        item.append(el('p', preference.text), el('p', `${category(preference.categoryId)} · ${preference.bookId === null ? '本社' : `《${bookTitle(preference.bookId)}》`} · ${preference.state === 'active' ? '已启用' : preference.state === 'frozen' ? '已冻结' : '已停用'}`));
-        const controls = el('div', ''); controls.className = 'preference-actions';
-        if (preference.state === 'active') controls.append(action('停用', () => run(async () => {
-          await api.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
-            scope: preference.bookId === null ? { kind: 'category', categoryId: preference.categoryId } : { kind: 'book', bookId: preference.bookId },
-            categoryId: preference.categoryId, text: '', effect: 'guide' });
-          return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-        })));
-        if (preference.state === 'active') controls.append(action('编辑偏好', () => {
-          controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
-            existing: preference, save: savePreference }));
-        }));
-        const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
-        const basis = house?.current?.legacyBasis?.lines ?? house?.current?.governance?.baseLines ?? house?.current?.lines ?? [];
-        const sourceBooks = (itemId: string, seen = new Set<string>()): string[] => {
-          if (seen.has(itemId)) return []; seen.add(itemId);
-          const line = basis.find((line) => (line.owner?.itemId ?? `preference:${line.bookId ?? 'house'}:${line.categoryId}`) === itemId);
-          const parents = global!.items.find((item) => item.itemId === itemId)?.lineage ?? [];
-          return [...(line?.sources.map((source) => source.bookTitle) ?? []), ...parents.flatMap((pin) => sourceBooks(pin.itemId, seen))];
-        };
-        const sourceTitles = new Set(sourceBooks(preference.itemId));
-        if (preference.bookId !== null) sourceTitles.add(bookTitle(preference.bookId));
-        for (const title of sourceTitles) lineage.append(el('p', `来自《${title}》`));
-        const changes = global.directives.filter((entry) => entry.directiveId === preference.itemId || entry.targets.some((pin) => pin.itemId === preference.itemId));
-        for (const entry of changes) lineage.append(el('p', `${localInstantLabel(entry.recordedAt)} · ${entry.operation === 'deactivate' ? '已停用' : entry.operation === 'supervise' ? entry.effect === 'freeze' ? '已冻结' : '学习方向已更新' : '已启用'}`));
-        if (changes.length === 0) lineage.append(el('p', '尚无单独的偏好变更记录。'));
-        controls.append(lineage); item.append(controls); active.append(item);
-      }
-      if (candidates.querySelector('article') !== null) section.append(candidates);
-      if (active.querySelector('article') === null) active.append(el('p', '尚无已启用的审阅偏好。'));
-      section.append(active);
-      if (page.nextItemOffset !== null) section.append(action('更多记忆', () => {
-        itemOffset = page.nextItemOffset!;
-        void api.inspectEditorialLearning({ signalOffset, itemOffset, exclusionOffset }).then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更多记忆。'; });
-      }));
+      renderReviewPreferenceGroups({ section, page, global, house, api, lifecycleState, paint, run, action, savePreference,
+        read: (input, fallback) => {
+          void api.inspectEditorialLearning({ signalOffset, itemOffset, exclusionOffset, ...input }).then((next) => {
+            if (section.isConnected) { lifecycleState.confirmId = null; lifecycleState.confirmError = ''; page = next; if (input.itemOffset !== undefined) itemOffset = input.itemOffset; paint(); }
+          }).catch(async (error: unknown) => {
+            if (!section.isConnected) return;
+            status.textContent = rendererErrorMessage(error, fallback);
+            if (rendererErrorCode(error) === 'REVIEW_PREFERENCE_DELETED') {
+              const next = await Promise.all([api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }), api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]).catch(() => null);
+              if (section.isConnected && next) { [page, global, house] = next; itemOffset = 0; lifecycleState.confirmId = null; paint(); }
+            }
+          });
+        } });
       return;
     }
     if (page.curation !== undefined) {
@@ -187,7 +153,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         const perPass = number('每次整理的 token 上限', curation.envelope?.budget.perPassTokens ?? 20_000);
         const save = el('button', '启用这个学习整理范围'); save.type = 'submit'; save.disabled = busy; form.append(save);
         form.addEventListener('submit', (event) => { event.preventDefault(); run(() => api.changeEditorialLearning({
-          kind: 'switch', enabled: true, expectedEntries: page.controlEntries,
+          kind: 'switch', enabled: true, expectedEntries: page.controlEntries, offerDigest: curation.offerDigest!,
           curation: { maxPasses: Number(passes.value), totalTokens: Number(total.value), perPassTokens: Number(perPass.value) } })); });
         panel.append(form);
       }
@@ -216,7 +182,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         lineage.append(el('p', technicalWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
       for (const source of sources ?? []) lineage.append(el('p', technicalWords(`来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`)));
-      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${localInstantLabel(version.recordedAt)}`));
+      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${version.schema === 'ai7.global-editorial-memory/2' && version.action === 'reactivate' ? '重新启用' : { proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[(version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation) as ListedState]} · ${localInstantLabel(version.recordedAt)}`));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
           .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });

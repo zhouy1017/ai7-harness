@@ -1,14 +1,15 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { seedModelEfforts } from '../support/model-effort-catalogue.js';
+import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
+import { launchPreviewProjection } from '../../src/service/task-launch-preview.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
@@ -18,10 +19,10 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/manuscript-export.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
@@ -60,10 +61,12 @@ import {
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
+  type BookFindingsReadProjection,
   type ServiceJobProjection,
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { sample1Seed } from '../support/sample1-seed.js';
 import { LITERARY_EXPRESSION, PLOT_CONSISTENCY, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { makeJ13Series } from '../support/series-consistency.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -95,6 +98,127 @@ const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
 const FACTUAL = 'factual-review';
 
+/** Count every relation around a preview, without reading editorial payloads. */
+function previewRowCounts(): unknown {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map(row =>
+    [row.name, db.prepare(`SELECT count(*) n FROM "${String(row.name).replaceAll('"', '""')}"`).get()!.n]); }
+  finally { db.close(); }
+}
+
+describe('review launch options and read-only preview (#1657)', () => {
+  it('waits for quiet before admitting an idle launch', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      session.owner.setBackgroundIdle(false);
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy);
+      expect(launched.projection.run!.state).toBe('waiting');
+      await driveLaunchedReviewRun(session.driver, launched);
+      expect(session.driver.driving).toBe(false);
+      let loop: Promise<void> | null = null;
+      const ready = session.owner.whenBackgroundIdle().then(() => session.store.admitIdleReview(launched.projection.run!.reviewRunId,
+        () => { loop = session.driver.drive(launched.projection.run!.reviewRunId); }));
+      await Promise.resolve();
+      expect(loop).toBeNull();
+      session.owner.setBackgroundIdle(true);
+      await ready; await loop;
+      expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
+    });
+  });
+
+  it('keeps the existing restart refusal for an idle approval that never began', async () => {
+    const first = await open('sample1-review-cross-chapter-authored');
+    let book!: Book, reviewRunId!: string;
+    try {
+      book = await importBook(first);
+      reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy).projection.run!.reviewRunId;
+    } finally { await close(first); }
+    const second = await open('sample1-review-cross-chapter-authored');
+    try {
+      second.store.reconcileStoppedReviewCategoryRuns();
+      const before = previewRowCounts();
+      second.store.admitIdleReview(reviewRunId, () => { throw new Error('must not restart'); });
+      expect(previewRowCounts()).toEqual(before);
+      expect(workspace(second, book, reviewRunId).run!.state).toBe('failed');
+    } finally { await close(second); }
+  });
+  const choices: import('../../src/shared/protocol.js').PlanEditsProjection[] = [
+    { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+    { removedSteps: [], disallowedAdaptations: ['safe-retry'] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: [] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+  ];
+  it.each(choices.flatMap(planEdits => [[TYPOS], [TYPOS, STYLE, FACTUAL]].map(categoryIds => ({ planEdits, categoryIds }))))
+    ('freezes the same options as prepared, edited and authorized review: %j', async ({ planEdits, categoryIds }) => {
+      await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+        const prepared = prepare(session, book, categoryIds, WHOLE);
+        const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId });
+        session.store.editTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId,
+          planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ...planEdits });
+        const edited = workspace(session, book, prepared.reviewRunId).run!;
+        session.store.authorizeReviewRun(book.bookId, edited.reviewRunId, approvals(edited));
+        const expected = frozenReviewOptions(roots.dataRoot, edited.reviewRunId);
+        const another = await importSample1Book(session.store, roots.codeRoot, 'sample1 启动选项');
+        await pinEditorialWorkspaceProfileRevision2(session.store, another.bookId);
+        const launched = session.store.launchReviewRun({ bookId: another.bookId, clientCommandId: randomUUID(), categoryIds, scope: WHOLE, planEdits }, launchPolicy);
+        expect(frozenReviewOptions(roots.dataRoot, launched.projection.run!.reviewRunId)).toEqual(expected);
+      });
+    });
+  it.each([{ categoryIds: [TYPOS] }, { categoryIds: [TYPOS, STYLE, FACTUAL] }])('previews and freezes the same category choices: %j', async ({ categoryIds }) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds, scope: WHOLE, startWhen: 'idle' as const,
+        planEdits: { removedSteps: ['assurance-sampling'] as const, disallowedAdaptations: ['safe-retry'] as const,
+          runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 10000 } } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(before);
+      const launched = session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy);
+      const run = launched.projection.run!;
+      expect(frozenReviewCeiling(roots.dataRoot, run.reviewRunId, 'run-synthesis')).toEqual({ kind: 'tokens', maxTotalTokens: categoryIds.length === 3 ? 30000 : 10000 });
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(plan.boundary.adaptable.every(entry => entry.movable === false)).toBe(true);
+      expect(preview).toEqual(launchPreviewProjection(plan, frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+      expect(preview.adaptations.some(line => line.endsWith('不允许'))).toBe(true);
+      expect(session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy).repeated).toBe(true);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId, startWhen: 'now' }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_LAUNCH_COMMAND_CHANGED' }));
+    });
+  });
+
+  it('refuses ask-first identically in launch and preview before writing', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } };
+      const before = previewRowCounts();
+      const refusal = expect.objectContaining({ code: 'REVIEW_RETRY_CHOICE_UNAVAILABLE', message: '审阅暂不支持“失败时先问你”；可以选自动重试或不重试。' });
+      expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy)).toThrowError(refusal);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy)).toThrowError(refusal);
+      expect(previewRowCounts()).toEqual(before);
+    });
+  });
+
+  it('previews a local review without writes, keeps old options and refuses only new model options', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: ['local-text-check'], scope: WHOLE,
+        localCheck: { punctuation: 'chinese-prose' as const, numerals: 'off' as const, publication: 'unknown' as const,
+          numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(preview.units).toBeGreaterThan(0);
+      expect(previewRowCounts()).toEqual(before);
+      for (const options of [{ startWhen: 'idle' as const }, { planEdits: { removedSteps: [], disallowedAdaptations: [] } },
+        { planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } }]) {
+        expect(() => session.store.launchReviewRun({ ...input, ...options }, launchPolicy)).toThrowError(expect.objectContaining({
+          code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', message: '这次审阅不使用模型，无需选择运行选项。' }));
+        expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: { ...input, ...options } } }, launchPolicy))
+          .toThrowError(expect.objectContaining({ code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE' }));
+        expect(previewRowCounts()).toEqual(before);
+      }
+      const run = session.store.launchReviewRun({ ...input, executionConfig: { modelId: 'ignored-choice' }, rememberedChoice: true, startWhen: 'when-online' }, launchPolicy).projection.run!;
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }), frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+    });
+  });
+});
+
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 
@@ -108,6 +232,10 @@ afterEach(async () => {
   await roots.dispose();
 });
 
+// Cases whose first act is the import start from a copy of one imported sample1 store (#1621); a case that imports a second Book,
+// reopens a store or tests the import itself keeps `importSample1Book` or a plain `open`.
+const seeded = sample1Seed({ title: 'L2 sample1 审阅记录' });
+
 interface Session {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
@@ -115,6 +243,8 @@ interface Session {
   readonly fixture: ResolvedModelFixture;
   readonly responseEntries?: Map<string, ModelFixtureEntry>;
   readonly capture?: ReturnType<typeof capturedOrdinaryExecution>;
+  /** The data root was copied from the sample1 seed: `importBook` hands back its Book instead of importing. */
+  readonly seeded?: boolean;
 }
 
 interface Book {
@@ -123,8 +253,9 @@ interface Book {
   readonly branchId: string;
 }
 
-async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2): Promise<Session> {
+async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2, seed = false): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
+  if (seed) (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -135,7 +266,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
   });
   const executionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
-  return { store, owner: executionOwner, driver, fixture };
+  return { store, owner: executionOwner, driver, fixture, seeded: seed };
 }
 
 /** The service entry's own shutdown order: the loop stops first, the owner interrupts, the loop records it. */
@@ -147,6 +278,12 @@ async function close(session: Session): Promise<void> {
 }
 
 async function importBook(session: Session): Promise<Book> {
+  if (session.seeded) {
+    const { book } = await seeded();
+    // Recorded here, after the session's own route connection, as before the seed: the first connection becomes the fast role's.
+    recordMissingCredentialConnection(session.store, 'L2 主编辑连接');
+    return { bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId };
+  }
   await requireExactSample1(roots.codeRoot);
   const imported = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 审阅记录');
   await pinEditorialWorkspaceProfileRevision2(session.store, imported.bookId);
@@ -154,13 +291,13 @@ async function importBook(session: Session): Promise<Book> {
   return { bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
 }
 
-async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>): Promise<void> {
-  const session = await open(fixtureIdentity);
+async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>, seed = false): Promise<void> {
+  const session = await open(fixtureIdentity, undefined, undefined, seed);
   try { await body(session); } finally { await close(session); }
 }
 
 async function withBook(fixtureIdentity: string, body: (session: Session, book: Book) => Promise<void>): Promise<void> {
-  await withSession(fixtureIdentity, async (session) => { await body(session, await importBook(session)); });
+  await withSession(fixtureIdentity, async (session) => { await body(session, await importBook(session)); }, true);
 }
 
 /** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
@@ -168,6 +305,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
   controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<void> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-contract-v2-controls');
   const responseEntries = new Map(fixture.entries);
+  (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -183,8 +321,9 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
       : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, controls);
+  seedModelEfforts(store, 'opencode-go', { 'account-future-model': ['low', 'high'] });
   launchPolicy = capture.policy;
-  const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries };
+  const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries, seeded: true };
   try { await body(session, await importBook(session)); } finally { await close(session); }
 }
 
@@ -243,8 +382,79 @@ function binding(session: Session, book: Book): { manuscriptId: string; branchId
   return { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
 }
 
+/** Real writer paths in one lifecycle; only the old version and public rows are used as the oracle. */
+function findingsVersionWrites(current: () => Session, book: Book): Array<{ name: string; changed?: false; write: () => unknown | Promise<unknown> }> {
+  const read = () => current().store.inspectBookFindings(book.bookId, { whole: true });
+  const bind = () => binding(current(), book);
+  let batchMarkId = '';
+  return [
+    { name: 'analysis revision with gaps', write: () => runBaseline(current(), book) },
+    { name: 'review materialization', write: () => authorizeAndDrive(current(), book, prepare(current(), book, [TYPOS, STYLE], WHOLE)) },
+    { name: 'batch apply', write: () => {
+      const marks = read().items.flatMap((row) => row.suggestion?.batchAllowed ? [row.suggestion.markId] : []);
+      expect(marks.length).toBeGreaterThan(1); batchMarkId = marks[0]!;
+      return current().store.applyChangeSuggestionBatch({ ...bind(), markIds: marks, clientEffectId: randomUUID() });
+    } },
+    { name: 'batch undo', write: () => current().store.reverseAppliedChangeSuggestion({ ...bind(), markId: batchMarkId, clientEffectId: randomUUID() }) },
+    { name: 'single apply', write: () => {
+      const markId = read().items.find((row) => row.suggestion !== undefined)!.suggestion!.markId;
+      return current().store.applyChangeSuggestion({ ...bind(), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+    } },
+    { name: 'mark handled', write: () => {
+      const markId = read().items.find((row) => row.decision?.kind === 'ignore' && row.place?.markId !== null)!.place!.markId!;
+      return current().store.updateEditorialMark({ ...bind(), markId, action: 'set-status', body: null, highlightColor: null, status: 'resolved', targetKind: null, proposedText: null, rationale: null });
+    } },
+    { name: 'row reject', write: () => {
+      const decision = read().items.find((row) => row.decision?.kind === 'reject')!.decision!;
+      if (decision.kind !== 'reject') throw new Error('missing reject fixture');
+      return current().store.recordChangeSuggestionDecision({ ...decision.input, clientDecisionId: randomUUID() });
+    } },
+    { name: 'row ignore', write: () => {
+      const decision = read().items.find((row) => row.decision?.kind === 'ignore')!.decision!;
+      if (decision.kind !== 'ignore') throw new Error('missing ignore fixture');
+      const input = decision.input;
+      return current().store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+    } },
+    { name: 'journal edit on suggestion words', write: () => {
+      const row = read().items.find((item) => item.suggestion !== undefined)!;
+      const card = current().store.getEditorialMarkCard(book.manuscriptId, book.branchId, row.suggestion!.markId);
+      const window = current().store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
+      const block = window.blocks.find((item) => item.blockId === card.blockId)!;
+      return current().store.flushJournalEdit({ ...bind(), clientEditId: randomUUID(), baseRevisionId: window.revisionId, blockId: card.blockId,
+        baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: card.fromGrapheme + 1, toGrapheme: card.fromGrapheme + 1, insertText: '〔改〕' });
+    } },
+    { name: 'new evaluation risk', write: () => {
+      const record = current().store.startEvaluation(book.bookId).record!;
+      return current().store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: false,
+        content: { ...record.content, risks: record.content.risks.map((risk, index) => index === 0 ? { ...risk, level: 'high', statement: '合成风险', reviewed: false } : risk) } });
+    } },
+    { name: 'reviewed evaluation risk', write: () => {
+      const record = current().store.inspectEvaluation(book.bookId, null).record!;
+      return current().store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: false,
+        content: { ...record.content, risks: record.content.risks.map((risk) => ({ ...risk, reviewed: true })) } });
+    } },
+    { name: 'another Book import', changed: false, write: () => importSample1Book(current().store, roots.codeRoot, '另一份公开样书') },
+  ];
+}
+
+function expectFindingsPoll(held: BookFindingsReadProjection, read: (since?: string) => BookFindingsReadProjection, name: string, changed = true): BookFindingsReadProjection {
+  const polled = read(held.version), fresh = read();
+  expect(polled.unchanged, name).toBe(!changed);
+  expect(polled.version, name).not.toBe(held.version);
+  expect(changed ? JSON.stringify(polled.items) === JSON.stringify(fresh.items) : polled.items.length === 0, name).toBe(true);
+  return fresh;
+}
+
 function workingText(session: Session, book: Book): Map<string, string> {
   return new Map(session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).map((block) => [block.blockId, block.text] as const));
+}
+
+function replaceBlockPrefix(session: Session, book: Book, blockId: string, insertText: string, remove = 256): void {
+  const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId });
+  const block = window.blocks.find((entry) => entry.blockId === blockId)!;
+  session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+    blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+    fromGrapheme: 0, toGrapheme: Math.min(remove, graphemeCount(block.text)), insertText });
 }
 
 /** Words written at the end of the paragraph at `position`, as the editor's journal writes them. */
@@ -473,29 +683,6 @@ function selectionContext(session: Session, book: Book) {
   return { at, on };
 }
 
-/** Only coverage of the genuine revision-84 review-contract widening; the database suites start elsewhere. */
-function revision84ReviewStore(): Array<{ table: string; rows: unknown[] }> {
-  const before: Array<{ table: string; rows: unknown[] }> = [];
-  return withDatabase((db) => {
-    constructPre94PolicyEncoding(db);
-    execPre74Fixture(db, 'PRAGMA user_version = 95');
-    db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
-    for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
-      const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
-      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
-      before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
-      db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
-      db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
-        .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
-        .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
-      db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
-      for (const trigger of triggers) db.exec(String(trigger.sql));
-    }
-    execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
-    return before;
-  });
-}
-
 /** The editor's mark actions used to arrange report versioning. */
 function handleReviewFindings(session: Session, book: Book, run: ReviewRunProjection) {
   const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
@@ -513,15 +700,18 @@ function standBlocks(session: Session, book: Book, moves: ReadonlyArray<readonly
   const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
   withDatabase((db) => {
     db.exec('PRAGMA foreign_keys = OFF');
-    const move = db.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-    for (const [read] of moves) move.run(100000 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
-    for (const [read, now] of moves) move.run(now, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    // The paragraph read at `read` takes the order key of the one at `now` (Issue #1654: the order is the keys').
+    const keyAt = new Map(blocks.map((block) => [block.position, Number((db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?')
+      .get(book.branchId, block.blockId) as { order_key: number }).order_key)] as const));
+    const move = db.prepare('UPDATE working_blocks SET order_key = ? WHERE branch_id = ? AND block_id = ?');
+    for (const [read] of moves) move.run(2 ** 52 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    for (const [read, now] of moves) move.run(keyAt.get(now)!, book.branchId, blocks.find((block) => block.position === read)!.blockId);
   });
 }
 
 async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: string }> {
   let gated = null as GatedOwner | null;
-  const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
+  const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; }, undefined, true);
   let book: Book;
   let reviewRunId: string;
   try {
@@ -549,9 +739,11 @@ async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: strin
   return { book: book!, reviewRunId: reviewRunId! };
 }
 
-async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing') {
-  const first = await open('sample1-review-cross-chapter-authored');
+async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing', earlierRuns: number) {
+  // Only the first turn starts from the seed: a later turn opens the data root the earlier turns wrote, which is the point of the case.
+  const first = await open('sample1-review-cross-chapter-authored', undefined, undefined, book === undefined);
   try {
+    expect(withDatabase((db) => (db.prepare('SELECT COUNT(*) AS runs FROM review_runs').get() as { runs: number }).runs), 'Review Runs the earlier turns left in the store').toBe(earlierRuns);
     book ??= await importBook(first);
     const prepared = prepare(first, book, [TYPOS], WHOLE);
     const reviewRunId = prepared.reviewRunId;
@@ -690,7 +882,7 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 
 describe('a Review Run over the real store on exact sample1', () => {
   it('keeps change-plan redo independent of the previous series selection', async () => {
-    const session = await openLayeredSelection();
+    const session = await openLayeredSelection({}, true);
     try {
       const book = await importBook(session);
       const seriesId = makeJ13Series(session.store, book.bookId);
@@ -783,33 +975,12 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally { await close(current); }
   }, 300_000);
 
-  it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
-    const legacy = await open('review-overlap-authored');
-    const book = await importBook(legacy);
-    // This retained v1 fixture closes no units under the current outcome rule (#1307).
-    try { expect((await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE))).state).toBe('failed'); }
-    finally { await close(legacy); }
-    const before = revision84ReviewStore();
-    const session = await open('review-overlap-authored');
-    try {
-      // Inherited at integration-24: this two-paragraph synthetic fixture has no sample1 request entries.
-      expect(workspace(session, book).runs[0]!.state).toBe('failed');
-      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
-      expect(projection.resultSetRevision).toBeNull();
-      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
-      withDatabase((after) => {
-        for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
-        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      });
-    } finally { await close(session); }
-  }, 300_000);
-
   it('refuses a terminal store missing its excluded findings relation (#1084)', async () => {
     const session = await open('review-overlap-authored');
     await close(session);
     const broken = database();
     try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
-    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_INVALID' });
   }, 300_000);
 
   it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {
@@ -895,7 +1066,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('retries one invalid v2 envelope, keeps valid siblings, and persists the visible rejected finding without a mark (#1084)', async () => {
-    const session = await open('sample1-review-contract-v2-controls');
+    const session = await open('sample1-review-contract-v2-controls', undefined, undefined, true);
     const book = await importBook(session);
     let runId = '';
     try {
@@ -1114,6 +1285,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
       const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
+      const whole = session.store.inspectBookFindings(book.bookId, { whole: true });
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: whole.version })).toMatchObject({ unchanged: true, items: [] });
+      expect(whole.items).toEqual(aggregateBefore.items);
       aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal')).equals(walBytes)).toBe(true);
@@ -1128,6 +1302,192 @@ describe('a Review Run over the real store on exact sample1', () => {
         .toMatchObject({ status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' });
       expect(current.findings.find((finding) => finding.findingId === applied.findingId))
         .toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
+    });
+  }, 300_000);
+
+  it('never hides real-store writes from a held version, another window, or a reopened store (#1669 B1)', async () => {
+    let session: Session | null = await open('sample1-review-cross-chapter-authored', undefined, undefined, true);
+    try {
+      const book = await importBook(session);
+      const current = (): Session => session!;
+      const read = (since?: string): BookFindingsReadProjection => current().store.inspectBookFindings(book.bookId, { whole: true, ...(since === undefined ? {} : { since }) });
+      let held = read();
+      for (const step of findingsVersionWrites(current, book)) {
+        await step.write();
+        held = expectFindingsPoll(held, read, step.name, step.changed !== false);
+        if (step.name === 'analysis revision with gaps') expect(held.items.some((row) => row.target.kind === 'gap')).toBe(true);
+      }
+      const otherWindow = read();
+      const decision = held.items.find((row) => row.decision?.kind === 'ignore')!.decision!;
+      if (decision.kind !== 'ignore') throw new Error('missing other-window fixture');
+      const input = decision.input;
+      current().store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+      held = expectFindingsPoll(otherWindow, read, 'other window ignore');
+      expect(held.items.some((row) => row.id === input.findingId)).toBe(false);
+      await close(session); session = null;
+      session = await open('sample1-review-cross-chapter-authored');
+      expectFindingsPoll(held, read, 'reopened store');
+    } finally { if (session !== null) await close(session); }
+  }, 300_000);
+
+  it('merges repeated suggestions newest first and closes their shared mark with one decision (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, first) => {
+      const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const third = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const merged = session.store.inspectBookFindings(book.bookId, { whole: true });
+      const pending = third.findings.filter((finding) => finding.status === 'pending');
+      expect(merged.total).toBe(pending.length);
+      expect(merged.items.every((item) => item.place?.reviewRunId === third.reviewRunId)).toBe(true);
+      expect(merged.groups.reduce((sum, group) => sum + group.count, 0)).toBe(merged.total);
+      const ignored = merged.items.find((item) => item.decision?.kind === 'ignore')!;
+      const input = ignored.decision!.input;
+      if (!('findingId' in input)) throw new Error('missing ignore input');
+      session.store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+      const after = session.store.inspectBookFindings(book.bookId, { whole: true, since: merged.version });
+      expect(after).toMatchObject({ unchanged: false, total: merged.total - 1 });
+      expect(after.items.some((item) => item.id === ignored.id)).toBe(false);
+      for (const run of [first, second, third]) expect(workspace(session, book, run.reviewRunId).run!.findings.find((finding) => finding.markId === ignored.place!.markId)?.status).toBe('ignored');
+      expect(session.store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.filter((signal) => signal.kind === 'review-finding-ignored')).toHaveLength(1);
+      const repeated = storeError(() => session.store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason));
+      expect(repeated).toMatchObject({ code: 'REVIEW_FINDING_NOT_PENDING', message: '这条发现已经忽略过。' });
+    });
+  }, 300_000);
+
+  it('carries the review card place, existing reject input and filtered batch sentences (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const read = (filters = {}) => session.store.inspectBookFindings(book.bookId, { whole: true, filters });
+      const whole = read();
+      for (const row of whole.items) {
+        const finding = run.findings.find((entry) => entry.findingId === row.id)!;
+        expect(row.place).toEqual({ manuscriptId: book.manuscriptId, branchId: book.branchId, reviewRunId: run.reviewRunId,
+          ordinal: finding.ordinal, blockId: finding.blockId, markId: finding.markId, blockExists: finding.blockPosition !== null });
+      }
+      const count = whole.items.filter((item) => item.suggestion?.batchAllowed).length;
+      expect(whole.batch).toEqual({ count, sentence: `将把所列 ${count} 条修改建议写入稿件。` });
+      for (const filters of [{ category: `review:${TYPOS}` }, { severity: '必须处理' }]) {
+        const filtered = read(filters);
+        expect(filtered.groups).toEqual(whole.groups);
+        expect(filtered.batch.count).toBe(filtered.items.filter((item) => item.suggestion?.batchAllowed).length);
+        expect(filtered.batch.sentence).toBe(filtered.batch.count ? `将把当前筛选下的 ${filtered.batch.count} 条修改建议写入稿件。` : null);
+      }
+      expect(read({ category: `review:${STYLE}` }).batch).toEqual({ count: 0, sentence: null });
+      const reject = whole.items.find((item) => item.decision?.kind === 'reject')!.decision!;
+      if (reject.kind !== 'reject') throw new Error('missing reject input');
+      session.store.recordChangeSuggestionDecision({ ...reject.input, clientDecisionId: randomUUID() });
+      expect(read().total).toBe(whole.total - 1);
+    });
+  }, 300_000);
+
+  it('does one finding-view read per Run instead of every workspace on every aggregate page (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, first) => {
+      const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const third = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const workspaceSpy = vi.spyOn(session.store, 'inspectReviewWorkspace');
+      const querySpy = vi.spyOn(StatementSync.prototype, 'all');
+      try {
+        const oldRead = () => [third, second, first].flatMap((identity) => {
+          const findings = [];
+          let after: number | null = null;
+          for (;;) {
+            const run: ReviewRunProjection = session.store.inspectReviewWorkspace(book.bookId, identity.reviewRunId, undefined,
+              { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
+            findings.push(...run.findings.filter((finding) => finding.status === 'pending'));
+            if (!run.findingsTruncated || run.findings.length === 0) return findings;
+            after = run.findings.at(-1)!.ordinal;
+          }
+        });
+        let offset = 0, total = 0;
+        do { total = oldRead().length; offset += 40; } while (offset < total);
+        const oldCalls = workspaceSpy.mock.calls.length;
+        querySpy.mockClear(); workspaceSpy.mockClear();
+        const merged = session.store.inspectBookFindings(book.bookId, { whole: true });
+        const findingReads = () => querySpy.mock.contexts.filter(statement => statement instanceof StatementSync && statement.sourceSQL.includes('FROM review_findings f')).length;
+        expect(findingReads()).toBe(3);
+        expect(workspaceSpy).not.toHaveBeenCalled();
+        console.info(`FINDINGS_COST/${JSON.stringify({ legacyWorkspaceReads: oldCalls, mergedFindingReads: findingReads() })}`);
+        expect(oldCalls).toBeGreaterThanOrEqual(findingReads());
+        querySpy.mockClear();
+        expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: merged.version })).toMatchObject({ unchanged: true, items: [] });
+        expect(findingReads()).toBe(0);
+      } finally { querySpy.mockRestore(); workspaceSpy.mockRestore(); }
+    });
+  }, 300_000);
+
+  it('keeps no-mark findings distinct across Runs as in the report (#1669)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const original = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.kind === 'paragraph');
+      const steps = session.store.reviewRunDriveSteps;
+      const driver = new ReviewRunDriver({ ...steps, write: (runId, categoryId) => {
+        if (categoryId === TYPOS) for (const block of original) replaceBlockPrefix(session, book, block.blockId, '〔编辑改稿〕');
+        steps.write(runId, categoryId);
+      } }, session.owner);
+      const runs: ReviewRunProjection[] = [];
+      try {
+        for (let index = 0; index < 2; index++) {
+          const prepared = prepare(session, book, [TYPOS], WHOLE);
+          session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+          await driver.drive(prepared.reviewRunId);
+          runs.push(workspace(session, book, prepared.reviewRunId).run!);
+          for (const block of original) replaceBlockPrefix(session, book, block.blockId, sliceGraphemes(block.text, 0, 256), graphemeCount('〔编辑改稿〕'));
+        }
+      } finally { await driver.dispose(); }
+      const finding = runs[0]!.findings.find((entry) => entry.markId === null)!;
+      expect(finding).toBeDefined();
+      const other = runs[1]!.findings.find((entry) => entry.categoryId === finding.categoryId && entry.blockId === finding.blockId && entry.quote === finding.quote && entry.replacement === finding.replacement)!;
+      expect(other.markId).toBeNull();
+      expect(other.findingId).not.toBe(finding.findingId);
+      const before = session.store.inspectBookFindings(book.bookId, { whole: true });
+      expect(before.items.filter((row) => row.id === finding.findingId || row.id === other.findingId)).toHaveLength(2);
+      const reviewed = await session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'book-review-report' }, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, format: 'docx' }, true);
+      await mkdir(roots.inputRoot, { recursive: true });
+      await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId, target: { kind: 'report', reportId: reviewed.target.report!.reportId },
+        options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination: join(roots.inputRoot, 'no-mark-report.docx'), format: 'docx' }, true);
+      expect(workspace(session, book, runs[1]!.reviewRunId).run!.report!.record.totals!.pending).toBe(before.total);
+      const row = before.items.find((entry) => entry.id === finding.findingId)!;
+      expect(row.place).toMatchObject({ markId: null, blockExists: true });
+      expect(row.decision?.kind).toBe('ignore');
+      session.store.recordReviewFindingDisposition(book.bookId, runs[0]!.reviewRunId, finding.findingId, '编辑决定忽略');
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: before.version }).items.some((entry) => entry.id === finding.findingId)).toBe(false);
+      expect(workspace(session, book, runs[0]!.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId)!.status).toBe('ignored');
+      expect(workspace(session, book, runs[1]!.reviewRunId).run!.findings.find((entry) => entry.findingId === other.findingId)!.status).toBe('pending');
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true }).items.some((entry) => entry.id === other.findingId)).toBe(true);
+      expect(session.store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.filter((signal) => signal.kind === 'review-finding-ignored')).toHaveLength(1);
+    });
+  }, 300_000);
+
+  it('carries the review card place and rejects with a stale window start after a paragraph join (#1669, #1754)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const finding = run.findings.find((entry) => {
+        const index = blocks.findIndex((block) => block.blockId === entry.blockId);
+        return entry.output === 'change-suggestion' && index > 0 && blocks[index]!.kind === 'paragraph' && blocks[index - 1]!.kind === 'paragraph';
+      })!;
+      expect(finding).toBeDefined();
+      const previous = blocks[blocks.findIndex((block) => block.blockId === finding.blockId) - 1]!;
+      const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: previous.blockId });
+      const removed = window.blocks.find((block) => block.blockId === finding.blockId)!;
+      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        blockId: previous.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: previous.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: previous.graphemes, toGrapheme: previous.graphemes, insertText: '',
+        structure: { kind: 'merge', mergedBlockId: finding.blockId, mergedBlockDigest: removed.digest } });
+      const card = workspace(session, book, run.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId)!;
+      expect(card.blockId).toBe(previous.blockId);
+      expect(card.blockPosition).toBe(previous.position);
+      const row = session.store.inspectBookFindings(book.bookId, { whole: true }).items.find((entry) => entry.id === finding.findingId)!;
+      expect(row.place).toMatchObject({ blockId: card.blockId, blockExists: true, ordinal: card.ordinal });
+      expect(row.decision?.kind).toBe('reject');
+      const decision = row.decision;
+      if (decision?.kind !== 'reject') throw new Error('missing current-block reject input');
+      expect(decision.input.windowStartBlockId).toBe(previous.blockId);
+      const stale = { ...decision.input, windowStartBlockId: removed.blockId, clientDecisionId: randomUUID() };
+      const rejected = session.store.recordChangeSuggestionDecision(stale).card;
+      expect(rejected?.blockId).toBe(previous.blockId);
+      expect(rejected?.status).toBe('resolved');
+      expect(rejected?.suggestion?.decision?.disposition).toBe('rejected');
+      const retried = session.store.recordChangeSuggestionDecision(stale).card;
+      expect(retried?.suggestion?.decision?.decisionId).toBe(rejected?.suggestion?.decision?.decisionId);
+      const settled = workspace(session, book, run.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId);
+      expect(settled?.status).toBe('handled');
     });
   }, 300_000);
 
@@ -1520,6 +1880,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       const failed = await authorizeAndDrive(session, book, chosen);
       expect(failed.state).toBe('failed');
       expect(failed.categories[0]!.state).toBe('failed');
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: failed.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun', cancelsFirst: null, summary: ['重新开始一项新任务，已完成的内容不会带入。'] });
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
       expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
@@ -1579,7 +1941,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(ledger.chainRevisionsRead).toBe(6);
       for (let read = 0; read < 5; read += 1) workspace(first, book);
       expect(ledger.chainRevisionsRead).toBe(6);
-    });
+    }, true);
     // Opened again, the first read walks the chain cold — six reads, one a revision — and the poll's reads walk no more.
     await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const ledger = second.store.reviewCategoryLedger(definition);
@@ -1606,7 +1968,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = prepare(first, book, [TYPOS], CHANGED);
       expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 2, unreviewed: 0 });
       reviewRunId = synced.reviewRunId;
-    });
+    }, true);
     // The 全书's revision record is damaged beside the closed store: its coverage manifest no longer matches the digest it names.
     withDatabase((db) => {
       db.exec('DROP TRIGGER analysis_result_set_revisions_no_update');
@@ -1761,7 +2123,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('keeps going when one category cannot be dispatched, and ends that ledger Run instead of leaving it authorized', async () => {
-    const session = await open('sample1-review-cross-chapter-authored', (inner) => new RefusingFirstDispatch(inner));
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => new RefusingFirstDispatch(inner), undefined, true);
     try {
       const book = await importBook(session);
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
@@ -1813,7 +2175,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
     let taken = null as PlacesTakenOwner | null;
-    const session = await open('sample1-review-cross-chapter-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; }, undefined, true);
     try {
       const book = await importBook(session);
       const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
@@ -1845,7 +2207,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records a category the owner interrupted on shutdown as interrupted, and 继续审阅 goes on with the rest', async () => {
     let gated = null as GatedOwner | null;
-    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; });
+    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; }, undefined, true);
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1890,7 +2252,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       handOff.ledger.recordRunState(handOff.runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
       handOff.ledger.recordRunState(handOff.runRecordId, 'executing', { detail: '正在执行。' });
       steps.recordDispatch(reviewRunId, TYPOS, handOff.runRecordId);
-    });
+    }, true);
 
     await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const partial = workspace(second, book, reviewRunId).run!;
@@ -1909,8 +2271,8 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('reconciles stopped admitted or executing categories while preserving explicit continuation (#657)', async () => {
     let book: Book | undefined;
-    for (const planted of ['authorized', 'admitted', 'executing'] as const) {
-      const stopped = await plantStoppedCategory(book, planted);
+    for (const [turn, planted] of (['authorized', 'admitted', 'executing'] as const).entries()) {
+      const stopped = await plantStoppedCategory(book, planted, turn);
       book = stopped.book;
       const { reviewRunId, runRecordId } = stopped;
       const second = await open('sample1-review-cross-chapter-authored');
@@ -2326,8 +2688,9 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 
 const SERIES = 'series-consistency';
 /** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
-async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<Session> {
+async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, seed = false): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'); // unchanged response bytes, not an admission pin
+  if (seed) (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -2348,8 +2711,9 @@ async function openLayeredSelection(controls: Parameters<typeof capturedOrdinary
           : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), ...controls });
+  seedModelEfforts(store, 'opencode-go', { 'account-future-model': ['low', 'high'] });
   launchPolicy = capture.policy;
-  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture };
+  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, seeded: seed };
 }
 
 /** 先看计划 from a Captured Procedure version (ADR 0087 §4): the pin the sheet — or the selection composer — carries. */
@@ -2363,7 +2727,7 @@ function preparePinned(session: Session, book: Book, categoryIds: ReadonlyArray<
 
 
 async function withSelectionProcedures(body: (session: Session, book: Book, context: Awaited<ReturnType<typeof selectionProcedures>>) => Promise<void>): Promise<void> {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session);
     await body(session, book, await selectionProcedures(session, book));
@@ -2624,6 +2988,38 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('explains a review cancellation refusal without naming only a series stop (#1656)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      await session.driver.drive(run.reviewRunId);
+      expect(() => session.store.cancelReviewRun(book.bookId, run.reviewRunId)).toThrowError(expect.objectContaining({ code: 'REVIEW_RUN_NOT_CANCELLABLE', message: '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。' }));
+    });
+  });
+  it.each([false, true])('relaunches a finished review through its original request, remembered=%s (#1656)', async remembered => {
+    await withCapturedReviewBook(async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+      const first = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch).toBeNull();
+      await session.driver.drive(first.reviewRunId);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      const before = session.store.inspectReviewCategory(book.bookId, definition);
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.operation).toBe('launchReviewRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      expect(recipe.input).toMatchObject({ categoryIds: input.categoryIds, scope: input.scope });
+      const request = { ...recipe.input, clientCommandId: randomUUID(), rememberedChoice: remembered,
+        executionConfig: remembered ? { modelConnectionId: randomUUID(), modelId: 'removed-review-model' } : { modelId: 'account-future-model', reasoningEffort: 'low' } };
+      const launched = session.store.launchReviewRun(request, launchPolicy).projection;
+      const next = launched.run!;
+      const after = session.store.inspectReviewCategory(book.bookId, definition);
+      expect(after.providerResolutionPlan!.executionRoute).toMatchObject(remembered ? { model: session.store.getConfiguredModelRoleBinding('main-editorial')!.model } : { model: 'account-future-model', reasoningEffort: 'low' });
+      if (remembered) expect(launched.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
+      expect(after.planEnvelope!.promptContractDigest).toBe(before.planEnvelope!.promptContractDigest);
+      expect(session.store.launchReviewRun(request, launchPolicy).projection.run!.reviewRunId).toBe(next.reviewRunId);
+      expect(() => session.store.launchReviewRun({ ...request, clientCommandId: randomUUID() }, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      await session.driver.drive(next.reviewRunId);
+    });
+  });
   it('omits an unsent effort from the request, card, report and task row while keeping the role default', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const binding = session.store.getConfiguredModelRoleBinding('main-editorial')!;
@@ -2741,16 +3137,73 @@ describe('one-step review launch (#1455)', () => {
 });
 
 
-async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
-  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap);
-  const session = await openLayeredSelection();
+async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, seed = false): Promise<Session> {
+  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap, undefined, seed);
+  const session = await openLayeredSelection({}, seed);
   return wrap === undefined ? session : { ...session, driver: new ReviewRunDriver(session.store.reviewRunDriveSteps, wrap(session.owner)) };
 }
 
 describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
+  it('cancels a review stopped between categories before relaunch (#1656)', async () => {
+    const session = await openLaunchedLifecycle(scope, undefined, true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const steps = session.store.reviewRunDriveSteps;
+      const firstCategory = new ReviewRunDriver({ ...steps, begin: id => steps.begin(id).slice(0, 1) }, session.owner);
+      try { await firstCategory.drive(first.reviewRunId); } finally { await firstCategory.dispose(); }
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst).toEqual({ operation: 'cancelReviewRun', input: { bookId: book.bookId, reviewRunId: first.reviewRunId } });
+      expect(recipe.summary).toEqual(['先取消这项未完成的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']);
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      const { bookId: _book, ...previewInput } = request;
+      const beforePreview = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: previewInput } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(beforePreview);
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      session.store.cancelReviewRun(book.bookId, first.reviewRunId);
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'cancelled', canContinue: false });
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: next.reviewRunId }), frozenReviewUnits(roots.dataRoot, next.reviewRunId)));
+      await session.driver.drive(next.reviewRunId);
+    } finally { await close(session); }
+  });
+
+  it('relaunches a paused review only after its own cancellation settles (#1656)', async () => {
+    let gated: GatedOwner | null = null;
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const loop = session.driver.drive(first.reviewRunId); await gated!.reached;
+      const paused = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'pause' });
+      session.owner.pauseRun(paused.runRecordId!, paused.ledger); gated!.release(); await loop;
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst?.operation).toBe('controlTaskRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      const { bookId: _book, ...previewInput } = request;
+      const beforePreview = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: previewInput } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(beforePreview);
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const cancelled = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'cancel' });
+      session.owner.cancelRun(cancelled.runRecordId!, cancelled.ledger); await session.owner.whenIdle();
+      session.store.finishCancelledReviewRun(cancelled.runRecordId!);
+      expect(() => session.store.launchReviewRun({ ...request, relaunchOf: { ...request.relaunchOf!, revision: `0:0:0:${'a'.repeat(64)}` } }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      expect(next.reviewRunId).not.toBe(first.reviewRunId);
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: next.reviewRunId }), frozenReviewUnits(roots.dataRoot, next.reviewRunId)));
+      await session.driver.drive(next.reviewRunId);
+    } finally { (gated as GatedOwner | null)?.release(); await close(session); }
+  });
+
   it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
     let gated: GatedOwner | null = null;
-    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)));
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
     try {
       const book = await importBook(session);
       const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE };
@@ -2761,6 +3214,8 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun' });
       const beforeReplay = categoryEventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
       await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
       expect(categoryEventTrail(run.reviewRunId)).toEqual(beforeReplay);
@@ -2780,7 +3235,7 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
 
   it('cancels a launched run after restart and immediately launches an undispatched category again', async () => {
     let book!: Book, reviewRunId!: string;
-    const first = await openLaunchedLifecycle(scope);
+    const first = await openLaunchedLifecycle(scope, undefined, true);
     try {
       book = await importBook(first);
       reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
@@ -2827,13 +3282,17 @@ it('transmits a non-default channel and model with effort and stamps its card, r
 
 
 it('reconnects an offline ordinary review with every category on its launched model after defaults change (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session), defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
       executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
     const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
     expect(launched.projection.run!.state).toBe('waiting');
+    seedModelEfforts(session.store, 'opencode-go', { 'account-future-model': ['low'] });
+    expect(() => session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy)).toThrowError(expect.objectContaining({
+      code: 'MODEL_EFFORT_INVALID', message: '之前选的强度现在不可用，请重新选择。',
+    }));
     const repeated = session.store.launchReviewRun(input, launchPolicy);
     expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
     await driveLaunchedReviewRun(session.driver, repeated);
@@ -2862,7 +3321,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
 });
 
 it('cancels an offline ordinary review before any category starts and immediately relaunches them (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session);
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
@@ -2880,19 +3339,24 @@ it('cancels an offline ordinary review before any category starts and immediatel
 });
 
 it('continues an ordinary launched review after its running ledger view is evicted from the bounded cache (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   const gated = new GatedOwner(session.owner, 2), driver = new ReviewRunDriver(session.store.reviewRunDriveSteps, gated);
   try {
     const book = await importBook(session);
     const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
       executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
     const driving = driver.drive(run.reviewRunId); await gated.reached;
+    // The bounded cache is keyed by Review Run. One other Book can supply all the entries needed to evict the held Run.
+    const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
+    await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
+    const evictingRuns = new Set<string>();
     for (let index = 0; index < 33; index += 1) {
-      const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
-      await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
       const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
-      session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
+      const reviewRunId = launched.projection.run!.reviewRunId;
+      session.store.inspectReviewWorkspace(other.bookId, reviewRunId);
+      evictingRuns.add(reviewRunId);
     }
+    expect(evictingRuns.size).toBe(33);
     const restored = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(restored.state).toBe('running'); expect(restored.modelLabel).toBe('account-future-model@high');
     const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
@@ -2914,7 +3378,7 @@ it('replays a committed launch after restart and drives it once without a second
     book = await importBook(session);
     reviewRunId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     // The process closes after commit, before it could acknowledge or start the driver.
-  });
+  }, true);
   await withSession('sample1-review-cross-chapter-authored', async session => {
     const input = { bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE };
     const repeated = session.store.launchReviewRun(input, launchPolicy);
@@ -2935,7 +3399,7 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
   let checkpointHeld = false;
   const first = await openLayeredSelection({ unitHold: async settled => {
     if (settled > 0 && !checkpointHeld) { checkpointHeld = true; reached(); await gate; }
-  } });
+  } }, true);
   const book = await importBook(first);
   const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE, PLOT], scope: WHOLE,
     executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
@@ -2972,7 +3436,7 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
 
 it('launches historical model-free baseline leads offline without a credential or waiting candidate (#1455)', async () => {
   // Explicitly reconstruct the retained v1 category owner; current v2 plot review remains model-backed.
-  const session = await open('sample1-review-cross-chapter-authored', undefined, 1);
+  const session = await open('sample1-review-cross-chapter-authored', undefined, 1, true);
   try {
     const book = await importBook(session); await runBaseline(session, book);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);

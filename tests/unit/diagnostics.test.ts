@@ -4,7 +4,7 @@ import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, sanitizeCrashRecord, type
 import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
-  buildIdentity: { schema: 1, softwareVersion: '0.1.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: true },
+  buildIdentity: { schema: 1, softwareVersion: '0.1.0', dataVersion: 2, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: true },
   appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 161, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
@@ -58,7 +58,7 @@ describe('pure diagnostics bundle', () => {
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
-    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 116, protocol: SERVICE_PROTOCOL_VERSION');
+    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 117, protocol: SERVICE_PROTOCOL_VERSION');
     expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
     expect(application).toContain("policySetVersion: 'no-policy-lock'");
     // The sandboxed preload cannot import the main module at runtime, so its literals must match the handler channels.

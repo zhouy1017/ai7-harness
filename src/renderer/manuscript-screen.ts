@@ -1,12 +1,15 @@
 import { reviewReturnButton } from './review-return.js';
+import { rendererErrorCode } from './error-words.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { menuPanel } from './components/controls.js';
+import { copyPlainText } from './clipboard-text.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
+import { startNewVersionImport } from './import-entry.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
@@ -99,6 +102,7 @@ export interface ManuscriptScreen {
   interrupt(): void;
   blockedClose(): boolean;
   /** AI 写作 on 稿件's switcher reads again (Issue #1403): the Task Drawer started or recorded its Task. */
+  openWriting(): void;
   refreshWriting(): void;
   destroy(): void;
 }
@@ -181,28 +185,6 @@ function button(label: string, className: 'primary' | 'secondary' | 'quiet', act
   return node;
 }
 
-/**
- * Put plain text on the clipboard (Issue #951, 复制受影响内容): the document's copy command over a detached field, else the
- * window's own copy through main. The page holds no clipboard permission, so `navigator.clipboard` is not used.
- */
-async function copyPlainText(api: RendererApi, text: string): Promise<void> {
-  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.readOnly = true;
-  field.className = 'clipboard-carrier';
-  field.setAttribute('aria-hidden', 'true');
-  document.body.append(field);
-  try {
-    field.focus({ preventScroll: true });
-    field.select();
-    if (!document.execCommand('copy')) await api.runEditorClipboardCommand({ command: 'copy' });
-  } finally {
-    field.remove();
-    returnFocus?.focus({ preventScroll: true });
-  }
-}
-
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
 function panel(): HTMLElement { return element('section', 'page-content'); }
 
@@ -214,12 +196,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     prepareSelectionTask, renderEditorWindow, renderBookAnalysis, renderBookReview, renderBookDeliverables,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
+  /** From how many changes an undo or redo says it is running (Issue #1654): 「正在撤销 2,000 处修改…」. */
+  const LARGE_STEP_CHANGES = 20;
   let viewportObserver: ResizeObserver | undefined;
   let taskBadgeTimer: number | undefined;
   let taskBadgeReading = false;
 
   let destroyed = false;
-  let columnMeasure: { destroy(): void } | undefined;
+  let columnMeasure: ReturnType<typeof mountColumnMeasure> | undefined;
   let currentWindow = initialWindow;
   let editor: BoundedEditor | undefined;
   let editorialMarks: EditorialMarksSurface | undefined;
@@ -458,6 +442,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   toolbarActions.classList.add('editor-edit-actions');
   // Present the existing mode and auto-apply settings as one choice.
   let autoApplyRevisions = getAutoApplyEditorRevisions();
+  const directEditKey = 'ai7.editor.directEditMode';
+  let initialInputMode: EditorInputMode = DEFAULT_EDITOR_INPUT_MODE;
+  try { if (globalThis.localStorage?.getItem(directEditKey) === 'true') initialInputMode = 'direct-edit'; } catch { /* Use the default when storage is unavailable. */ }
   const inputMenu = element('details', 'edit-method-menu');
   const inputModeToggle = element('summary', 'btn secondary editor-input-mode-toggle');
   inputModeToggle.dataset['editorInputModeToggle'] = 'true';
@@ -486,6 +473,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           setAutoApplyEditorRevisions(autoApplyRevisions);
         }
         editor.setInputMode(choice.mode);
+        try { globalThis.localStorage?.setItem(directEditKey, String(choice.mode === 'direct-edit')); } catch { /* The choice still applies to this editor. */ }
         paintInputMode(editor.inputMode());
         setStatus(choice.value === 'confirm' ? INPUT_MODE_CONFIRM_CHANGED : INPUT_MODE_CHANGED[choice.mode], 'success');
         close();
@@ -502,7 +490,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   methodPanel.setAttribute('role', 'menu');
   methodPanel.setAttribute('aria-label', '改稿方式');
   inputMenu.append(inputModeToggle, methodPanel);
-  paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
+  paintInputMode(initialInputMode);
   const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
   scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
   toolbarActions.append(inputMenu, paragraphStyle, scopedAiEditEntry, ...(isDocument ? [saveVersion, taskOnDocument] : []), undo, redo, retryAuthoritativeRefreshButton);
@@ -730,7 +718,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     updateExclusionSummary();
     if (mode === 'outline') { paintOutline(); revealCurrentChapter(); }
   }
-  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
+  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void startNewVersionImport(initialWindow.bookId), () => void leaveForDeliverables());
   const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
@@ -883,7 +871,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   function replaceComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.replaceComments(replacer)); }
   function restoreComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.restoreComments(replacer)); }
   const edgeEntries = element('div', 'edge-entries');
-  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-paragraph-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
     const badge = element('span', 'edge-badge');
     badge.setAttribute('aria-hidden', 'true');
@@ -961,7 +949,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   identities.append(identityGrid, journal);
   switcher = mountManuscriptSwitcher({
     bookId: initialWindow.bookId,
-    bookTitle,
+    bookTitle, toolbar: toolbarActions,
     api,
     currentDocumentId: productionDocument?.document.documentId ?? null,
     setStatus,
@@ -1008,6 +996,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       protectionSurface?.openOptions(PROTECTION_CLOSE_BLOCKED);
       return true;
     },
+    openWriting: () => switcher?.openWriting(),
     refreshWriting: () => switcher?.refreshWriting(),
     destroy,
   };
@@ -1336,18 +1325,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   async function rememberEntryPosition(): Promise<void> {
     // Where the editor was belongs to the manuscript the Book opens into, never to a Production Document.
     if (!editor || options.interrupted() || isDocument) return;
-    const point = editor.captureContinuity().anchor;
-    // Paging with 向前浏览 / 向后浏览 deliberately leaves the caret where it was, off the window now on
-    // screen, so the window's own first block answers for the position rather than a caret the editor
-    // can no longer see. Anywhere else the caret is the position.
-    const carried = currentWindow.blocks.some((block) => block.blockId === point.blockId);
-    const blockId = carried ? point.blockId : currentWindow.blocks[0]?.blockId;
-    if (blockId === undefined) return;
+    // The caret while the editor can see it. Read away from by the wheel, it is not where they read: the paragraph at the
+    // middle of the page answers, so the way back opens on that page (Issue #1703). A window paged to by 向前浏览 / 向后浏览
+    // leaves the caret behind and answers with its own first block until the reader moves the page.
+    const point = editor.readingPoint();
     await api.recordManuscriptEntryPosition({
       manuscriptId: currentWindow.manuscriptId,
       branchId: currentWindow.branchId,
-      blockId,
-      grapheme: carried ? point.grapheme : 0,
+      blockId: point.blockId,
+      grapheme: point.grapheme,
     }).catch(() => undefined);
   }
 
@@ -1379,19 +1365,34 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     target: Parameters<typeof api.getManuscriptWindowAt>[0]['target'],
     continuity: EditorContinuity,
     expected?: AuthoritativeResult,
-  ): Promise<void> {
+    reopenLatest = false,
+  ): Promise<boolean> {
     if (!editor) throw new Error('稿件编辑器不可用。');
     const binding = editor.currentWindow();
-    const next = await api.getManuscriptWindowAt({
+    const read = () => api.getManuscriptWindowAt({
       manuscriptId: binding.manuscriptId,
       branchId: binding.branchId,
       target,
+    }).catch((error: unknown) => {
+      if (!expected || target.kind !== 'window-start' || rendererErrorCode(error) !== 'WINDOW_NOT_FOUND') throw error;
+      return api.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'start' } });
     });
-    if (!editor) throw new Error('稿件编辑器不可用。');
-    if (expected && (
+    const owned = (page: ManuscriptWindowProjection) => editor !== undefined && !options.interrupted() &&
+      page.bookId === binding.bookId && page.manuscriptId === binding.manuscriptId && page.branchId === binding.branchId;
+    let next = await read();
+    if (!owned(next)) throw new Error('当前稿件已改变，请重新打开。');
+    const moved = expected !== undefined && (
       next.revisionId !== expected.revisionId || next.journalSequence !== expected.journalSequence ||
       next.workingDigest !== expected.workingDigest
-    )) throw new Error('保存的结果与刷新后的稿件不一致，请重新打开稿件。');
+    );
+    if (moved) {
+      if (!reopenLatest || next.journalSequence < expected.journalSequence) throw new Error('保存的结果与刷新后的稿件不一致，请重新打开稿件。');
+      const confirmed = await read();
+      if (!owned(confirmed) || confirmed.revisionId !== next.revisionId || confirmed.journalSequence !== next.journalSequence ||
+        confirmed.workingDigest !== next.workingDigest) throw new Error('稿件仍在变化，请再次重新打开。');
+      next = confirmed;
+    }
+    if (!editor || options.interrupted()) throw new Error('稿件编辑器不可用。');
     windowLoadCause = 'authoritative';
     try {
       if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
@@ -1401,6 +1402,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
     currentWindow = next;
     updateWindowChrome();
+    return moved;
   }
 
   async function runAuthoritativeMutation<T extends AuthoritativeResult>(
@@ -1475,12 +1477,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (!recovery || !authoritativeMutation) return;
     retryAuthoritativeRefreshButton.disabled = true;
     try {
-      await refreshAuthoritativeEditor(recovery.target, recovery.continuity, recovery.expected);
-      if (recovery.expected && recovery.reconcile) await recovery.reconcile(recovery.expected);
+      const moved = await refreshAuthoritativeEditor(recovery.target, recovery.continuity, recovery.expected, true);
+      if (moved) {
+        await invalidateSearchIfStale('稿件已有后续修改，已打开最新稿件。');
+        await loadOutline(true);
+      } else if (recovery.expected && recovery.reconcile) await recovery.reconcile(recovery.expected);
       clearAuthoritativeRecovery();
       setAuthoritativeMutation(false);
       setStatus(
-        recovery.expected
+        moved ? '原操作已保存；稿件后来又有修改，已重新打开最新稿件。' : recovery.expected
           ? technicalWords(`${recovery.expected.completionLabel}；权威窗口刷新已恢复。`, `${recovery.expected.completionLabel}；稿件已重新打开。`)
           : technicalWords('权威操作失败后已恢复到当前持久窗口。', '操作未完成；稿件已恢复到最近保存的状态。'),
         recovery.expected ? 'success' : 'error',
@@ -1590,7 +1595,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (!editor) return null;
     const windowNow = editor.currentWindow();
     const blocks = windowNow.blocks;
-    const anchorId = editor.captureContinuity().anchor.blockId;
+    // The paragraph being read, which is the caret's only while the caret shows (Issue #1703).
+    const anchorId = editor.readingPoint().blockId;
     const index = Math.max(0, blocks.findIndex((block) => block.blockId === anchorId));
     const block = blocks[index];
     if (block === undefined) return null;
@@ -2379,25 +2385,52 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
   }
 
+  /**
+   * Ctrl+Z and redo take back or replay one editor step (Issue #1654), an accepted 修改建议 included. A large step says so while
+   * it runs; the answer names the step and its paragraph, and the view goes there. A step whose words changed since is set
+   * aside by the service, which says where and why, in the error tone; nothing to undo or redo is said plainly. Words typed
+   * just before are saved first, so they are the step Ctrl+Z takes back. The controls stand busy from the press on, the save
+   * and the read of the step included, so no second press or command starts in between.
+   */
   async function runHistory(action: 'undo' | 'redo'): Promise<void> {
     if (authoritativeMutationBusy() || !editor) return;
+    const verb = action === 'undo' ? '撤销' : '重做';
+    publishAuthoritativeMutationStarting(true);
+    let next: Awaited<ReturnType<typeof api.inspectEditorHistory>> | null = null;
+    try {
+      if (!(await settleLocalEdit()) || !editor) return;
+      const binding = editor.currentWindow();
+      next = await Promise.resolve().then(() => api.inspectEditorHistory({ manuscriptId: binding.manuscriptId, branchId: binding.branchId })).catch(() => null);
+    } finally {
+      // runAuthoritativeMutation below marks them busy again in the same turn, before anything else can run.
+      publishAuthoritativeMutationStarting(false);
+    }
+    const step = next === null ? undefined : action === 'undo' ? next.undo : next.redo;
+    if (step === null) {
+      setStatus(`没有可${verb}的修改。`, 'success');
+      return;
+    }
+    if (step !== undefined && step.changeCount >= LARGE_STEP_CHANGES) setStatus(`正在${verb} ${step.changeCount.toLocaleString('zh-CN')} 处修改…`, 'busy');
     try {
       const result = await runAuthoritativeMutation(() => {
-        const binding = editor!.currentWindow();
-        const input = {
-          manuscriptId: binding.manuscriptId,
-          branchId: binding.branchId,
-          expectedWorkingDigest: binding.workingDigest,
-        };
+        const current = editor!.currentWindow();
+        const input = { manuscriptId: current.manuscriptId, branchId: current.branchId, expectedWorkingDigest: current.workingDigest };
         return action === 'undo' ? api.undoManuscript(input) : api.redoManuscript(input);
       }, async () => {
         await invalidateSearchIfStale('稿件历史状态已变化；先前搜索结果和返回位置已失效。');
         await loadOutline(true);
       });
       if (!result) return;
-      setStatus(result.completionLabel, 'success');
+      // The view goes to the place: within the window the paragraph is brought into view where it stands; outside it the
+      // window is opened there.
+      if (!result.blocked && result.anchorBlockId !== null) {
+        const shown = editorWindow.querySelector<HTMLElement>(`[data-block-id="${result.anchorBlockId}"]`);
+        if (shown !== null) shown.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        else await navigate({ kind: 'block', blockId: result.anchorBlockId });
+      }
+      setStatus(result.completionLabel, result.blocked ? 'error' : 'success');
     } catch (error) {
-      setStatus(rendererErrorMessage(error, `${action === 'undo' ? '撤销' : '重做'}未完成。`), 'error');
+      setStatus(rendererErrorMessage(error, `${verb}未完成。`), 'error');
     }
   }
 
@@ -2429,8 +2462,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
     // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
     // a frame before the restore's own `scroll` event arrives (#474). The Mark surface moves the pane too:
-    // a card brought into view, or the pane settling once a card's height is gone.
-    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll() || editorialMarks?.ownsScroll()) return;
+    // a card brought into view, or the pane settling once a card's height is gone. So does the column measure, putting the
+    // reading block back after a right-hand column changed.
+    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll() || editorialMarks?.ownsScroll() || columnMeasure?.ownsScroll()) return;
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
@@ -2466,7 +2500,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
     if (step === 'set-marks') {
       // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
-      editor.setMarks(next.marks, next.marksTruncated);
+      editor.setMarks(next.marks, next.marksTruncated, next.marksPage);
       editorialMarks?.refreshComments();
       manuscriptRail?.refresh();
       const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
@@ -2523,6 +2557,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }
 
   editor = mountBoundedEditor({
+    initialInputMode,
     host: editorHost,
     scrollContainer: editorWindow,
     platform: api.platform,
@@ -2613,6 +2648,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     'view.previousPending': () => editorialMarks?.stepPending('previous'),
     'view.nextPending': () => editorialMarks?.stepPending('next'),
   });
+  paintInputMode(editor.inputMode());
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
   const scheduleRailRefresh = (): void => {
@@ -2739,7 +2775,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           const read = await api.getManuscriptWindowAt({
             manuscriptId: shown.manuscriptId, branchId: shown.branchId, target: { kind: 'window-start', blockId: shown.blocks[0]!.blockId },
           });
-          return read.blocks[0]?.blockId === shown.blocks[0]?.blockId ? { journalSequence: read.journalSequence, marks: read.marks, truncated: read.marksTruncated } : null;
+          return read.blocks[0]?.blockId === shown.blocks[0]?.blockId ? { journalSequence: read.journalSequence, marks: read.marks, truncated: read.marksTruncated, page: read.marksPage } : null;
         },
       },
       // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.

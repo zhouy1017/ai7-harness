@@ -72,6 +72,7 @@ function commit(store: EditorialStore, launch: TaskLaunchPreviewInput['launch'],
     case 'launchInitialEvaluation': return store.launchInitialEvaluation({ ...launch.input, bookId }, policy);
     case 'launchReadersReport': return store.launchReadersReport({ ...launch.input, bookId }, policy);
     case 'launchEvaluationRewrite': return store.launchEvaluationRewrite({ ...launch.input, bookId }, policy);
+    default: throw new Error('expected a ledger task launch');
   }
 }
 
@@ -155,6 +156,18 @@ async function ordinaryRedo() {
       if (result.dispatchRunRecordId !== null) capture.owner.admitAndDispatch(result.dispatchRunRecordId, result.ledger);
       return result.projection;
     }),
+    // 重新开始… (Issue #1680): the plan's relaunch recipe goes through the ordinary launch, with the launch bar's own reads.
+    launchBaselineAnalysis: vi.fn(async (input: Parameters<RendererApi['launchBaselineAnalysis']>[0]) => {
+      const launched = commit(store, { operation: 'launchBaselineAnalysis', input }, bookId, capture.policy);
+      driveLaunchedLedgerRun(capture.owner, launched); return launched;
+    }),
+    previewTaskLaunch: async () => { throw new Error('no preview'); },
+    inspectTaskOverview: async () => ({ groups: [] }),
+    getPreferences: async () => ({ values: preferenceDefaults() }),
+    getModelServiceSettings: async () => {
+      const channels = modelServiceChannels(); const connection = store.getModelServiceRouteConnection('opencode-go')!;
+      return { channels, roles: [{ roleId: 'main-editorial', connection: { ...connection, credentialOperationState: 'ready' }, binding: { modelId: channels.find(channel => channel.route === 'opencode-go')!.models[0]!.modelId } }], routeChoice: { routes: [{ route: 'opencode-go', connection }] } };
+    },
     cancelBaselineAnalysisRun: async (input: Parameters<RendererApi['cancelBaselineAnalysisRun']>[0]) => {
       const runRecordId = store.requestBaselineAnalysisCancel(bookId, input.taskIntentId);
       if (runRecordId !== null) capture.owner.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
@@ -162,43 +175,42 @@ async function ordinaryRedo() {
     },
   };
   const root = document.createElement('aside'); document.body.append(root);
-  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(),
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true,
     errorCode: () => null, errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
     awaitServiceJob: async (initial: unknown) => initial } as never);
   drawer.open({ bookId, kind: 'baseline-analysis', ref: launched.taskIntentId }, () => null);
   const close = async () => { drawer.close(false); timers.forEach(clearInterval); await capture.owner.dispose(); governor.close(); await governor.whenIdle(); capture.assertMatched(); store.close(); uninstall(); await roots.dispose(); };
-  return { root, api, capture, bookId, close };
+  return { root, api, capture, bookId, store, ref: launched.taskIntentId, close };
 }
 
-it('lets an ordinary baseline redo change its budget tier, revising the plan and then authorizing it', async () => {
+it('lets an ordinary baseline 重新开始… open on its stopped ceiling, change the tier and launch once from the copied source (Issue #1680)', async () => {
   const view = await ordinaryRedo();
   const button = (name: string) => miniDocument.querySelector(`[data-task-drawer-control="${name}"]`);
   try {
-    for (let iteration = 0; iteration < 2; iteration += 1) {
-      await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false)); button('redo')!.click();
-      await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-launch-option="budget"]')).not.toBeNull());
-      const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
-      // #1573 joined: the ordinary redo plan takes a budget edit; the tier goes through the existing revise-plan request.
-      const [retained, chosen] = iteration === 0 ? ['50000', 100_000] : ['100000', 200_000];
-      expect(budget.disabled).toBe(false); expect(budget.value).toBe(retained);
-      expect(view.root.querySelector('.task-launch-budget-reason')).toBeNull();
-      budget.value = String(chosen); budget.dispatchEvent({ type: 'change', bubbles: true });
-      const before = view.capture.wireRequests.length; button('start')!.click();
-      await vi.waitFor(() => expect(view.capture.wireRequests.length).toBeGreaterThan(before));
-      expect(view.api.editBaselineAnalysisPlan).toHaveBeenCalledTimes(iteration + 1);
-      const edit = view.api.editBaselineAnalysisPlan.mock.calls[iteration]![0];
-      expect(edit.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: chosen });
-      const editFrame = { id: randomUUID(), op: 'editBaselineAnalysisPlan', input: { ...edit, bookId: view.bookId } };
-      expect(decodeRequest(new TextEncoder().encode(JSON.stringify(editFrame)))).toEqual(editFrame);
-      const input = view.api.authorizeBaselineAnalysis.mock.calls[iteration]![0];
-      expect(input.planEnvelopeDigest).not.toBe(edit.planEnvelopeDigest);
-      const frame = { id: randomUUID(), op: 'authorizeBaselineAnalysis', input: { ...input, bookId: view.bookId } };
-      expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
-      await vi.waitFor(() => expect(button('cancel-run')?.disabled).toBe(false));
-      button('cancel-run')!.click(); button('confirm-cancel-run')!.click();
-      await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false));
-    }
-
+    const recipe = view.store.inspectTaskPlan({ bookId: view.bookId, kind: 'baseline-analysis', ref: view.ref }).relaunch!;
+    expect(recipe.operation).toBe('launchBaselineAnalysis');
+    await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false)); button('redo')!.click();
+    await vi.waitFor(() => expect(button('launch')?.disabled).toBe(false));
+    expect(button('launch')!.textContent).toBe('开始');
+    // What the new Task keeps is the recipe's own sentence; nothing was cancelled or launched by opening the bar.
+    for (const line of recipe.summary) expect(view.root.querySelector('[data-task-relaunch-summary]')!.textContent).toContain(line);
+    expect(view.api.launchBaselineAnalysis).not.toHaveBeenCalled();
+    const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+    expect(budget.value).toBe('50000');
+    budget.value = '100000'; budget.dispatchEvent({ type: 'change', bubbles: true });
+    const before = view.capture.wireRequests.length;
+    button('launch')!.click(); button('launch')!.click();
+    await vi.waitFor(() => expect(view.capture.wireRequests.length).toBeGreaterThan(before));
+    expect(view.api.launchBaselineAnalysis).toHaveBeenCalledOnce();
+    const input = view.api.launchBaselineAnalysis.mock.calls[0]![0];
+    const { bookId: _book, ...copied } = recipe.input as typeof recipe.input & { bookId: string };
+    expect(input).toMatchObject({ ...copied, planEdits: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100000 } } });
+    expect(input.relaunchOf).toEqual(recipe.input.relaunchOf);
+    const frame = { id: randomUUID(), op: 'launchBaselineAnalysis', input: { ...input, bookId: view.bookId } };
+    expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
+    // The drawer then shows the new Task, started.
+    await vi.waitFor(() => expect(view.root.dataset['taskPlanRef']).not.toBe(view.ref));
+    expect(view.root.dataset['taskPlanStart']).toBe('started');
   } finally { await view.close(); }
 }, 60_000);
 

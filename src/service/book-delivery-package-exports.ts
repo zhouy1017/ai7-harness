@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -72,31 +73,10 @@ export const BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const BOOK_DELIVERY_PACKAGE_EXPORT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  book_delivery_package_exports: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'package_version_id>book_delivery_package_versions.package_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-  book_delivery_package_export_files: [
-    'export_id>book_delivery_package_exports.export_id:NO ACTION/NO ACTION/NONE',
-    'preparation_id>export_preparations.preparation_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  book_delivery_package_exports: 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE',
+  book_delivery_package_export_files: 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE',
+});
 
 export class BookDeliveryPackageExportError extends Error {
   constructor(readonly code: string, message: string) {
@@ -116,23 +96,6 @@ export type BookDeliveryPackageExportRoute = 'folder' | 'archive';
 export function packageExportWrongRoute(actual: BookDeliveryPackageExportRoute): BookDeliveryPackageExportError {
   const label = actual === 'archive' ? '导出为压缩包' : '导出为文件夹';
   return new BookDeliveryPackageExportError('BOOK_DELIVERY_PACKAGE_EXPORT_WRONG_ROUTE', `这次导出是「${label}」；请在「${label}」里继续。`);
-}
-
-/** Revision 41's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeBookDeliveryPackageExportSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_exports'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Book delivery package export schema rollback failed.');
-    }
-    throw error;
-  }
-  requirePackageExport(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '图书交付包导出的关系与已有记录不一致。');
 }
 
 // ---- words ----------------------------------------------------------------------------------------------------
@@ -473,6 +436,10 @@ export class BookDeliveryPackageExports {
     if (publication !== null) {
       lines.push(`- 稿件 · 发稿版本「${publication.milestoneLabel}」 · ${publication.revisionLabel}（发稿范围：${publication.scope}）`);
     }
+    // A package made since Issue #1639 stores no 不会做 list (`exclusions` is empty) and its manifest has no 不包含 section, nor a heading
+    // for a document that was never delivered; every earlier record keeps its own keys and its manifest bytes, which stored export
+    // records bind by digest.
+    const madeSinceRetiredLists = Array.isArray(record.content.exclusions) && record.content.exclusions.length === 0;
     const deliveries: string[] = [];
     for (const entry of record.content.documents) {
       if (entry.disposition !== 'included') continue;
@@ -480,7 +447,7 @@ export class BookDeliveryPackageExports {
       const peers = record.content.documents.filter((candidate) => candidate.typeId === entry.typeId && candidate.disposition === 'included').length;
       const typeLabel = entry.title === undefined || (entry.title === baseLabel && peers === 1) ? baseLabel : `${baseLabel} · 《${entry.title}》`;
       lines.push(`- ${typeLabel} · 版本 ${entry.version}`);
-      deliveries.push('', `### ${typeLabel}`, '');
+      if (!madeSinceRetiredLists || entry.deliveryIds.length > 0) deliveries.push('', `### ${typeLabel}`, '');
       for (const deliveryId of entry.deliveryIds) {
         const row = this.#db.prepare(
           'SELECT ordinal, version, recipient_label, note, recorded_at FROM production_document_deliveries WHERE delivery_id = ? AND book_id = ?',
@@ -506,6 +473,7 @@ export class BookDeliveryPackageExports {
       .filter((entry) => entry.disposition === 'not-for-this-book')
       .map((entry) => productionDocumentType(entry.typeId, this.#db)?.label ?? '衍生稿件');
     lines.push(
+      ...(madeSinceRetiredLists ? [] : [
       '',
       '## 不包含',
       '',
@@ -518,6 +486,7 @@ export class BookDeliveryPackageExports {
         ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord}：${BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing}`] : []),
       ...(record.content.schema === 'ai7.book-delivery-package-content/2' && readersReports.length === 0
         ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.readersReport}：${BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing}`] : []),
+      ]),
       '',
       '## 说明',
       '',

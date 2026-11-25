@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { inspectDevelopmentInputs } from './doctor.mjs';
 import { electronLicenseCarriers } from './electron-runtime.mjs';
 import { readBuildIdentity } from './build-identity.mjs';
-import { IDENTITY_BOUND_OUTPUTS } from '../src/shared/build-identity.ts';
+import { IDENTITY_BOUND_OUTPUTS, STANDARD_TABLE_SEED_OUTPUTS } from '../src/shared/build-identity.ts';
 
 // The whole-project type check needs about 2.4 GB of heap; Node's default limit on a machine with 4 GB of memory (the test
 // guests) is about 2 GB, where it aborts with exit 134. A limit, not a reservation; passed as an argument because the doctor
@@ -127,6 +127,8 @@ async function ensureClosedOutputs() {
     'notices/fonts/OFL-Sans.txt',
     'notices/fonts/OFL-Serif.txt',
     'service/index.mjs',
+    'service/standard-table-seed.cjs',
+    ...STANDARD_TABLE_SEED_OUTPUTS,
     'service/wal-checkpoint-worker.mjs',
     'shared/data-root.mjs',
     'shared/network-denial.mjs',
@@ -199,7 +201,8 @@ async function ensureClosedOutputs() {
     !preload.includes('node:http') &&
       !preload.includes('node:net') &&
       !preload.includes('installNodeNetworkDenial') &&
-      preload.includes('contextBridge'),
+      preload.includes('contextBridge') &&
+      [...preload.matchAll(/\brequire\(([^)]+)\)/gu)].every((match) => match[1] === '"electron"'),
     'Sandboxed preload gained Node network authority or lost its narrow bridge.',
   );
   requireBuild(
@@ -324,10 +327,17 @@ async function main() {
   await runEsbuild({
     ...nodeBuild,
     define,
+    external: ['./standard-table-seed.cjs'],
     entryPoints: [resolve(ROOT, 'src', 'service', 'index.ts')],
     format: 'esm',
     outfile: outputPath('service', 'index.mjs'),
   });
+  // Keep the shipped editions outside executable code. The reader resolves them beside the built service.
+  await copyFile(resolve(ROOT, 'src/service/standard-table-seed.cjs'), outputPath('service/standard-table-seed.cjs'));
+  await mkdir(outputPath('service/standard-tables/seed'), { recursive: true });
+  for (const path of STANDARD_TABLE_SEED_OUTPUTS) {
+    await copyFile(resolve(ROOT, 'src', path), outputPath(path));
+  }
   await runEsbuild({
     ...nodeBuild,
     entryPoints: [resolve(ROOT, 'src', 'service', 'wal-checkpoint-worker.ts')],

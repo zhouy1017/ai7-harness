@@ -1,6 +1,7 @@
 import { identityWords, technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { reportResult } from './notifications.js';
-import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
+import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type SourceIdentityInput } from '../shared/protocol.js';
+import { sourceLinkControls, webSourceName, type SourceLinkApi } from './source-link.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
@@ -14,7 +15,10 @@ import {
   researchUnitLine,
   sourceAlignmentLine,
   sourceCaptureLine,
+  sourceFindingLine,
   sourceName,
+  findingSourceLine,
+  type FindingSourceEntry,
   sourceStalenessLine,
   sourceTranslationView,
 } from './research-evidence-labels.js';
@@ -29,7 +33,7 @@ export interface MountResearchEvidenceOptions {
   readonly root: HTMLElement;
   readonly bookId: string;
   readonly focusEvidenceId?: string;
-  readonly api: Pick<RendererApi, 'inspectResearchEvidence' | 'saveEvidenceAsMaterial'>;
+  readonly api: Pick<RendererApi, 'inspectResearchEvidence' | 'saveEvidenceAsMaterial'> & SourceLinkApi;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -49,14 +53,17 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
   let last: ResearchEvidenceBookProjection | null = null;
   let saving: string | null = null;
 
-  const card = (record: ResearchEvidenceProjection, staleAfterDays: number): HTMLElement => {
+  const card = (record: ResearchEvidenceProjection, staleAfterDays: number, findings: ResearchEvidenceBookProjection['findings']): HTMLElement => {
     const article = el('article', 'source-card research-evidence-card');
     article.dataset['evidenceId'] = record.evidenceId;
     article.dataset['captureState'] = record.captureState;
     article.dataset['alignment'] = record.alignment;
     article.dataset['staleness'] = record.staleness.state;
-    // The address as text: the renderer never navigates, and the editor copies it to read the page outside AI7.
+    // The full address stays a developer line; ordinary mode reads the domain beside 复制链接 and 在浏览器中打开 (Issue #1683).
     article.append(el('h3', undefined, sourceName(record)), el('p', 'research-evidence-url technical-identity', record.url));
+    article.append(sourceLinkControls({ address: record.url, identity: { bookId, evidenceId: record.evidenceId }, api }));
+    const sentence = sourceFindingLine(record, findings);
+    if (sentence !== null) article.append(el('p', 'research-evidence-finding', sentence));
     article.append(el('p', 'research-evidence-capture', sourceCaptureLine(record, localInstantLabel)));
     const stale = sourceStalenessLine(record, staleAfterDays, localInstantLabel);
     if (stale !== null) article.append(el('p', 'research-evidence-stale', stale));
@@ -126,7 +133,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
       units.append(list);
       children.push(units);
     }
-    for (const record of records) children.push(card(record, last.staleAfterDays));
+    for (const record of records) children.push(card(record, last.staleAfterDays, last.findings));
     if (last.next !== null) {
       const more = el('button', 'button quiet', SOURCES_MORE);
       more.type = 'button';
@@ -176,11 +183,13 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
 }
 
 /**
- * A factual finding's sources on its card (ADR 0095 §5; Issue #1174), on the review card and the mark card alike: each one's
- * name and address, the verification note, the exact excerpt, and its 来源译文 beside a machine-translation note. The rows are
- * the ones 来源与证据 archives; `openSource` opens that archive on the row when one was retained.
+ * A factual finding's sources on its card (ADR 0095 §5; Issue #1174), on the review card, the mark card and the in-app 审阅报告:
+ * each one's name, the verification note, the exact excerpt, its 来源译文 beside a machine-translation note, and for a web source
+ * its domain, 复制链接 and 在浏览器中打开 (Issue #1683). The identity 在浏览器中打开 sends is the entry's own (the result and card it
+ * was read from); a stored report row has none, so `reportBookId` names its retained row instead, or nothing opens. `openSource`
+ * opens 来源与证据 on the row when one was retained.
  */
-export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>, openSource?: (evidenceId: string) => void): HTMLElement {
+export function findingEvidenceList(sources: ReadonlyArray<FindingSourceEntry>, openSource?: (evidenceId: string) => void, reportBookId?: string): HTMLElement {
   const section = el('section', 'finding-evidence');
   section.dataset['evidenceCount'] = String(sources.length);
   section.append(el('p', 'finding-evidence-heading', FINDING_EVIDENCE_HEADING));
@@ -189,9 +198,13 @@ export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>
     const item = el('li', 'finding-evidence-source');
     item.dataset['evidenceId'] = source.evidenceId ?? '';
     const heading = el('p', 'finding-evidence-source-heading');
-    heading.append(el('strong', 'finding-evidence-name', source.name), ' · ', el('span', 'finding-evidence-note', source.note));
+    heading.append(el('strong', 'finding-evidence-name', source.url === null ? source.name : webSourceName(source.name, source.url)), ' · ', el('span', 'finding-evidence-note', source.note));
     item.append(heading);
-    if (source.url !== null) item.append(el('p', 'finding-evidence-url research-evidence-url technical-identity', source.url));
+    if (source.url !== null) {
+      item.append(el('p', 'finding-evidence-url research-evidence-url technical-identity', source.url));
+      const identity: SourceIdentityInput | null = source.identity ?? (reportBookId !== undefined && source.evidenceId !== null ? { bookId: reportBookId, evidenceId: source.evidenceId } : null);
+      item.append(sourceLinkControls({ address: source.url, identity }));
+    }
     if (source.snippet !== null) item.append(el('blockquote', 'finding-evidence-snippet research-evidence-passage', source.snippet));
     if (source.translation !== null) {
       const translated = el('figure', 'finding-evidence-translation');
@@ -206,6 +219,25 @@ export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>
       open.addEventListener('click', () => openSource(evidenceId));
       item.append(open);
     }
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+/** Retention commits before verification; its standalone finding keeps the retained row's own safe link controls. */
+export function findingRetainedSources(projection: ResearchEvidenceBookProjection, finding: { blockId: string; quote: string }, bookId: string): HTMLElement | null {
+  const origin = projection.findings.find(entry => entry.blockId === finding.blockId && entry.quote === finding.quote);
+  if (origin === undefined) return null;
+  const records = projection.records.filter(record => record.findingId === origin.findingId && record.runRecordId === origin.runRecordId);
+  if (records.length === 0) return null;
+  const section = el('section', 'finding-evidence'); section.dataset['evidenceCount'] = String(records.length);
+  const list = el('ul', 'finding-evidence-list');
+  for (const record of records) {
+    const item = el('li', 'finding-evidence-source'); item.dataset['evidenceId'] = record.evidenceId;
+    item.append(el('p', 'review-finding-source', findingSourceLine(record, projection.staleAfterDays, localInstantLabel)),
+      el('p', 'research-evidence-url technical-identity', record.url),
+      sourceLinkControls({ address: record.url, identity: { bookId, evidenceId: record.evidenceId } }));
     list.append(item);
   }
   section.append(list);

@@ -1,7 +1,8 @@
+import { createBaselineRelations } from '../../../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from '../../../../src/service/evaluation-calibration.js';
+import { EvaluationCalibrationError, EvaluationCalibrationLedger, EVALUATION_CALIBRATION_SCHEMA_SQL } from '../../../../src/service/evaluation-calibration.js';
 import * as calibration from '../../../../src/service/evaluation-calibration-operations.js';
 import { StoreError } from '../../../../src/service/store-records.js';
 import { calibrationHost, seedBook, seedPublication, seededEvaluationDatabase } from '../../../support/domain/evaluation.js';
@@ -53,8 +54,7 @@ describe('设置 › 评估校准与预测 over the domain relations', () => {
     const database = new DatabaseSync(':memory:');
     try {
       database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; CREATE TABLE publication_versions (publication_version_id TEXT PRIMARY KEY) STRICT;');
-      initializeEvaluationCalibrationSchema(database);
-      initializeEvaluationCalibrationSchema(database);
+      createBaselineRelations(database, EVALUATION_CALIBRATION_SCHEMA_SQL);
       const ledger = new EvaluationCalibrationLedger(database);
       const publishOne = (): void => {
         const bookId = randomUUID();

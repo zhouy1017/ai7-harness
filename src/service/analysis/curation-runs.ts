@@ -9,13 +9,14 @@ export interface CurationRunsHost {
   readonly db: DatabaseSync;
   insertRunState: (runRecordId: string, sequence: number, state: BaselineAnalysisRunState, detail: Record<string, unknown>, recordedAt: string) => void;
   recordRunState: (runRecordId: string, state: BaselineAnalysisRunState, detail: Record<string, unknown>) => void;
-  settleCuration: (run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted', evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }) => void;
+  settleCuration: (run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted', evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; retryAfterCredential?: boolean; reason: string }) => void;
 }
 
 export function curationBudgetUse(host: CurationRunsHost, controlEntryId: string): { passesUsed: number; reservedTokens: number } {
   const rows = host.db.prepare(`SELECT a.canonical_json, o.canonical_json outcome FROM analysis_run_authorizations a
       LEFT JOIN analysis_task_outcomes o ON o.task_intent_id = a.task_intent_id
-      WHERE a.origin = 'enabled-learning' AND json_extract(a.canonical_json, '$.controlEntryId') = ?`).all(controlEntryId);
+      WHERE a.origin = 'enabled-learning' AND json_extract(a.canonical_json, '$.controlEntryId') = ?
+        AND COALESCE(json_extract(o.canonical_json, '$.retryAfterCredential'), 0) = 0`).all(controlEntryId);
   return { passesUsed: rows.length, reservedTokens: rows.reduce((total, row) => {
     const reserved = Number((parseCanonicalJson(String(row.canonical_json)) as { reservedTokens: number }).reservedTokens);
     const outcome = row.outcome === null ? null : parseCanonicalJson(String(row.outcome)) as { usage: Record<string, number> | null };
@@ -94,13 +95,13 @@ export function bindCuration(host: CurationRunsHost, run: import('../learning/cu
   return { attemptId, bindingDigest: binding.digest };
 }
 
-export function settleCuration(host: CurationRunsHost, run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted', evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
+export function settleCuration(host: CurationRunsHost, run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted', evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; retryAfterCredential?: boolean; reason: string }): void {
   transact(host.db, () => {
     host.recordRunState(run.runRecordId, state, { detail: evidence.reason, curation: evidence });
     const outcomeId = randomUUID(), recordedAt = new Date().toISOString();
     const outcome = canonicalRecord({ schema: 'ai7.learning-curation-outcome/1', outcomeId, taskIntentId: run.taskIntentId,
       runRecordId: run.runRecordId, classification: state, resultSetRevisionId: null, sourceManifestDigest: run.bundle.digest,
-      summary: evidence.reason, safeNextAction: '查看候选记忆；本批来源不会自动重发。', ...evidence, recordedAt });
+      summary: evidence.reason, safeNextAction: evidence.retryAfterCredential ? '恢复凭据后可重试。' : '查看候选记忆；本批来源不会自动重发。', ...evidence, recordedAt });
     host.db.prepare('INSERT INTO analysis_task_outcomes VALUES (?,?,?,?,NULL,?,?,?)')
       .run(outcomeId, run.taskIntentId, run.runRecordId, state, recordedAt, outcome.json, outcome.digest);
   });

@@ -1,7 +1,9 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
+import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
-import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
+import { planViewExpression, statusCardExpression, taskCardFactsExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -447,8 +449,7 @@ async function importSample1(renderer, title, distinct, name) {
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -566,7 +567,10 @@ const READ_BACKGROUND = `(() => {
 const READ_ITEMS = `window.ai7.inspectGlobalAttention().then((projection) => ({
   count: projection.actionableCount,
   running: projection.running,
-  items: projection.groups.flatMap((group) => group.items.map((item) => ({ group: group.key, itemId: item.itemId, bookId: item.book.bookId, state: item.state, progress: item.facts?.progress ?? null }))),
+  items: projection.groups.flatMap((group) => group.items.map((item) => ({ group: group.key, itemId: item.itemId, bookId: item.book.bookId, state: item.state,
+    taskIntentId: item.target.kind === 'analysis' ? item.target.taskIntentId : null,
+    revisionId: item.technical.find(row => row.key === 'result-set-revision')?.value ?? null, ordinal: item.facts?.revisionOrdinal ?? null,
+    progress: item.facts?.progress ?? null }))),
 }))`;
 async function waitForItems(renderer, predicate, name, timeout = 120_000) {
   const deadline = Date.now() + timeout;
@@ -634,6 +638,7 @@ async function waitAttentionPainted(renderer, name) {
 const READ_PAGE = `(() => {
   const host = document.querySelector('[data-screen="global-attention"] .global-attention-host');
   return {
+    progress: host?.querySelector('[data-attention-in-progress] span')?.textContent ?? null,
     count: host?.dataset.attentionCount ?? null,
     running: host?.dataset.attentionRunning ?? null,
     groups: Array.from(host?.querySelectorAll(':scope > section.global-attention-group') ?? []).map((group) => ({
@@ -678,9 +683,10 @@ async function sameAttentionInBothWindows(main, observer, name) {
     const [mainPage, observerPage, observerService] = await Promise.all([
       main.evaluate(READ_PAGE), observer.evaluate(READ_PAGE), observer.evaluate(READ_SERVICE),
     ]);
-    const identity = (groups) => groups.map((group) => ({ key: group.key, total: Number(group.total), items: group.items.map((item) => [item.itemId, item.bookId, item.state]) }));
+    const count = service.groups.flatMap(group => group.items).filter(item =>
+      ['analysis-running', 'analysis-waiting-capacity'].includes(item.state)).length;
     if (JSON.stringify(service) === JSON.stringify(observerService) &&
-      JSON.stringify(identity(service.groups)) === JSON.stringify(identity(mainPage.groups)) &&
+      mainPage.groups.length === 0 && mainPage.progress === `有 ${count} 项任务正在进行。` &&
       mainPage.count === String(service.count) && mainPage.running === String(service.running) &&
       JSON.stringify(mainPage) === JSON.stringify(observerPage)) return service;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
@@ -703,12 +709,6 @@ async function openItem(renderer, itemId, name) {
   const selector = `[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(itemId)}]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.disabled===false`, `${name}-listed`, 30_000);
   await clickSelector(renderer, selector, `${name}-open`);
-}
-
-/** Continue the detailed record checks through the result window's own link. */
-async function openResultRecord(renderer, name) {
-  await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult==='ready'`, `${name}-result`, 30_000);
-  await clickSelector(renderer, '.task-result-window [data-task-result-action="open"]', `${name}-record`);
 }
 
 async function main() {
@@ -1047,19 +1047,18 @@ async function main() {
     // The service's answer once nothing is in flight, and the page come to say exactly it: the screen paints
     // the reader's last answer at once and the fresh one as soon as it arrives.
     const service = await readSettledAttention(renderer);
-    const serviceIds = JSON.stringify(service?.groups?.map((group) => group.items.map((item) => item.itemId)) ?? null);
+    const serviceIds = JSON.stringify(service?.groups?.filter(group => group.key === 'exceptions').map((group) => group.items.map((item) => item.itemId)) ?? null);
     await waitFor(renderer, `(() => { const page=${READ_PAGE}; return page.count===${JSON.stringify(String(service?.count))} && JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(serviceIds)}; })()`, 'attention-page-current', 30_000);
     const page = await renderer.evaluate(READ_PAGE);
     const pageGroups = page?.groups ?? [];
     const groupOf = (key) => pageGroups.find((group) => group.key === key);
     const exceptions = groupOf('exceptions')?.items ?? [];
     const decisions = groupOf('decisions')?.items ?? [];
-    const recent = groupOf('recent')?.items ?? [];
     // Only the groups that hold an item are drawn, in their fixed order, each keeping its heading; the two with nothing in them are
     // absent and not read as empty; and every item's identities wait one deliberate step below its words, in a closed 查看技术详情.
-    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(['exceptions', 'recent']) &&
-      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify([GROUP_LABELS[0], GROUP_LABELS[3]]) &&
-      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true","false"]' &&
+    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(['exceptions']) &&
+      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify([GROUP_LABELS[0]]) &&
+      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true"]' &&
       groupOf('decisions') === undefined && groupOf('active') === undefined && pageGroups.every((group) => group.empty === null) &&
       pageGroups.every((group) => group.items.every((entry) => entry.technical === false)),
     'groups-with-items-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
@@ -1081,25 +1080,16 @@ async function main() {
       blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     requireJourney(decisions.length === 0, 'no-preapproval-decision');
-    // 最近完成: the second Book's completed analysis, newest first, its time a completion.
-    const completionItem = recent[0];
-    requireJourney(recent.length === 1 && completionItem?.itemId === `analysis-outcome:${settledB.taskOutcome.outcomeId}` &&
-      ['analysis-completed', 'analysis-completed-with-gaps'].includes(completionItem.state) && completionItem.bookId === bookB &&
-      completionItem.target === 'analysis' && completionItem.reason?.startsWith('已形成第 1 份基线分析') === true &&
-      completionItem.next === '查看运行' && (completionItem.time ?? '').startsWith('完成于 '),
-    'completion-item', completionItem);
-    // The page is the service's answer, item for item.
-    requireJourney(service?.count === 1 && service.running === false &&
-      JSON.stringify(service.groups.map((group) => group.items.map((item) => item.itemId))) === JSON.stringify(pageGroups.map((group) => group.items.map((item) => item.itemId))) &&
-      service.groups[0].items[0].nextStep === 'view-run' && !service.groups.some((group) => group.key === 'decisions'),
-    'page-is-the-service-answer', service);
+    const completionItem = { itemId: `analysis-outcome:${settledB.taskOutcome.outcomeId}`, revisionId: settledB.resultSetRevision.revisionId };
+    requireJourney(service?.count === 1 && !service.running && service.groups[0].items[0].nextStep === 'view-run',
+      'blocked-run-needs-attention', service);
     // Nothing here grants anything: no 待审批 or 批准, no control carries 授权, and no item claims a pause.
     await assertRenderer(renderer, `(() => { const screen=document.querySelector('[data-screen="global-attention"]'); const text=screen?.textContent??''; return !/待审批|批准/u.test(text) && !Array.from(screen.querySelectorAll('button')).some((button)=>/授权/u.test(button.textContent??'')) && !Array.from(screen.querySelectorAll('.global-attention-pill')).some((pill)=>/已暂停/u.test(pill.textContent??'')); })()`, 'no-authority-words');
 
     at('attention-count');
     // The number is the first two groups' and no other: this launch has one blocked Run.
     requireJourney(page.count === '1' && groupOf('exceptions').countLine === '1 项需要你处理' && groupOf('decisions') === undefined &&
-      groupOf('recent').countLine === '1 项' && Number(groupOf('exceptions').total) === Number(page.count), 'count-is-the-first-two-groups', page);
+      groupOf('recent') === undefined && Number(groupOf('exceptions').total) === Number(page.count), 'count-is-the-first-two-groups', page);
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='1' && document.querySelector('#global-attention-entry .global-attention-badge')?.textContent==='1' && document.querySelector('#global-attention-entry')?.getAttribute('aria-label')==='待我处理，1 项需要你处理'`, 'entry-count-one', 30_000);
 
     at('attention-writes-nothing');
@@ -1125,9 +1115,19 @@ async function main() {
     requireJourney((routeA?.bookId ?? null) === (routeBeforeCard?.bookId ?? null), 'blocked-record-route', routeA);
 
     at('open-completion');
-    await openAttention(renderer, 'completion');
-    await openItem(renderer, completionItem.itemId, 'completion');
-    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready'`, 'completion-record', 30_000);
+    async function openCompletedTask(item, name) {
+      const { itemId, revisionId } = item;
+      requireJourney(typeof revisionId === 'string', `${name}-revision-ref`);
+      // The global attention route releases the current Book. A different Book opened from a bound workbench belongs in a separate window.
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), `${name}-attention`);
+      await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && window.ai7.getBookWorkbenchRoute().then(route => route === null)`, `${name}-global-route`);
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${name}-page`);
+      const selector = `[data-task-group="recent"] [data-task-item=${JSON.stringify(itemId)}] [data-task-action="result"]`;
+      await pressReachable(renderer, waitFor, requireJourney, selector, `${name}-result`);
+      const card = `[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card`;
+      await waitFor(renderer, `(() => { const record = document.querySelector(${JSON.stringify(card)})?.dataset; return (record?.inspectedRevisionId ?? record?.resultRevisionId) === ${JSON.stringify(revisionId)}; })()`, `${name}-record`, 30_000);
+    }
+    await openCompletedTask(completionItem, 'completion');
 
     at('j14-attention-keyboard');
     // Without a pointer: Enter on the header's 待我处理 opens the screen with its heading focused, Tab reaches the
@@ -1146,7 +1146,7 @@ async function main() {
     await openAttention(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 5 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 3 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
@@ -1157,11 +1157,10 @@ async function main() {
       if (!matchMedia('(forced-colors: active)').matches) return false;
       const style = (node, pseudo) => getComputedStyle(node, pseudo);
       const blocked = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-blocked="true"]');
-      const open = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-blocked="false"]');
       const pill = blocked?.querySelector('.global-attention-pill');
       const badge = document.querySelector('#global-attention-entry .global-attention-badge');
       const group = document.querySelector('[data-screen="global-attention"] section.global-attention-group');
-      return blocked instanceof HTMLElement && open instanceof HTMLElement && parseFloat(style(blocked).borderLeftWidth) > parseFloat(style(open).borderLeftWidth) &&
+      return blocked instanceof HTMLElement && parseFloat(style(blocked).borderLeftWidth) >= 3 &&
         style(blocked).borderLeftStyle === 'solid' && pill instanceof HTMLElement && pill.dataset.pillShape === 'diamond' && style(pill, '::before').content !== 'none' &&
         badge instanceof HTMLElement && !badge.hidden && style(badge).borderTopStyle === 'solid' && parseFloat(style(badge).borderTopWidth) >= 2 &&
         group instanceof HTMLElement && style(group).boxShadow === 'none';
@@ -1223,7 +1222,7 @@ async function main() {
     const pendingTaskB = await launchTaskFromBar(renderer, waitFor, 'concurrent-b-start');
     await waitForBar(renderer, {
       state: 'queued', pill: '排队中', status: '排队中', note: QUEUED_NOTE,
-      actions: [['cancel-wait', '取消', 'enabled'], ['run-link', '查看运行', 'enabled']],
+      actions: [['cancel-wait', '取消任务', 'enabled'], ['run-link', '查看运行', 'enabled']],
     }, 'concurrent-b-queued-bar', 30_000);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='排队中'`, 'concurrent-b-queued-card', 30_000);
     const queuedB = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1245,25 +1244,17 @@ async function main() {
     // counts none of them, and has nothing waiting for the editor.
     await openAttention(renderer, 'concurrent-attention');
     const concurrentService = await renderer.evaluate(READ_SERVICE);
-    const concurrentIds = JSON.stringify(concurrentService?.groups?.map((group) => group.items.map((item) => item.itemId)) ?? null);
-    await waitFor(renderer, `(() => { const page=${READ_PAGE}; return JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(concurrentIds)}; })()`, 'concurrent-page-current', 30_000);
-    const concurrentPage = await renderer.evaluate(READ_PAGE);
-    const activeItems = concurrentPage?.groups?.find((group) => group.key === 'active')?.items ?? [];
-    const itemOf = (bookId) => activeItems.find((item) => item.bookId === bookId) ?? null;
-    const queuedItem = itemOf(bookB);
-    requireJourney(concurrentService?.count === 0 && concurrentService.running === true && concurrentPage.count === '0' && activeItems.length === 3 &&
-      itemOf(bookA)?.state === 'analysis-running' && itemOf(bookA).book === `《${FIRST.title}》` &&
-      itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
-      queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingTaskB}` &&
-      queuedItem.pill === '排队中' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
-      queuedItem.next === '查看运行' && !concurrentPage.groups.some((group) => group.key === 'exceptions' || group.key === 'decisions'),
-    'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
-    await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
-
+    await waitFor(renderer, `(() => { const page=${READ_PAGE}; return page.progress==='有 3 项任务正在进行。' && page.count==='0' && page.groups.length===0 &&
+      document.querySelector('.task-navigation-badge')?.textContent==='3' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true; })()`, 'concurrent-page-current', 30_000);
+    await pressReachable(renderer, waitFor, requireJourney, '[data-attention-view-tasks]', 'concurrent-view-tasks');
+    const queuedItem = { itemId: `analysis:${pendingTaskB}` };
+    for (const [ref, state] of [[taskA, 'analysis-running'], [pendingTaskB, 'analysis-waiting-capacity'], [taskC, 'analysis-running']]) {
+      const card = `[data-screen="task-overview"] [data-task-item="analysis:${ref}"][data-task-state="${state}"]`;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(card)})`, 'concurrent-task-card');
+    }
     at('concurrent-second-window');
     const secondWindowStarted = performance.now();
     // Use the existing product chooser, as J-12 does, rather than a test hook that creates a window.
-    await openItem(renderer, queuedItem.itemId, 'second-window-b');
     await openAnalysisOf(renderer, bookB, 'second-window-b-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-b-analysis', 30_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'second-window-overview');
@@ -1297,7 +1288,6 @@ async function main() {
 
     at('concurrent-pause');
     // 暂停 on 甲, from its own plan: 正在暂停 while its range in flight finishes.
-    await openItem(renderer, `analysis:${taskA}`, 'concurrent-a-item');
     await openAnalysisOf(renderer, bookA, 'concurrent-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-a-record', 30_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-a-plan');
@@ -1320,7 +1310,7 @@ async function main() {
       !answer.items.some((item) => item.bookId === bookB && item.state === 'analysis-waiting-capacity'), 'concurrent-a-paused-b-admitted');
     const observerRefreshStarted = performance.now();
     // The observer's already-open view follows the real poll, without a focus event or another click.
-    await waitFor(observer, `(() => { const page=${READ_PAGE}; const items=page.groups.flatMap((group)=>group.items); return items.some((item)=>item.itemId===${JSON.stringify(`analysis:${taskA}`)}&&item.state==='analysis-paused') && !items.some((item)=>item.itemId===${JSON.stringify(queuedItem.itemId)}&&item.state==='analysis-waiting-capacity'); })()`, 'observer-follows-pause-and-admission', 30_000);
+    await waitFor(observer, `(() => { const page=${READ_PAGE}; return ['1','2'].some(count => page.progress==='有 '+count+' 项任务正在进行。' && document.querySelector('.task-navigation-badge')?.textContent===count) && page.groups.length===0; })()`, 'observer-follows-pause-and-admission', 30_000);
     const focusAfter = await renderer.evaluate(FOCUS_STATE);
     const routeAfter = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
     requireJourney(JSON.stringify(focusAfter) === JSON.stringify(focusBefore) && JSON.stringify(routeAfter) === JSON.stringify(routeBefore) && routeAfter?.bookId === bookC, 'background-run-steals-nothing', { before: focusBefore, after: focusAfter, route: routeAfter?.bookId === bookC });
@@ -1410,14 +1400,12 @@ async function main() {
     requireJourney(cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId && afterCancel.revisionId === afterApply.revisionId &&
       afterCancel.journalSequence === afterApply.journalSequence && afterCancel.applied === true,
     'concurrent-c-apply-effect-kept', { pinnedAsAuthorized: cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId, journal: [afterApply.journalSequence, afterCancel.journalSequence], applied: afterCancel.applied });
-    const settledAll = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId) &&
+    const isSecondB = item => item.group === 'recent' && item.bookId === bookB && item.taskIntentId === pendingTaskB && item.ordinal === 2;
+    const settledAll = await waitForItems(renderer, (answer) => answer.items.some(isSecondB) &&
       !answer.items.some((item) => item.group === 'active' && item.bookId === bookB) &&
       answer.items.some((item) => item.group === 'active' && item.bookId === bookA && item.state === 'analysis-paused'), 'concurrent-b-completed');
-    const completionB = settledAll.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId);
-    await openAttention(renderer, 'isolation-b');
-    await openItem(renderer, completionB.itemId, 'isolation-b');
-    await openResultRecord(renderer, 'isolation-b');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'isolation-b-record', 30_000);
+    const completionB = settledAll.items.find(isSecondB);
+    await openCompletedTask(completionB, 'isolation-b');
     const settledB2 = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const transitionsB = settledB2?.run?.transitions ?? [];
     requireJourney(settledB2?.bookId === bookB && settledB2.state === 'settled' && settledB2.run?.runRecordId === runB && settledB2.taskIntent?.mode === 'reanalyze-range' &&
@@ -1426,8 +1414,6 @@ async function main() {
       settledB2.resultSetRevision.manuscriptPin?.bookId === bookB && settledB2.resultSetRevision.provenance?.runRecordId === runB &&
       settledB2.run.attempt?.attemptId !== cancelledC.run.attempt.attemptId,
     'concurrent-b-own-revision', { state: settledB2?.state, run: settledB2?.run?.state, transitions: transitionsB.map((transition) => transition.state), ordinal: settledB2?.resultSetRevision?.ordinal });
-    await openAttention(renderer, 'isolation-a');
-    await openItem(renderer, `analysis:${taskA}`, 'isolation-a');
     await openAnalysisOf(renderer, bookA, 'isolation-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='paused'`, 'isolation-a-record', 30_000);
     const pausedA = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1509,20 +1495,17 @@ async function main() {
     await editAndSave(renderer, '〔后台处理登记旅程的改动〕', 'background-edit');
     const backgroundFocusBefore = await renderer.evaluate(FOCUS_STATE);
     requireJourney(backgroundFocusBefore?.screen === 'editor' && backgroundFocusBefore.book === bookB && backgroundFocusBefore.focused === true, 'background-focus-before', backgroundFocusBefore);
-    const settledBackground = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB &&
-      item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId), 'background-run-completed', 120_000);
+    const isThirdB = item => item.group === 'recent' && item.bookId === bookB && item.ordinal === 3 && item.revisionId !== null;
+    const settledBackground = await waitForItems(renderer, answer => answer.items.some(isThirdB), 'background-run-completed', 120_000);
     const backgroundFocusAfter = await renderer.evaluate(FOCUS_STATE);
     requireJourney(JSON.stringify(backgroundFocusAfter) === JSON.stringify(backgroundFocusBefore) && (await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookB,
       'background-run-steals-nothing', { before: backgroundFocusBefore, after: backgroundFocusAfter });
-    const backgroundCompletion = settledBackground.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId);
+    const backgroundCompletion = settledBackground.items.find(isThirdB);
 
     at('background-run-record');
     // The Run is an exact Task of its own: 同步到当前稿件, its authorization's origin the enrollment version, recorded as such, and
     // its revision 乙's third. ②A names it among the Runs the Enrollment started.
-    await openAttention(renderer, 'background-run');
-    await openItem(renderer, backgroundCompletion.itemId, 'background-run');
-    await openResultRecord(renderer, 'background-run');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'background-run-card', 30_000);
+    await openCompletedTask(backgroundCompletion, 'background-run');
     const backgroundRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(backgroundRun?.bookId === bookB && backgroundRun.taskIntent?.mode === 'sync-current' &&
       backgroundRun.taskIntent.taskIntentId !== beforeBackground.taskIntent.taskIntentId &&
@@ -1654,6 +1637,20 @@ async function main() {
       yieldedIdle.run.attempt?.spans?.length === 1 && yieldedIdle.authorization.authorizationId === idleAuthorizationId &&
       yieldedIdle.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000,
     'idle-yield-keeps-unit-authorization-ceiling');
+    at('idle-yield-card-words');
+    // Issue #1680: on the 任务 page the yielded Run's card says what its record says — 让位给你的任务, never 「你 … 暂停」 — with
+    // 继续 · 重新开始… · 取消任务, each inside the window.
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'idle-yield-tasks');
+    const yieldedCard = '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-yielded"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(yieldedCard + ' [data-task-action="redo"]')})`, 'idle-yield-card', 30_000);
+    const yieldedWords = await renderer.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(yieldedCard)}); return { pill: card.querySelector('.task-overview-state')?.textContent ?? null, line: card.querySelector('.task-overview-card-line')?.textContent ?? null,
+      actions: Array.from(card.querySelectorAll('[data-task-action]')).filter((button) => !button.closest('details')).map((button) => [button.dataset.taskAction, button.textContent]) }; })()`);
+    requireJourney(yieldedWords.pill === '让位给你的任务' && yieldedWords.line?.startsWith('让位给你的任务') === true && !/你(在)? ?\d/u.test(yieldedWords.line) &&
+      JSON.stringify(yieldedWords.actions) === JSON.stringify([['resume', '继续'], ['redo', '重新开始…'], ['cancel', '取消任务']]), 'idle-yield-card-words', yieldedWords);
+    for (const action of ['resume', 'redo', 'cancel']) {
+      await wheelIntoView(renderer, waitFor, `${yieldedCard} [data-task-action="${action}"]`, `idle-yield-${action}`);
+      await assertReachable(renderer, waitFor, requireJourney, `${yieldedCard} [data-task-action="${action}"]`, `idle-yield-${action}`);
+    }
     // Cancel the foreground work through its existing controls, then idle resumes B without another authorization.
     for (const [foregroundBook, foregroundTask] of [[bookA, taskA], [bookC, idleForegroundTask]]) {
       await toLibrary(renderer, 'idle-foreground-cancel');
@@ -1789,16 +1786,63 @@ async function main() {
     const filterTrigger = '.task-overview-filters select[aria-label="图书"] + .ui-select-trigger';
     const filterIndex = await renderer.evaluate(`Array.from(document.querySelector('.task-overview-filters select[aria-label="图书"]').options).findIndex((option) => option.value === ${JSON.stringify(overviewBooks[3])})`);
     requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
-    await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
-    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
+    // Chosen by key on confirmed state (Issue #1680): the list is open, and its active option follows each key before Enter.
+    const filterActive = `(() => { const trigger=document.querySelector(${JSON.stringify(filterTrigger)}); if (trigger?.getAttribute('aria-expanded')!=='true') return null; const row=document.getElementById(trigger.getAttribute('aria-activedescendant') ?? ''); return row ? Number(row.dataset.index) : -1; })()`;
+    await pressReachable(renderer, waitFor, requireJourney, filterTrigger, 'overview-filter-open');
+    await waitFor(renderer, `${filterActive} === 0`, 'overview-filter-popup-open');
+    for (let step = 0; step < filterIndex; step += 1) { await press(renderer, 'ArrowDown'); await waitFor(renderer, `${filterActive} === ${step + 1}`, 'overview-filter-active-follows-key'); }
     await press(renderer, 'Enter');
-    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    try {
+      await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    } catch (error) {
+      const diagnostic = await renderer.evaluate(`(async () => {
+        const selected = document.querySelector('.task-overview-filters select[aria-label="图书"]'), trigger = document.querySelector('.task-overview-filters select[aria-label="图书"] + .ui-select-trigger');
+        const cards = [...document.querySelectorAll('.task-overview-card')], projection = await window.ai7.inspectTaskOverview();
+        const items = projection.groups.flatMap(group => group.items), bounds = node => { if (!node) return null; const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
+        return { selectedMatches: selected?.value === ${JSON.stringify(overviewBooks[3])}, focusIsTrigger: document.activeElement?.matches('.task-overview-filters .ui-select-trigger') === true,
+          visibleCardCount: cards.length, popupOpen: trigger?.getAttribute('aria-expanded') === 'true', viewport: { width: innerWidth, height: innerHeight }, controlBounds: bounds(trigger),
+          cards: cards.map(card => { const item = items.find(item => item.itemId === card.dataset.taskItem); return { kind: item?.plan?.kind ?? card.dataset.taskKind ?? null, state: item?.state ?? null, attentionState: card.dataset.taskState ?? item?.attention.state ?? null, bookMatches: item === undefined ? null : item.bookId === selected?.value, expectedBookMatches: item === undefined ? null : item.bookId === ${JSON.stringify(overviewBooks[3])} }; }) };
+      })()`).catch(() => ({ unavailable: true }));
+      console.error('J-09/overview-filter-chosen-by-key/diagnostic', JSON.stringify(diagnostic));
+      throw error;
+    }
+    // #1668: the header counts the Book the filter shows, in the groups its cards stand in — none here, while other Books run and queue.
+    const headerCountsCards = (scope) => `(() => { const cards = (group) => document.querySelectorAll('.task-overview-group[data-task-group="' + group + '"] .task-overview-card').length;
+      return (document.querySelector('.task-overview-context')?.textContent ?? '').startsWith(${JSON.stringify(scope)} + ' · 同时运行 ' + cards('running') + ' 项 · 排队 ' + cards('queued') + ' 项 · '); })()`;
+    await waitFor(renderer, `(async () => { const p = await window.ai7.inspectTaskOverview(); return p.runningCount > 0 && p.queuedCount > 0 && document.querySelector('.task-overview-context')?.textContent.startsWith('所选图书 · 同时运行 0 项 · 排队 0 项 · '); })()`, 'overview-header-counts-the-chosen-book');
     await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
     await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
+    await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length === 1 && ${headerCountsCards('所选图书')}`, 'overview-header-counts-the-new-task', 60000);
     await press(renderer, 'ArrowDown');
-    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowUp');
+    await waitFor(renderer, `${filterActive} === ${filterIndex}`, 'overview-filter-reopened-by-key');
+    for (let step = filterIndex - 1; step >= 0; step -= 1) { await press(renderer, 'ArrowUp'); await waitFor(renderer, `${filterActive} === ${step}`, 'overview-filter-back-follows-key'); }
     await press(renderer, 'Enter');
     await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
+    try {
+      await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="running"] .task-overview-card').length > 0 && document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length > 0 && ${headerCountsCards('全部图书')}`, 'overview-header-counts-every-book');
+    } catch (error) {
+      console.error('J-09/overview-header-counts-every-book/diagnostic', JSON.stringify(await renderer.evaluate(`({ header: document.querySelector('.task-overview-context')?.textContent ?? null, groups: Array.from(document.querySelectorAll('.task-overview-group'), (group) => [group.dataset.taskGroup, group.querySelectorAll('.task-overview-card').length]), pressed: Array.from(document.querySelectorAll('.task-overview-filters [aria-pressed="true"]'), (node) => node.textContent) })`).catch(() => null)));
+      throw error;
+    }
+    // 0.7.9 acceptance R3: a pressed filter is marked. 「7 天」 is pressed by the pointer, read inside the window first; in every row of
+    // filter buttons the pressed one's computed background is then neither the page's behind it nor an unpressed filter's. 「今天」 is
+    // pressed back, so the page is left as it was.
+    const timeFilter = (index) => `.task-overview-filters .task-overview-filter-row:last-child button.task-overview-filter:nth-of-type(${index})`;
+    const timeFilterPressed = (index, label) => `(() => { const button = document.querySelector(${JSON.stringify(timeFilter(index))}); return button?.textContent === ${JSON.stringify(label)} && button.getAttribute('aria-pressed') === 'true'; })()`;
+    const filterMarks = `(() => { const clear = (colour) => colour === 'transparent' || colour === 'rgba(0, 0, 0, 0)';
+      const behind = (node) => { for (let at = node; at; at = at.parentElement) { const colour = getComputedStyle(at).backgroundColor; if (!clear(colour)) return colour; } return null; };
+      return Array.from(document.querySelectorAll('.task-overview-filters .task-overview-filter-row'), (row) => { const buttons = Array.from(row.querySelectorAll('button.task-overview-filter')), pressed = buttons.filter((button) => button.getAttribute('aria-pressed') === 'true');
+        return { buttons: buttons.length, pressed: pressed.map((button) => button.textContent), marked: pressed.map((button) => getComputedStyle(button).backgroundColor), page: behind(row),
+          plain: [...new Set(buttons.filter((button) => !pressed.includes(button)).map((button) => getComputedStyle(button).backgroundColor))] }; }).filter((row) => row.buttons > 0)
+        .map((row) => ({ ...row, shown: row.pressed.length === 1 && !clear(row.marked[0]) && row.page !== null && row.marked[0] !== row.page && row.plain.length > 0 && !row.plain.includes(row.marked[0]) })); })()`;
+    await waitFor(renderer, timeFilterPressed(1, '今天'), 'overview-time-filter-rests-on-today');
+    await pressReachable(renderer, waitFor, requireJourney, timeFilter(2), 'overview-filter-seven-days');
+    await waitFor(renderer, timeFilterPressed(2, '7 天'), 'overview-filter-seven-days-pressed');
+    const filterRows = await renderer.evaluate(filterMarks);
+    console.log(`J-09/overview-pressed-filter-marks/${JSON.stringify(filterRows)}`);
+    requireJourney(Array.isArray(filterRows) && filterRows.length >= 2 && filterRows.every((row) => row.shown === true) && filterRows.at(-1).pressed[0] === '7 天', 'overview-pressed-filter-is-marked', filterRows);
+    await pressReachable(renderer, waitFor, requireJourney, timeFilter(1), 'overview-filter-today-again');
+    await waitFor(renderer, timeFilterPressed(1, '今天'), 'overview-filter-back-to-today');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');
@@ -1844,6 +1888,11 @@ async function main() {
     const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      // The 任务 page's card says when it finished, how long it worked and its model as separate pieces of one line (stage-4/5 R3).
+      await waitFor(renderer, `innerWidth === ${statusWidth} && document.querySelector(${JSON.stringify(`${finishedCard} .task-overview-usage`)}) !== null`, `task-status-finished-card-facts-shown-${statusWidth}`, 30_000);
+      const finishedFacts = await renderer.evaluate(taskCardFactsExpression(`document.querySelector(${JSON.stringify(finishedCard)})`));
+      console.log(`TASK_CARD_FACTS/${statusWidth}/${JSON.stringify(finishedFacts)}`);
+      requireJourney(finishedFacts !== null && finishedFacts.apart && finishedFacts.sentence && finishedFacts.inCard, `task-status-finished-card-facts-${statusWidth}`, finishedFacts);
       await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
       await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
       await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);

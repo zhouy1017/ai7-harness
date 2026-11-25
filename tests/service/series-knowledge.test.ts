@@ -1,4 +1,3 @@
-import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -6,7 +5,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SeriesKnowledgeLedger, SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION, SERIES_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   MAX_FRAME_BYTES,
@@ -16,7 +14,6 @@ import {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) over the real
 // store: candidates from the editor's own words and from the exact span of a member Book's manuscript, conflicts found by
@@ -539,30 +536,6 @@ describe('书系知识 over the real store', () => {
       });
     });
   });
-  it('adds revision 53 to a revision-52 store with nothing else moved', async () => {
-    store.createSeries({ title: '早先的书系', note: '' });
-    closeStore();
-    const schemaOf = (database: DatabaseSync): Array<{ name: string; sql: string }> =>
-      database.prepare("SELECT name, sql FROM sqlite_schema WHERE type IN ('table', 'trigger', 'index') AND sql IS NOT NULL ORDER BY name").all() as Array<{ name: string; sql: string }>;
-    const before = withDatabase((plant) => {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; ${TABLES.slice().reverse().map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${SERIES_SCHEMA_VERSION};`);
-      const before = schemaOf(plant);
-      // Taken before the kind-coupled relations go back to revision 58: revision 59 rebuilds them to these exact shapes again.
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-      return before;
-    });
-    await openStore();
-    const series = store.inspectSeriesList().series[0]!;
-    expect(store.inspectSeries(series.seriesId).knowledge).toEqual({ items: [], itemCount: 0, itemsNext: null, candidates: [], candidateCount: 0, candidatesNext: null });
-    expect(store.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
-    withDatabase((database) => {
-      const after = schemaOf(database);
-      // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
-      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|series_retrieval_exclusions|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema75(before));
-      expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
-        .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
-    });
-  }, 120_000);
   describe('bounded knowledge pages', () => {
     let seriesId: string;
     let proposed: Array<ReturnType<EditorialStore['proposeSeriesKnowledge']>>;

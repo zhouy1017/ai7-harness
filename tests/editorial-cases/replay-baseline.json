@@ -480,13 +480,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 2,
+        "answered": 8,
         "unmatched": 10
       },
       "recordedUsage": {
-        "requests": 9,
-        "inputTokens": 25989,
-        "outputTokens": 18976
+        "requests": 29,
+        "inputTokens": 85221,
+        "outputTokens": 41005
       },
       "contractsAgree": true,
       "fixtures": [
@@ -620,13 +620,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 10,
+        "answered": 12,
         "unmatched": 4
       },
       "recordedUsage": {
-        "requests": 13,
-        "inputTokens": 36408,
-        "outputTokens": 29790
+        "requests": 20,
+        "inputTokens": 62187,
+        "outputTokens": 32664
       },
       "contractsAgree": true,
       "fixtures": [
@@ -840,13 +840,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 10,
+        "answered": 12,
         "unmatched": 6
       },
       "recordedUsage": {
-        "requests": 15,
-        "inputTokens": 41404,
-        "outputTokens": 48384
+        "requests": 22,
+        "inputTokens": 62946,
+        "outputTokens": 51237
       },
       "contractsAgree": true,
       "fixtures": [

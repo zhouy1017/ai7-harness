@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../../shared/protocol.js';
 import { bindEditorialMemory, editorialMemoryDigest } from '../learning/memory-facade.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST,
   admittedGlobalAgentRoute, admittedGlobalAgentScopedRoute } from './global-agent-session.js';
@@ -10,14 +11,13 @@ import type { EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
-import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import { developerLiveBindingFor, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
   type DeveloperLiveProviderProcessingVersion,
   type LaunchPolicyProjection,
   type OrdinaryProductionProviderProcessingVersion,
 } from '../../shared/protocol.js';
-import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, streamingDeclared, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -116,12 +116,14 @@ export interface DialogueExecutionDeps {
  * with a broker of its own over the launch's Protected Secret Store and the development slot's Credential Reference.
  */
 export function dialogueLiveRoute(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): DialogueLiveRoute {
+  const binding = developerLiveBindingFor(runtime.launch, DIALOGUE_TASK_KIND);
+  const admitted = admittedDialogueRoute(policy);
   return {
     runtime,
     transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
-    route: admittedDialogueRoute(policy),
-    credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    route: admitted === null || binding.reasoningEffort === undefined ? admitted : { ...admitted, reasoningEffort: binding.reasoningEffort },
+    credentialReference: binding.credentialReference,
   };
 }
 
@@ -258,7 +260,7 @@ export class DialogueExecutionOwner {
     if (route === null || this.#deps.live === null || this.#disposed || !this.#deps.live.credentialReference ||
         bound?.profile.route !== route.profile.route || bound.modelProfile.model !== route.modelProfile.model)
       throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
-    return route;
+    return route.operationalScope === 'developer-live' && bound.reasoningEffort !== undefined ? { ...route, reasoningEffort: bound.reasoningEffort } : route;
   }
 
   globalDisclosureReference(): string { return this.#deps.live?.credentialReference ?? ''; }
@@ -383,7 +385,7 @@ export class DialogueExecutionOwner {
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST) : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
     const baseSystemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt) : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
-    const memory = live?.route?.providerProcessingVersion === 'v35' || turn.globalRoute?.providerProcessingVersion === 'v35'
+    const memory = supportsEditorialMemoryPolicy(live?.route?.providerProcessingVersion) || supportsEditorialMemoryPolicy(turn.globalRoute?.providerProcessingVersion)
       ? records.dialogueEditorialMemory?.(turn.dialogueId) ?? null : null;
     const { promptContractDigest, systemPrompt } = bindEditorialMemory({ promptContractDigest: basePromptContractDigest, systemPrompt: baseSystemPrompt }, memory);
     let current: string | null = null;
@@ -465,6 +467,7 @@ export class DialogueExecutionOwner {
       // the request. A live launch outside one is business, and the request reaches the transport itself.
       // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
       const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
+      const validationPurpose = !global ? DIALOGUE_TEST_ITEM_PURPOSE : scoped === null ? 'global-agent-dialogue' : 'global-agent-scoped-dialogue';
       let cache: ProviderResultCache | null = null;
       if (live !== null && validation !== null && !isOrdinaryProductionRuntime(live.runtime)) {
         cache = new ProviderResultCache(live.runtime.launch.providerCacheRoot);
@@ -543,10 +546,12 @@ export class DialogueExecutionOwner {
                 // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
                 // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
                 // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
-                transmitOnce(cache, observedSend, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
+                transmitOnce(cache, observedSend, { purpose: validationPurpose, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                   intent: validation,
-                  step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
-                  requestShape: streamShape ?? route.modelProfile.capabilities.requestShape,
+                  step: `${validationPurpose}/${turn.message.kind}`,
+                  requestShape: !global && streamShape !== null && route.modelProfile.capabilities.requestShape === 'openai-chat-completions'
+                    ? streamShape : route.modelProfile.capabilities.requestShape,
+                  ...(streamShape === null ? {} : { stream: true }),
                 }, route.profile, model, url, init);
               } catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
             },

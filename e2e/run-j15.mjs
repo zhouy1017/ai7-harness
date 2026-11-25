@@ -1,3 +1,5 @@
+import { chooseImportTarget } from './import-page.mjs';
+import { pressReachable, assertReachable, wheelIntoView } from './task-card-reach.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { HOUSE_DRAFT_MEASURE, ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, pressEscape, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
@@ -158,7 +160,7 @@ async function createRendererManager(browser) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if ((await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false)) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-15', name);
@@ -207,7 +209,7 @@ async function createEmptyBook(renderer, title) {
 const HOUSE_GUIDELINE_NAME = '本社文字规范.txt';
 const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。',
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
-const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存'];
+const KNOWLEDGE_TABS = ['审阅规范文件', '字表与词表', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
 // 事实核查契约 remains fixed; current plot-consistency reads clauses as well as pinned baseline leads (#1167).
 const GUIDELINE_FIXED = new Map([
@@ -301,10 +303,9 @@ const READ_LIBRARY = `(() => {
         indexLine: card.querySelector('.material-index-state')?.textContent ?? null,
         layers: Array.from(card.querySelectorAll('.material-index-layer'), (line) => [line.dataset.indexLayer, line.dataset.layerState, line.textContent]),
         layerActions: (() => {
-          const build = card.querySelector('[data-library-action="build-vectors"]');
           const request = card.querySelector('[data-library-action="request-translation"]');
           return {
-            build: build instanceof HTMLButtonElement ? build.disabled : null,
+            build: card.querySelector('[data-library-action="build-vectors"]') !== null,
             translation: request instanceof HTMLButtonElement ? request.disabled : null,
             translationNote: card.querySelector('.material-translation-note')?.textContent ?? null,
             described: request instanceof HTMLElement ? request.getAttribute('aria-describedby') === card.querySelector('.material-translation-note')?.id : null,
@@ -314,7 +315,9 @@ const READ_LIBRARY = `(() => {
           const section = card.querySelector('.material-vector-search');
           if (!(section instanceof HTMLElement)) return null;
           return {
+            label: section.querySelector('label')?.textContent ?? null,
             heading: section.querySelector('.material-vector-results-heading')?.textContent ?? null,
+            mode: (() => { const line = section.querySelector('.material-vector-results [data-retrieval-assist]'); if (!(line instanceof HTMLElement)) return null; const r = line.getBoundingClientRect(); return [line.dataset.retrievalAssist, line.textContent, r.width > 0 && r.height > 0 && getComputedStyle(line).display !== 'none']; })(),
             candidates: Array.from(section.querySelectorAll('.material-vector-candidate'), (item) => [item.dataset.candidateOrdinal, item.querySelector('.material-anchor')?.textContent ?? null]),
           };
         })(),
@@ -409,6 +412,49 @@ async function readLibrary(renderer, predicate, name) {
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.disabled)return false; const more=node.closest('.knowledge-file-more'); if(more instanceof HTMLDetailsElement&&!more.open)more.querySelector(':scope > summary').click(); node.click(); return true; })()`, name);
 }
+/**
+ * Where a control stands, measured by the engine: its rectangle, whether it lies inside the window and inside the visible box of
+ * its nearest scrolling ancestor, and whether it is topmost at its centre. Nothing is scrolled by script.
+ */
+function reachableExpression(selector) {
+  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement))return null;
+    let scroller=node.parentElement; while(scroller&&!(/(auto|scroll)/u.test(getComputedStyle(scroller).overflowY)&&scroller.scrollHeight>scroller.clientHeight))scroller=scroller.parentElement;
+    const r=node.getBoundingClientRect(), box=scroller?scroller.getBoundingClientRect():{left:0,top:0,right:innerWidth,bottom:innerHeight};
+    const x=r.left+r.width/2, y=r.top+r.height/2;
+    const inWindow=r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;
+    const inScroller=r.left>=box.left-1&&r.top>=box.top-1&&r.right<=box.right+1&&r.bottom<=box.bottom+1;
+    const hit=inWindow&&node.contains(document.elementFromPoint(x,y));
+    const visible={left:Math.max(0,box.left),top:Math.max(0,box.top),right:Math.min(innerWidth,box.right),bottom:Math.min(innerHeight,box.bottom)};
+    return {x,y,top:r.top,bottom:r.bottom,inWindow,inScroller,hit,reachable:inWindow&&inScroller&&hit,wheelX:Math.round((visible.left+visible.right)/2),wheelY:Math.round((visible.top+visible.bottom)/2),
+      down:r.bottom>Math.min(innerHeight,box.bottom)}; })()`;
+}
+
+/** The editor's own mouse wheel over the control's scroller, a turn at a time, until the control is reachable. */
+async function wheelToSearchControl(renderer, selector, name) {
+  for (let turn = 0; turn < 60; turn += 1) {
+    const at = await renderer.evaluate(reachableExpression(selector));
+    requireJourney(at !== null, `${name}-present`, at);
+    if (at.reachable) return;
+    // An on-screen control can still sit behind a fixed control. Wheel it towards the visible scroller centre.
+    const deltaY = at.inWindow && at.inScroller ? Math.round(at.y - at.wheelY) : at.down ? 120 : -120;
+    if (deltaY === 0) break;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY });
+    await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
+  }
+  requireJourney(false, `${name}-wheel-reachable`, await renderer.evaluate(reachableExpression(selector)));
+}
+
+/** A real press at the centre of a control asserted reachable, two frames apart, with no scripted scroll before it. */
+async function pressSearchControl(renderer, selector, name) {
+  await wheelToSearchControl(renderer, selector, name);
+  const before = await renderer.evaluate(reachableExpression(selector));
+  await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
+  const at = await renderer.evaluate(reachableExpression(selector));
+  requireJourney(at?.reachable === true && before?.x === at.x && before?.y === at.y, `${name}-reachable`, { before, at });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
+}
+
 async function pressKey(renderer, key) {
   const codes = { ArrowRight: 39, ArrowLeft: 37, Enter: 13 };
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: codes[key] });
@@ -475,6 +521,21 @@ async function main() {
     const executable = electronExecutable();
     const guidelinePath = resolve(runRoot, HOUSE_GUIDELINE_NAME);
     await writeFile(guidelinePath, HOUSE_GUIDELINE, 'utf8');
+    const tablePath = resolve(runRoot, '合成词表.xlsx');
+    await writeFile(tablePath, zipSync({
+      'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>甲词</t><rPh><t>jia3ci2</t></rPh></si></sst>'),
+      'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c></row></sheetData></worksheet>'),
+      'xl/worksheets/sheet2.xml': strToU8('<worksheet><sheetData/></worksheet>'),
+    }, { mtime: fixedArchiveTime() }));
+    const unstructuredTablePath = resolve(runRoot, '合成用语说明.txt');
+    await writeFile(unstructuredTablePath, '本社写作中推荐甲词，乙词需要改为甲词。', 'utf8');
+    const pickStandardTable = async (renderer) => {
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'standard-table-knowledge');
+      await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]')`, 'standard-table-knowledge-ready');
+      await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="standard-tables"]', 'standard-table-category');
+      await waitFor(renderer, `document.querySelectorAll('[data-standard-table-id]').length===4`, 'standard-table-library-ready');
+      await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="import"]', 'standard-table-pick');
+    };
     const launch = async (pickerPath = guidelinePath) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -494,7 +555,7 @@ async function main() {
     };
 
     at('initial-empty-book');
-    let manager = await launch();
+    let manager = await launch(tablePath);
     let renderer = await waitForRenderer(manager, 'initial-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
     await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
@@ -505,6 +566,17 @@ async function main() {
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
+    at('standard-table-workbook-preview');
+    await pickStandardTable(renderer);
+    await waitFor(renderer, `(() => {
+      const preview = document.querySelector('[data-standard-table-preview]');
+      const rows = preview?.querySelectorAll('[data-standard-table-row]');
+      return rows?.length === 1 && rows[0].firstElementChild?.textContent.startsWith('甲词 · ');
+    })()`, 'standard-table-workbook-clean-row');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="cancel-preview"]', 'standard-table-cancel');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('library'), 'standard-table-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'standard-table-returned');
+    at('initial-empty-book');
     const bookA = await createEmptyBook(renderer, 'J15 空图书甲');
     await assertRenderer(renderer, `document.querySelector('.native-artifact-card') === null && document.querySelector('[data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'book-capabilities-without-install');
     const freshWorkspace = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
@@ -531,8 +603,32 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
-    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===8`, 'knowledge-category-home');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===9`, 'knowledge-category-home');
     await assertRenderer(renderer, `document.querySelectorAll('.guideline-card, .library-material').length===0 && document.querySelector('.knowledge-recent') !== null`, 'knowledge-home-has-no-files');
+    await click(renderer, '字表与词表', 'knowledge-standard-tables');
+    await waitFor(renderer, `document.querySelectorAll('[data-standard-table-id]').length===4`, 'knowledge-preinstalled-tables');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-standard-table-id]')).every(card => card.textContent.includes('已识别') && card.textContent.includes('启用') && card.querySelector('[data-standard-table-action="import-version"]'))`, 'knowledge-table-status');
+    // Stage 4/5 rework R7: the four national tables say 预装, never 本社自建.
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-standard-table-id]')).every(card => (card.querySelector('.field-note')?.textContent ?? '').startsWith('预装 · ') && !card.textContent.includes('本社自建'))`, 'knowledge-table-preinstalled-words');
+    // R1: 删除 asks first, in the card. The question names the table and what goes; 取消 keeps all four; 确认删除 removes the
+    // table, and 恢复预装字表 brings the preinstalled one back. Every press is the pointer's, on a control asserted in view.
+    const doomed = await renderer.evaluate(`(() => { const card = document.querySelector('[data-standard-table-id]'); return { id: card?.dataset.standardTableId ?? null, name: card?.querySelector('h3')?.textContent ?? null }; })()`);
+    requireJourney(typeof doomed.id === 'string' && doomed.id.length > 0 && typeof doomed.name === 'string' && doomed.name.length > 0, 'knowledge-table-delete-target');
+    const doomedCard = `[data-standard-table-id=${JSON.stringify(doomed.id)}]`;
+    const tableCount = `document.querySelectorAll('[data-standard-table-id]').length`;
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="delete"]`, 'knowledge-table-delete');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${doomedCard} [data-standard-table-confirm] [data-standard-table-action="confirm-delete"]`)}) instanceof HTMLButtonElement`, 'knowledge-table-delete-question');
+    const asked = await renderer.evaluate(`(() => { const strip = document.querySelector(${JSON.stringify(`${doomedCard} [data-standard-table-confirm]`)}); return { question: strip?.querySelector('p')?.textContent ?? null, focus: document.activeElement?.dataset?.standardTableAction ?? null, tables: ${tableCount} }; })()`);
+    requireJourney(asked.question === `删除「${doomed.name}」？它的全部版本、条目和导入的原件会一起删除。之后可按「恢复预装字表」找回预装的内容，本社改过的内容不能找回。` && asked.focus === 'cancel-delete' && asked.tables === 4, 'knowledge-table-delete-asks', asked);
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="cancel-delete"]`, 'knowledge-table-delete-cancel');
+    await waitFor(renderer, `document.querySelector('[data-standard-table-confirm]') === null && document.querySelector(${JSON.stringify(doomedCard)}) !== null && ${tableCount} === 4`, 'knowledge-table-delete-cancelled');
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="delete"]`, 'knowledge-table-delete-again');
+    await pressReachable(renderer, waitFor, requireJourney, `${doomedCard} [data-standard-table-action="confirm-delete"]`, 'knowledge-table-delete-confirm');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(doomedCard)}) === null && ${tableCount} === 3 && document.querySelector('[data-standard-table-action="restore-preinstalled"]') instanceof HTMLButtonElement`, 'knowledge-table-deleted');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-standard-table-action="restore-preinstalled"]', 'knowledge-table-restore');
+    await waitFor(renderer, `${tableCount} === 4 && document.querySelector('[data-standard-table-action="restore-preinstalled"]') === null && Array.from(document.querySelectorAll('[data-standard-table-id] h3')).some(title => title.textContent === ${JSON.stringify(doomed.name)})`, 'knowledge-table-restored');
+    await pointerClick(renderer, waitFor, '[data-standard-table-action="inspect"]', 'knowledge-table-open');
+    await waitFor(renderer, `document.querySelector('[data-standard-table-detail] [data-standard-table-row]') && document.querySelector('[data-standard-table-action="save-version"]')`, 'knowledge-table-entries');
     await click(renderer, '审阅规范文件', 'knowledge-open-category');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
@@ -557,10 +653,11 @@ async function main() {
     await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
 
     at('knowledge-guideline-import');
-    await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
     // 导入新版本… on 文字规范条款 (Issue #1410 item 25): the file picked in the system dialog is imported at once as 第 2 版,
     // issued by the house; version 1 stays listed beneath it.
-    await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
+    await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if (!(start instanceof HTMLButtonElement) || start.disabled || start.textContent!=='导入新版本…' || start.closest('details')) return false; const r=start.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'knowledge-import-visible');
+    await assertRenderer(renderer, `document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]')?.closest('details')===null`, 'knowledge-import-face');
+    await pointerClick(renderer, waitFor, '[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]', 'knowledge-import-start');
     const importedPage = await readKnowledge(renderer, (page) => page.cards[0]?.pill === '第 2 版 · 本社', 'knowledge-imported');
     requireJourney(importedPage.cards[0].preview === null && importedPage.cards[0].clauses.length === 5 && importedPage.cards[0].versions.length === 2 &&
       importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
@@ -575,7 +672,11 @@ async function main() {
     // chosen with its focus visible.
     await assertRenderer(renderer, `(() => { const tab=document.querySelector('#knowledge-tab-guidelines'); if(!(tab instanceof HTMLButtonElement))return false; tab.focus(); return document.activeElement===tab; })()`, 'knowledge-tab-focus');
     await pressKey(renderer, 'ArrowRight');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='standard-tables' && document.activeElement?.id==='knowledge-tab-standard-tables' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await pressKey(renderer, 'ArrowRight');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right-evaluation', 10_000);
+    await pressKey(renderer, 'ArrowLeft');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='standard-tables' && document.activeElement?.id==='knowledge-tab-standard-tables' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-left-standard-tables', 10_000);
     await pressKey(renderer, 'ArrowLeft');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='guidelines' && document.activeElement?.id==='knowledge-tab-guidelines' && document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, 'knowledge-arrow-left', 10_000);
 
@@ -613,7 +714,6 @@ async function main() {
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
     at('knowledge-guideline-import');
-    await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
     // Real picker/service/UI pages: later clauses remain reachable after import; history reaches version 1.
     const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
     const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
@@ -745,7 +845,7 @@ async function main() {
     const libraryAdded = await readLibrary(renderer, (page) => page.preview === null && page.cards.length === 1, 'library-added');
     const [libraryCard] = libraryAdded.cards;
     requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '资料' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
-    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；已允许任务参考。`)}`, 'library-added-status', 10_000);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」。`)}`, 'library-added-status', 10_000);
     // The original is kept byte for byte under its digest in the Agent Data Root, and the service reads it as the page does.
     const libraryKept = await readFile(resolve(libraryObjects, 'sha256', sample1Digest.slice(0, 2), `${sample1Digest}.docx`));
     requireJourney(libraryKept.equals(sample1), 'library-original-kept-whole');
@@ -764,21 +864,21 @@ async function main() {
 
     // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ----------------------------
     at('knowledge-library-index');
-    // Built on this machine as it arrived, nothing asked: four layers read — recognition is not needed for a Word file, sample1
-    // is Chinese so it needs no 来源译文, and similarity vectors wait for the editor to ask (Issue #892), never built on open.
-    // The anchors are positions: a Word file has no page numbers.
+    // Built on this machine as it arrived, nothing asked: six layers — recognition is not needed for a Word file, sample1 is
+    // Chinese so it needs no 来源译文 — and 相似段落检索 is there at once, with nothing to build (R5-F2c). The anchors are
+    // positions: a Word file has no page numbers.
     const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
     const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     await assertRenderer(renderer, `(() => { const card=document.querySelector('article.library-material'); const warning=card?.querySelector(':scope > .knowledge-file-summary .knowledge-file-index'); return warning?.textContent==='索引：已在本机建好' && !warning.closest('.knowledge-file-more'); })()`, 'library-folded-index-warning');
-    requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
+    requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 6 &&
       JSON.stringify(layers.get('original')) === JSON.stringify(['complete', '已原样保存在本机']) &&
       layers.get('metadata')?.[0] === 'complete' && /^中文 · \d+ 段 · \d+ 个标题/u.test(layers.get('metadata')?.[1] ?? '') &&
       layers.get('text')?.[0] === 'complete' && /^已提取 \d+ 字$/u.test(layers.get('text')?.[1] ?? '') &&
       JSON.stringify(layers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
       JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
       layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
-      JSON.stringify(layers.get('vectors')) === JSON.stringify(['not-built', '未构建：可以「构建相似索引」（在本机建立，不发送任何内容）']) &&
-      libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null && libraryIndexed.cards[0].vectorSearch === null,
+      !layers.has('vectors') && libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null &&
+      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 结果仅供参考，原文以分段为准。已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && libraryIndexed.cards[0].vectorSearch.heading === null && libraryIndexed.cards[0].vectorSearch.mode === null,
     'library-index-layers', libraryIndexed.cards[0].layers);
     const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
     requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,
@@ -799,36 +899,43 @@ async function main() {
     await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-segments-back');
     await clickSelector(renderer, '[data-library-action="segments-close"]', 'library-segments-close');
     await waitFor(renderer, `document.querySelector('.material-segments [data-library-action="segments"]') === document.activeElement`, 'library-segments-closed', 10_000);
-    // 索引完成 sits in 最近完成, names the item and asks nothing: the count stays the decisions'.
-    const indexItem = `library-index:${materialId}`;
-    const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
-    const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
-    requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
-    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
-    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 资料「${LIBRARY_TITLE}」` &&
-      indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
-    await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
-    await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
+    await setDeveloperMode(renderer, waitFor, false, 'library-reading-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), 'library-index-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host[data-attention-count="0"]') && !document.querySelector('[data-attention-state="indexing-completed"]')`, 'library-index-attention-clear');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-category');
+    const indexState = `article.library-material[data-material-id="${materialId}"] .knowledge-file-summary .knowledge-file-index`;
+    await readLibrary(renderer, page => page.cards.some(card => card.id === materialId && card.index === 'complete'), 'library-index-complete');
+    await wheelIntoView(renderer, waitFor, indexState, 'library-index-reading');
+    await assertReachable(renderer, waitFor, requireJourney, indexState, 'library-index-reading');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(indexState)}).textContent === '可阅读'`, 'library-index-reading-words');
+    await setDeveloperMode(renderer, waitFor, true, 'library-index-details-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-details-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-details-category');
+    await pressReachable(renderer, waitFor, requireJourney, `article.library-material[data-material-id="${materialId}"] > details > summary`, 'library-index-details');
 
-    // 相似段落检索 (Issue #892): built on this machine only when the editor asks, by the built-in provider on this guest, then
-    // searched with the runner's own words. Only anchors are read back here, never the paragraphs' words.
-    at('knowledge-library-index-vectors');
-    const vectorCard = `article.library-material[data-material-id="${materialId}"]`;
-    await clickSelector(renderer, `${vectorCard} [data-library-action="build-vectors"]`, 'library-vectors-build');
-    const vectorsBuilt = await readLibrary(renderer, (page) => page.cards.find((card) => card.id === materialId)?.layers.some(([layer, state]) => layer === 'vectors' && state === 'complete') === true, 'library-vectors-built');
-    const vectorsLayer = vectorsBuilt.cards.find((card) => card.id === materialId).layers.find(([layer]) => layer === 'vectors');
-    requireJourney(vectorsLayer[2] === `已构建：${indexService[4]} 段 · 本机内置相似向量（按字词相近）`, 'library-vectors-layer', vectorsLayer);
-    const vectorsService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.vectors?.state ?? null, material.index.vectors?.embedding ?? null, material.index.vectors?.built ?? null, material.index.vectors?.total ?? null])`);
-    requireJourney(vectorsService[0] === 'complete' && vectorsService[1] === 'ai7-embedding/stub-1' && vectorsService[2] === indexService[4] && vectorsService[3] === indexService[4],
-      'library-vectors-service', vectorsService);
-    await fill(renderer, `${vectorCard} [data-library-field="vector-query"]`, '他们说话', 'library-vectors-query');
-    await clickSelector(renderer, `${vectorCard} [data-library-action="vector-search"]`, 'library-vectors-search');
-    const vectorsFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-vectors-found');
-    const search = vectorsFound.cards.find((card) => card.id === materialId).vectorSearch;
+    // 相似段落检索 (Issue #892; R5-F2c): there as soon as the index is built, nothing to build, ranked on this machine by words —
+    // and, with a fast model connected, widened and re-ordered by it. The field says what a search may send; the answer says
+    // what this one sent (0.7.9 review 2.3). This guest connects no model, so the line beside the results reads 没有发送.
+    // The editor wheels the page to the field, writes the runner's own words and presses 检索. Each control is asserted inside
+    // the window, inside its scroller's visible box and topmost at its centre before it is pressed — no scripted scroll.
+    // Only anchors are read back here, never the paragraphs' words.
+    at('knowledge-library-index-search');
+    const searchCard = `article.library-material[data-material-id="${materialId}"]`;
+    const searchField = `${searchCard} [data-library-field="vector-query"]`;
+    const searchButton = `${searchCard} [data-library-action="vector-search"]`;
+    await pressSearchControl(renderer, searchField, 'library-search-field');
+    await renderer.send('Input.insertText', { text: '他们说话' });
+    await pressSearchControl(renderer, searchButton, 'library-search-button');
+    const searchFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-search-found');
+    const search = searchFound.cards.find((card) => card.id === materialId).vectorSearch;
     requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&
-      search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-vectors-candidates', search);
+      new Set(search.candidates.map(([ordinal]) => ordinal)).size === search.candidates.length &&
+      search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-search-candidates', search);
+    requireJourney(JSON.stringify(search.mode) === JSON.stringify(['local', '本次：没有发送，只在本机按字面检索。', true]), 'library-search-mode', search.mode);
+    // Nothing was built for it: the item's index reads as it did, with no vector layer on the service either.
+    const searchService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, Object.keys(material.index.layers).length, 'vectors' in material.index])`);
+    requireJourney(JSON.stringify(searchService) === JSON.stringify(['complete', 6, false]), 'library-search-service', searchService);
 
     at('j14-library-reflow-forced-colors');
     // At 200% the item, its decisions and an open choice reflow into the width; under forced colours the card and the choice keep
@@ -993,6 +1100,72 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-books-commit');
     await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-books-committed');
 
+    at('knowledge-library-use');
+    await setDeveloperMode(renderer, waitFor, false, 'library-use-mode');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'library-use-knowledge');
+    await pointerClick(renderer, waitFor, '[data-knowledge-category="library"]', 'library-use-category');
+    await waitFor(renderer, `document.querySelector('[data-library-action="use"]')`, 'library-use-ready');
+    await assertRenderer(renderer, `document.querySelector('[data-library-action="attribute"], [data-library-action="eligibility"]')===null`, 'library-use-simple');
+    await pointerClick(renderer, waitFor, 'article.library-material > .knowledge-file-more > summary', 'library-use-details');
+    await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="segments"]', 'library-use-read');
+    await waitFor(renderer, `document.querySelector('[data-library-action="segments-close"]') !== null`, 'library-use-read-ready');
+    await pointerClick(renderer, waitFor, '[data-library-action="segments-close"]', 'library-use-read-close');
+    const useStart = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material'); return { count:Number(card.dataset.decisions), attribution:card.dataset.attribution, materialId:card.dataset.materialId }; })()`);
+    // 暂不使用 is a decision of its own (0.7.9 review BUG-03). Before the fix a usable new item marked 暂不使用 entered 待我处理 and
+    // could never leave it, and an item already waiting there stayed. Here the editor marks a usable item 暂不使用; opens the
+    // item that waits in 待我处理 from there — its 资料 button takes focus inside the window — and marks it too; 待我处理, read
+    // again, lists neither. Every control named is asserted reachable before a real press, with no scripted scroll. The press in
+    // 待我处理 is on an item whose standing has not changed since the page last read it: the list is painted from the cached
+    // reading first and replaced when the fresh one differs, so a press right after a decision could land on the list being replaced.
+    const attentionItem = (id) => `[data-attention-item="library-material:${id}"]`;
+    const useCard = (id) => `article.library-material[data-material-id="${id}"]`;
+    const markNotUsed = async (id, name) => {
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} [data-library-action="use"]`, `${name}-open`);
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} .library-use-chooser input[data-library-choice="deferred"]`, `${name}-choice`);
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} [data-library-action="confirm-use"]`, `${name}-confirm`);
+    };
+    const usedCard = (id, attribution, count) => `(() => { const card=document.querySelector(${JSON.stringify(useCard(id))}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('暂不使用') && card.dataset.attribution===${JSON.stringify(attribution)} && card.dataset.eligibility==='deferred' && Number(card.dataset.decisions)===${count}; })()`;
+    const usable = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material[data-attribution="house"][data-eligibility="house"][data-reference="available"]'); return card ? { materialId: card.dataset.materialId, count: Number(card.dataset.decisions) } : null; })()`);
+    requireJourney(usable !== null && usable.materialId !== useStart.materialId, 'library-use-usable-item', usable);
+    await markNotUsed(usable.materialId, 'library-use-usable');
+    await waitFor(renderer, usedCard(usable.materialId, 'house', usable.count + 1), 'library-use-usable-recorded');
+    const usableService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(usable.materialId)} }).then((material)=>[material.notUsed !== undefined, material.reference.state, material.decisions.at(-1)?.decision.notUsed === true])`);
+    requireJourney(JSON.stringify(usableService) === JSON.stringify([true, 'pending', true]), 'library-use-usable-service', usableService);
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention');
+    const attentionOpen = `${attentionItem(useStart.materialId)} button.global-attention-open`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionOpen)})?.disabled === false`, 'library-use-attention-ready');
+    await pressReachable(renderer, waitFor, requireJourney, attentionOpen, 'library-use-attention-open');
+    await waitFor(renderer, `(() => { const button=document.querySelector(${JSON.stringify(`${useCard(useStart.materialId)} [data-library-action="use"]`)}); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
+    await markNotUsed(useStart.materialId, 'library-use-waiting');
+    let useCount = useStart.count + 1;
+    await waitFor(renderer, usedCard(useStart.materialId, useStart.attribution, useCount), 'library-use-recorded');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention-after');
+    // The reading taken before the decision listed the waiting item: once it is gone the list shows the fresh reading, and
+    // the usable item marked 暂不使用 is not in it either.
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host[data-attention-count]') !== null && document.querySelector(${JSON.stringify(attentionItem(useStart.materialId))}) === null`, 'library-use-left-attention');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(attentionItem(usable.materialId))}) === null`, 'library-use-usable-not-in-attention');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'library-use-knowledge-again');
+    await pointerClick(renderer, waitFor, '[data-knowledge-category="library"]', 'library-use-category-again');
+    await waitFor(renderer, `document.querySelector('article.library-material')?.dataset.materialId === ${JSON.stringify(useStart.materialId)} && document.querySelector('article.library-material [data-library-action="use"]')?.disabled === false`, 'library-use-ready-again');
+    // A later choice supersedes 暂不使用: the usable item goes back to the house, as the stages after this one found it.
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} [data-library-action="use"]`, 'library-use-usable-again-open');
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} .library-use-chooser input[data-library-choice="house"]`, 'library-use-usable-again-choice');
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} [data-library-action="confirm-use"]`, 'library-use-usable-again-confirm');
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(useCard(usable.materialId))}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('本社可参考') && card.dataset.reference==='available' && Number(card.dataset.decisions)===${usable.count + 2}; })()`, 'library-use-usable-restored');
+    for (const [value, expected] of [['house', '本社可参考'], ['book:', null]]) {
+      await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="use"]', 'library-use-open');
+      const radio = value==='book:' ? '.library-use-chooser input[data-library-choice^="book:"]' : `.library-use-chooser input[data-library-choice="${value}"]`;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(radio)})`, 'library-use-choice-ready');
+      const bookTitle = value==='book:' ? await renderer.evaluate(`document.querySelector(${JSON.stringify(radio)})?.closest('label')?.textContent`) : null;
+      await pointerClick(renderer, waitFor, radio, 'library-use-choice');
+      await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-library-action="confirm-use"]'); const r=button?.getBoundingClientRect(); return !!r && r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-confirm-in-window');
+      await pointerClick(renderer, waitFor, '[data-library-action="confirm-use"]', 'library-use-confirm');
+      useCount += 2;
+      const expectedLine = expected ?? `${bookTitle}的任务可参考`;
+      await waitFor(renderer, `(() => { const card=document.querySelector('article.library-material'); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith(${JSON.stringify(expectedLine)}) && card.dataset.attribution===${JSON.stringify(value==='book:'?'book':'house')} && card.dataset.eligibility===${JSON.stringify(value==='book:'?'book':value)} && Number(card.dataset.decisions)===${useCount}; })()`, 'library-use-recorded');
+    }
+    await setDeveloperMode(renderer, waitFor, true, 'library-use-restore');
+
     at('knowledge-earlier-exemplar-import');
     await closeBrowser();
     const exemplarPath = resolve(runRoot, 'earlier-exemplar.txt');
@@ -1147,13 +1320,18 @@ async function main() {
         read.skills[0].revisionId===${JSON.stringify(firstRevision)};
     })()`, 'skill-rollback-selection-not-enablement');
     await closeBrowser();
-    manager = await launch();
+    manager = await launch(unstructuredTablePath);
     renderer = await waitForRenderer(manager, 'skill-rollback-restart-window');
     await openSkills('skill-rollback-restart');
     await assertRenderer(renderer, `(async () => {
       const read=await window.ai7.inspectImportedSkills({revisionId:null,before:null});
       return read.skills.length===1 && read.skills[0].revisionId===${JSON.stringify(firstRevision)} && read.skills[0].state==='installed-disabled' && document.querySelector('.imported-skill-list li')?.dataset.skillState==='installed-disabled';
     })()`, 'skill-rollback-survives-restart');
+
+    at('standard-table-unavailable');
+    await pickStandardTable(renderer);
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '这份文件需要模型整理。请在 设置 › 模型服务 选好可用的模型，再导入。'
+      && document.querySelector('[data-standard-table-preview]') === null`, 'standard-table-shows-model-setup-reason');
 
     at('word-persisted-source-lineage');
     const wordPath = resolve(runRoot, 'word-persisted-lineage.docx');
@@ -1167,7 +1345,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-landing');
     await click(renderer, '导入稿件', 'word-lineage-pick');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-lineage-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-new-book');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'word-lineage-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');

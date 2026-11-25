@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError, UUID_PATTERN, requireStore, sha256 } from './store-records.js';
+import { retrieveWithFlash, type RetrievalAssist } from './retrieval/flash-assist.js';
 import {
   type ServiceOperationMap,
   type LibraryMaterialProjection,
@@ -9,21 +10,18 @@ import {
   type MaterialTranslationProjection,
   type MaterialVectorSearchProjection,
 } from '../shared/protocol.js';
-import { BackgroundAnalysisEnrollmentLedger } from './background-analysis-enrollments.js';
 import { LIBRARY_OBJECT_DIRECTORY, LibraryMaterialLedger, type LibraryMaterialOriginal } from './library-materials.js';
 import {
   MaterialIndexError,
   MaterialIndexLedger,
   extractMaterialText,
   prepareMaterialIndexInSlices,
-  type MaterialEmbeddingFacts,
   type MaterialLayerActivity,
   type MaterialReferenceBoundary,
   type MaterialReferencePin,
   type MaterialTaskReading,
-  type MaterialVectorQuery,
 } from './material-index.js';
-import type { EmbeddingProvider } from './knowledge/embedding.js';
+import { RETRIEVAL_MAX_CANDIDATES, RetrievalIndex } from './retrieval/index.js';
 import {
   MATERIAL_TRANSLATION_BATCH_CODE_UNITS,
   MATERIAL_TRANSLATION_BATCH_PARAGRAPHS,
@@ -31,15 +29,11 @@ import {
   MAX_MATERIAL_TRANSLATION_REQUESTS,
   type MaterialTranslator,
 } from './fast-role/material-translation-contract.js';
-import { MATERIAL_LAYERS_READ_ONLY, MATERIAL_VECTOR_BATCH } from './store-operation-support.js';
+import { MATERIAL_LAYERS_READ_ONLY } from './store-operation-support.js';
 
 export interface MaterialIndexOperationsHost {
   readonly authority: DatabaseSync;
   readonly dataRoot: string;
-  readonly embedding: EmbeddingProvider;
-  enrollmentCall: <T>(operation: () => T) => T;
-  readonly enrollments: BackgroundAnalysisEnrollmentLedger;
-  readonly idleVectorItems: Set<string>;
   indexController: AbortController | null;
   indexEnabled: boolean;
   readonly indexQueue: string[];
@@ -55,10 +49,6 @@ export interface MaterialIndexOperationsHost {
   readonly translationFailures: Map<string, string>;
   translationRun: Promise<void> | null;
   translator: MaterialTranslator | null;
-  vectorBuilding: string | null;
-  vectorLaneIdle: boolean;
-  readonly vectorQueue: string[];
-  vectorRun: Promise<void> | null;
   inspectLibraryMaterial: (materialId: string) => LibraryMaterialProjection;
   replacementFrozen: () => boolean;
   startMaterialIndexing: () => void;
@@ -73,8 +63,8 @@ export function startMaterialIndexing(host: MaterialIndexOperationsHost): void {
 }
 
 export function materialIndexing(host: MaterialIndexOperationsHost): boolean {
-  // Similarity vectors and 来源译文 asked for write too (Issue #892).
-  return host.indexRun !== null || host.vectorRun !== null || host.translationRun !== null;
+  // 来源译文 asked for writes too (Issue #892).
+  return host.indexRun !== null || host.translationRun !== null;
 }
 
 export function internalResumeMaterialIndexing(host: MaterialIndexOperationsHost): void {
@@ -87,10 +77,7 @@ export async function settleMaterialIndexing(host: MaterialIndexOperationsHost):
 }
 
 export async function settleMaterialLayers(host: MaterialIndexOperationsHost): Promise<void> {
-  while (host.vectorRun !== null || host.translationRun !== null) {
-    await host.vectorRun;
-    await host.translationRun;
-  }
+  while (host.translationRun !== null) await host.translationRun;
 }
 
 export function internalScheduleMaterialIndex(host: MaterialIndexOperationsHost, materialIds: ReadonlyArray<string>): void {
@@ -172,14 +159,6 @@ export function readMaterialIndexForTask(host: MaterialIndexOperationsHost, boun
   });
 }
 
-export function embeddingProvider(host: MaterialIndexOperationsHost): EmbeddingProvider {
-  return host.embedding;
-}
-
-export function internalEmbeddingFacts(host: MaterialIndexOperationsHost): MaterialEmbeddingFacts {
-  return { identity: host.embedding.identity, dimensions: host.embedding.dimensions, readiness: host.embedding.readiness() };
-}
-
 export function useMaterialTranslator(host: MaterialIndexOperationsHost, translator: MaterialTranslator | null): void {
   host.translator = translator;
 }
@@ -193,105 +172,46 @@ export function internalTranslationRequest(host: MaterialIndexOperationsHost, sh
 
 export function internalLayerActivity(host: MaterialIndexOperationsHost, materialId: string, sha256: string): MaterialLayerActivity {
   return {
-    embedding: internalEmbeddingFacts(host),
-    vectorsBuilding: host.vectorBuilding === materialId || host.vectorQueue.includes(materialId),
     translating: host.translating === materialId,
     translationRequest: internalTranslationRequest(host, sha256),
     translationFailure: host.translationFailures.get(materialId) ?? null,
   };
 }
 
-export function buildMaterialVectors(host: MaterialIndexOperationsHost, materialId: string): LibraryMaterialProjection {
-  requireStore(typeof materialId === 'string' && UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
-  host.libraryCall(() => host.libraryMaterials.original(materialId));
-  const pending = internalMaterialIndexCall(host, () => host.materialIndex.vectorTargets(materialId, host.embedding.identity, 1));
-  requireStore(host.embedding.readiness().state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
-  requireStore(!host.replacementFrozen(), 'MATERIAL_INDEX_READ_ONLY', MATERIAL_LAYERS_READ_ONLY);
-  // Asked for by the editor: an item the idle lane queued no longer gives way to the editor's work.
-  host.idleVectorItems.delete(materialId);
-  if (pending.targets.length > 0 && !host.indexStopped && host.vectorBuilding !== materialId && !host.vectorQueue.includes(materialId)) {
-    host.vectorQueue.push(materialId);
-    internalStartVectorPump(host);
-  }
-  return host.inspectLibraryMaterial(materialId);
-}
-
-export function internalStartVectorPump(host: MaterialIndexOperationsHost): void {
-  if (host.vectorRun === null) {
-    host.vectorRun = internalPumpMaterialVectors(host).finally(() => {
-      host.vectorRun = null;
-    });
-  }
-}
-
-export function indexIdleMaterialVectors(host: MaterialIndexOperationsHost, idle: boolean): void {
-  host.vectorLaneIdle = idle;
-  if (!idle || host.vectorRun !== null || host.indexStopped || host.poisoned || host.replacementFrozen() ||
-    host.embedding.readiness().state !== 'ready') return;
-  const books = new Set(host.enrollmentCall(() => host.enrollments.active())
-    .filter((enrollment) => enrollment.kind === 'material-index' && !enrollment.paused).map((enrollment) => enrollment.bookId));
-  for (const bookId of books) {
-    for (const item of host.libraryCall(() => host.libraryMaterials.referable(bookId))) {
-      if (host.vectorQueue.includes(item.materialId)) continue;
-      try {
-        if (internalMaterialIndexCall(host, () => host.materialIndex.vectorTargets(item.materialId, host.embedding.identity, 1)).targets.length === 0) continue;
-      } catch (error) {
-        if (!(error instanceof StoreError)) throw error;
-        continue; // Not yet read, or its index is not ready: a later pass looks again.
-      }
-      host.idleVectorItems.add(item.materialId);
-      host.vectorQueue.push(item.materialId);
-    }
-  }
-  if (host.vectorQueue.length > 0) internalStartVectorPump(host);
-}
-
-export async function internalPumpMaterialVectors(host: MaterialIndexOperationsHost): Promise<void> {
-  while (!host.indexStopped && host.vectorQueue.length > 0) {
-    const materialId = host.vectorQueue.shift()!;
-    host.vectorBuilding = materialId;
-    try {
-      for (;;) {
-        if (host.indexStopped || host.poisoned || host.replacementFrozen() || host.embedding.readiness().state !== 'ready') break;
-        if (host.idleVectorItems.has(materialId) && !host.vectorLaneIdle) break;
-        const next = internalMaterialIndexCall(host, () => host.materialIndex.vectorTargets(materialId, host.embedding.identity, MATERIAL_VECTOR_BATCH));
-        if (next.targets.length === 0) break;
-        const vectors = await host.embedding.embed(next.targets.map((target) => target.text));
-        requireStore(vectors.length === next.targets.length, 'MATERIAL_INDEX_INVALID', '相似向量无效。');
-        await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
-        if (host.indexStopped || host.poisoned || host.replacementFrozen()) break;
-        host.transaction(host.authority, () => internalMaterialIndexCall(host, () => host.materialIndex.recordVectors(
-          next, { identity: host.embedding.identity, dimensions: host.embedding.dimensions },
-          next.targets.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, vector: vectors[index]! })))));
-      }
-    } catch {
-      // Refused, or its build changed meanwhile: what was recorded stays, and asking again goes on from there. A rollback that
-      // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
-    } finally {
-      host.vectorBuilding = null;
-      host.idleVectorItems.delete(materialId);
-    }
-  }
-}
-
-export async function searchLibraryMaterialVectors(host: MaterialIndexOperationsHost, input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
+/**
+ * 相似段落检索 in an item's 查看索引: the local ranker with optional Flash assistance over the item's pinned build, its paragraphs
+ * read in one statement. No explicit transaction is opened and no writer lock is taken: each statement reads in SQLite's own
+ * read snapshot, and a build and its segments are append-only, so reads made one after another cannot see a mixed build. The
+ * index pump takes the writer lock only inside its own write of a new build; a new build or a replaced store makes the second
+ * read differ, and the search then answers nothing rather than a paragraph of another build. Best chunk per paragraph.
+ */
+export async function searchLibraryMaterialVectors(host: MaterialIndexOperationsHost, input: ServiceOperationMap['queryMaterialVectors']['input'], assist: RetrievalAssist | null = null): Promise<MaterialVectorSearchProjection> {
   requireStore(typeof input.materialId === 'string' && UUID_PATTERN.test(input.materialId) && typeof input.text === 'string' &&
-    input.text.trim().length > 0 && input.text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && input.text.isWellFormed() &&
-    Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= MAX_MATERIAL_VECTOR_CANDIDATES, 'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效：请写 1 到 2,000 字。');
+    input.text.trim().length > 0 && input.text.isWellFormed() && Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= MAX_MATERIAL_VECTOR_CANDIDATES,
+  'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效：请写要找的字词。');
+  requireStore(input.text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS, 'MATERIAL_VECTOR_QUERY_INVALID', '检索的字词太长：请缩短到 1,000 字以内再检索。');
   host.libraryCall(() => host.libraryMaterials.original(input.materialId));
-  const embedding = internalEmbeddingFacts(host);
-  requireStore(embedding.readiness.state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
-  const [query] = await host.embedding.embed([input.text]);
-  return internalMaterialIndexCall(host, () => host.materialIndex.search(input.materialId, embedding, query!, input.k));
-}
-
-export async function queryMaterialVectors(host: MaterialIndexOperationsHost, boundary: MaterialReferenceBoundary, text: string, k: number, materialIds?: readonly string[]): Promise<MaterialVectorQuery> {
-  requireStore(typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && text.isWellFormed(),
-      'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效。');
-  const embedding = internalEmbeddingFacts(host);
-  const query = embedding.readiness.state === 'ready' ? (await host.embedding.embed([text]))[0]! : null;
-  return internalMaterialIndexCall(host, () => host.materialIndex.queryForTask(boundary, materialIds, embedding, query, k,
-    (id, book) => host.libraryMaterials.available(id, book), (id) => host.libraryMaterials.original(id).title));
+  const read = () => internalMaterialIndexCall(host, () => host.materialIndex.searchableParagraphs(input.materialId));
+  const build = read();
+  let first: typeof build | null = build;
+  const index = new RetrievalIndex([{ sourceKind: 'material', sourceId: input.materialId, digest: build.indexDigest, read: () => {
+    const now = first ?? read();
+    first = null;
+    return { digest: now.indexDigest, segments: now.paragraphs.map((paragraph) => ({ segmentOrdinal: paragraph.ordinal, text: paragraph.text })) };
+  } }]);
+  try {
+    const { candidates: found, assist: mode } = await retrieveWithFlash(index, input.text, RETRIEVAL_MAX_CANDIDATES, assist);
+    // A long paragraph is ranked in chunks: it answers once, where its best chunk ranks.
+    const ordinals = new Set<number>();
+    const best = found.filter((candidate) => !ordinals.has(candidate.anchor.segmentOrdinal!) && ordinals.add(candidate.anchor.segmentOrdinal!));
+    return { materialId: input.materialId, indexDigest: build.indexDigest, assist: mode, candidates: best.slice(0, input.k).map(({ anchor, score }) => {
+      const ordinal = anchor.segmentOrdinal!;
+      const { page, pageParagraph, preview } = build.paragraphs[ordinal - 1]!;
+      return { ordinal, page, pageParagraph, score: Math.round(score * 10_000) / 10_000, preview };
+    }) };
+  } finally {
+    index.dispose();
+  }
 }
 
 export function requestMaterialTranslation(host: MaterialIndexOperationsHost, materialId: string): LibraryMaterialProjection {

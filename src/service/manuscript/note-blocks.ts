@@ -2,7 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ManuscriptBlockProjection } from '../../shared/protocol.js';
 import type { ParsedDocxBlock } from '../docx.js';
 import type { ParsedNoteSource } from '../docx-notes.js';
-import { asNumber, asString, type SqlRow } from './bounded-kernel.js';
+import { asNumber, asString, REVISION_IMPORT_LINEAGE, type SqlRow } from './bounded-kernel.js';
+import { paragraphAtKey } from './working-positions.js';
 import type { StagedParagraphPiece } from './import-structure.js';
 
 /**
@@ -57,40 +58,69 @@ export function commitNoteSources(db: DatabaseSync, input: { revisionId: string;
     WHERE n.draft_id = ? ORDER BY n.position`).run(blocks.id, input.revisionId, input.sourceVersionId, input.createdAt, input.draftId).changes);
 }
 
+interface NoteOrigin { revisionId: string; branchId: string; sourceId: string; notesAt: string | null }
+const lastCommittedOrigin = new WeakMap<DatabaseSync, NoteOrigin>();
+
+function notesAtRevision(db: DatabaseSync, branchId: string, revisionId: string): string | null {
+  const prior = lastCommittedOrigin.get(db);
+  if (prior?.branchId === branchId && prior.revisionId === revisionId) return prior.notesAt;
+  const current = db.prepare(`SELECT source_version_id, parent_revision_id, (
+    EXISTS(SELECT 1 FROM manuscript_block_sources WHERE revision_id = r.revision_id) OR
+    EXISTS(SELECT 1 FROM manuscript_note_sources WHERE revision_id = r.revision_id)) imported
+    FROM manuscript_revisions r WHERE r.revision_id = ? AND r.branch_id = ?`).get(revisionId, branchId);
+  if (!current) return null;
+  const sourceId = asString(current.source_version_id);
+  let notesAt: string | null = null;
+  if (current.parent_revision_id === null || current.imported === 1) {
+    if (db.prepare('SELECT 1 FROM manuscript_note_sources WHERE revision_id = ? LIMIT 1').get(revisionId)) notesAt = revisionId;
+  } else if (prior?.branchId === branchId && prior.revisionId === current.parent_revision_id && prior.sourceId === sourceId) {
+    notesAt = prior.notesAt;
+  } else if (db.prepare("SELECT 1 FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'note' LIMIT 1").get(revisionId)) {
+    const origin = db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE} SELECT revision_id FROM lineage child
+      WHERE NOT EXISTS (SELECT 1 FROM lineage parent WHERE parent.revision_id = child.parent_revision_id)
+      AND EXISTS (SELECT 1 FROM manuscript_note_sources WHERE revision_id = child.revision_id)`).get(revisionId, branchId);
+    if (origin) notesAt = asString(origin.revision_id);
+  }
+  if (!db.isTransaction) lastCommittedOrigin.set(db, { revisionId, branchId, sourceId, notesAt });
+  return notesAt;
+}
+
 /** The window's note blocks with what they say about themselves: part, number and the paragraph that refers to them. */
-export function withNoteReferences(db: DatabaseSync, branchId: string, blocks: ManuscriptBlockProjection[]): ManuscriptBlockProjection[] {
-  if (db.prepare('SELECT 1 FROM manuscript_note_sources LIMIT 1').get() === undefined) return blocks;
+export function withNoteReferences(db: DatabaseSync, branchId: string, revisionId: string, blocks: ManuscriptBlockProjection[]): ManuscriptBlockProjection[] {
+  const sourceRevision = notesAtRevision(db, branchId, revisionId);
+  if (sourceRevision === null) return blocks;
   const links = db.prepare(`WITH RECURSIVE refs(block_id, depth) AS (SELECT ?, 0 UNION ALL
     SELECT l.block_id, r.depth + 1 FROM refs r JOIN manuscript_block_lineage l ON l.related_block_id = r.block_id
     JOIN manuscript_command_groups g ON g.command_group_id = l.command_group_id
     WHERE l.relation = 'merged-into' AND g.branch_id = ? AND g.status = 'applied' AND r.depth < 100000)
     SELECT ns.block_id, ns.note_part, ns.note_ordinal FROM manuscript_note_sources ns
     JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ns.block_id WHERE ns.reference_block_id IN (SELECT block_id FROM refs)
-    AND ns.rowid = (SELECT max(latest.rowid) FROM manuscript_note_sources latest WHERE latest.block_id = ns.block_id)
+    AND ns.revision_id = ?
     ORDER BY ns.note_ordinal`);
-  const source = db.prepare(`SELECT ns.note_part, ns.note_ordinal, ns.reference_block_id, wb.position reference_position
+  const source = db.prepare(`SELECT ns.note_part, ns.note_ordinal, ns.reference_block_id, wb.order_key reference_key
     FROM manuscript_note_sources ns LEFT JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ns.reference_block_id
-    WHERE ns.block_id = ? ORDER BY ns.rowid DESC LIMIT 1`);
+    WHERE ns.block_id = ? AND ns.revision_id = ?`);
   const mergedReference = db.prepare(`WITH RECURSIVE refs(block_id, depth) AS (SELECT ?, 0 UNION ALL
     SELECT l.related_block_id, r.depth + 1 FROM refs r JOIN manuscript_block_lineage l ON l.block_id = r.block_id
     JOIN manuscript_command_groups g ON g.command_group_id = l.command_group_id
     WHERE l.relation = 'merged-into' AND g.branch_id = ? AND g.status = 'applied' AND r.depth < 100000)
-    SELECT wb.block_id, wb.position FROM refs r JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = r.block_id ORDER BY r.depth DESC LIMIT 1`);
+    SELECT wb.block_id, wb.order_key FROM refs r JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = r.block_id ORDER BY r.depth DESC LIMIT 1`);
   return blocks.map((block) => {
     if (block.kind !== 'note') {
-      const notes = links.all(block.blockId, branchId, branchId) as SqlRow[];
+      const notes = links.all(block.blockId, branchId, branchId, sourceRevision) as SqlRow[];
       return notes.length === 0 ? block : { ...block, noteLinks: notes.map((note) => ({ blockId: asString(note.block_id),
         part: note.note_part === 'endnote' ? 'endnote' as const : 'footnote' as const, ordinal: asNumber(note.note_ordinal) })) };
     }
-    const row = source.get(branchId, block.blockId) as SqlRow | undefined;
+    const row = source.get(branchId, block.blockId, sourceRevision) as SqlRow | undefined;
     if (row === undefined) return block;
-    const merged = row.reference_block_id !== null && row.reference_position === null
+    const merged = row.reference_block_id !== null && row.reference_key === null
       ? mergedReference.get(asString(row.reference_block_id), branchId, branchId) as SqlRow | undefined : undefined;
     return { ...block, note: {
       part: asString(row.note_part) === 'endnote' ? 'endnote' : 'footnote',
       ordinal: asNumber(row.note_ordinal),
       referenceBlockId: merged ? asString(merged.block_id) : row.reference_block_id === null ? null : asString(row.reference_block_id),
-      referencePosition: merged ? asNumber(merged.position) : row.reference_position === null ? null : asNumber(row.reference_position),
+      referencePosition: merged ? paragraphAtKey(db, branchId, asNumber(merged.order_key))
+        : row.reference_key === null ? null : paragraphAtKey(db, branchId, asNumber(row.reference_key)),
     } };
   });
 }
@@ -117,8 +147,8 @@ export function revisionNoteSources(db: DatabaseSync, revisionId: string, source
 
 /** The first position of the working manuscript's notes, which follow every body block; null when it has none. */
 export function firstNotePosition(db: DatabaseSync, branchId: string): number | null {
-  const row = db.prepare("SELECT min(position) position FROM working_blocks WHERE branch_id = ? AND kind = 'note'").get(branchId) as SqlRow | undefined;
-  return row === undefined || row.position === null ? null : asNumber(row.position);
+  const row = db.prepare("SELECT min(order_key) order_key FROM working_blocks WHERE branch_id = ? AND kind = 'note'").get(branchId) as SqlRow | undefined;
+  return row === undefined || row.order_key === null ? null : paragraphAtKey(db, branchId, asNumber(row.order_key));
 }
 
 /**

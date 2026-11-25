@@ -1,3 +1,4 @@
+import { supportsEditorialMemoryPolicy } from '../shared/protocol.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import {
   readSearchBackendConnections,
@@ -9,25 +10,46 @@ import {
 import { randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
+import { modelEffortRefusal, MODEL_EFFORT_STALE_REASON } from './provider/model-efforts.js';
+import { modelProfileFor } from './provider/model-profile.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
+import { isRecord } from './analysis/canonical.js';
 import {
+  DISCOVERED_EFFORT_LEVELS,
+  DISCOVERED_THINKING_MODES,
   MODEL_SERVICE_CONNECTION_IDS,
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTES,
+  MODEL_ROLE_IDS,
+  MODEL_ROLE_LABELS,
+  MODEL_ROLE_SOURCE_LABELS,
+  modelRoleIdOf,
   modelServiceChannelOf,
   modelServiceModels,
+  modelServiceRecommendedModels,
+  modelServiceRouteRefusal,
   modelServiceRuntimeBinding,
+  modelTierOf,
   validModelServiceModelId,
+  type DiscoveredEffortLevel,
+  type DiscoveredModel,
+  type DiscoveredModelReasoningEvidence,
   type ModelConnectionTestStatus,
+  type LegacyModelRoleId,
   type ModelCredentialOperationState,
+  type ModelRoleId,
+  type ModelRoleResolutionProjection,
+  type ModelRoleSource,
   type ModelServiceConnectionProjection,
   type ModelServiceRouteId,
+  type TrustedOperationalScope,
 } from '../shared/protocol.js';
-import { MODEL_SERVICE_ROW_COLUMNS } from './model-service-connections.js';
+import { MODEL_SERVICE_ROW_COLUMNS, readModelRoleChoices, writeModelRoleChoice, type ModelRoleChoiceInput } from './model-service-connections.js';
 import { DatabaseSync } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, asString, requireStore, type SqlRow } from './store-records.js';
 import { readModelConnectionTest } from './store-schema.js';
-import { resolveRuntimeExecutionConfig, validReasoningEffort, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { resolveRuntimeExecutionConfig, sentReasoningEffort, validReasoningEffort, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import type { LaunchChoice } from './task-launch-snapshots.js';
 
 export interface ModelSearchSettingsHost {
   assertAvailable: () => void;
@@ -39,7 +61,6 @@ export interface ModelSearchSettingsHost {
   getModelServiceRouteConnection: (route: ModelServiceRouteId) => ModelServiceConnectionProjection | null;
   getSearchBackendConnections: () => import('../shared/protocol.js').SearchBackendConnectionProjection[];
   modelServiceBinding: (route: ModelServiceRouteId, modelId: string) => import('../shared/protocol.js').ModelServiceBindingProjection;
-  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string) => void;
 }
 
 export function getSearchBackendSettings(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendSettingsProjection {
@@ -98,7 +119,7 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
   const target = { connectionId: MODEL_SERVICE_CONNECTION_IDS[route], binding: MODEL_SERVICE_ROUTE_BINDINGS[route] };
   requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
   const row = host.authority.prepare(
-      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, reasoning_effort, fast_reasoning_effort
+      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, connection_test, fast_model_id, reasoning_effort, fast_reasoning_effort
        FROM model_service_connections
        WHERE connection_id = ?`,
   ).get(target.connectionId) as SqlRow | undefined;
@@ -115,6 +136,7 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
       'STORE_CORRUPT',
       '模型服务凭据引用无效。',
   );
+  const choices = readModelRoleChoices(host.authority);
   return {
     connectionId: target.connectionId,
     roleId: 'main-editorial',
@@ -127,10 +149,29 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
     credentialUpdatedAt: asString(row.credential_updated_at),
-    selected: row.selected === 1,
-    fastSelected: row.fast_selected === 1,
-    connectionTest: readModelConnectionTest(row),
+    selected: choices.some(choice => choice.roleId === 'foreground-pro' && choice.connectionId === target.connectionId),
+    fastSelected: choices.some(choice => choice.roleId === 'foreground-flash' && choice.connectionId === target.connectionId),
+    ...connectionTestsOf(host.authority, target.connectionId, row),
   };
+}
+
+/**
+ * The newest test result of each model tested on a connection. The lighter model's results live here only (the stored slot
+ * stays the one value every build reads, so an older build opens the store), until the service stops.
+ */
+const HELD_CONNECTION_TESTS = new WeakMap<object, Map<string, Map<string, ModelConnectionTestStatus>>>();
+const MAX_HELD_MODELS_PER_CONNECTION = 8;
+
+/** `connectionTest` is the newest of `connectionTests`: every model's newest result, the stored one included, for this credential. */
+function connectionTestsOf(authority: object, connectionId: string, row: SqlRow): Pick<ModelServiceConnectionProjection, 'connectionTest' | 'connectionTests'> {
+  const stored = readModelConnectionTest(row);
+  const results = new Map<string, ModelConnectionTestStatus>();
+  for (const result of [...(HELD_CONNECTION_TESTS.get(authority)?.get(connectionId)?.values() ?? []), ...(stored === null ? [] : [stored])]) {
+    const known = results.get(result.modelId);
+    if (result.credentialUpdatedAt === row.credential_updated_at && (known === undefined || result.testedAt > known.testedAt)) results.set(result.modelId, result);
+  }
+  const connectionTests = [...results.values()].sort((a, b) => (a.testedAt < b.testedAt ? 1 : a.testedAt > b.testedAt ? -1 : 0));
+  return { connectionTest: connectionTests[0] ?? null, connectionTests };
 }
 
 export function getModelServiceConnections(host: ModelSearchSettingsHost): ModelServiceConnectionProjection[] {
@@ -164,15 +205,14 @@ export function saveModelServiceConnection(host: ModelSearchSettingsHost, connec
       // Minted here when the caller names none — as main always does — so the reference belongs to this data root alone.
       let credentialReference = credentialReferenceInput ?? randomUUID();
       while (DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference)) credentialReference = randomUUID();
-      const anySelected = host.authority.prepare('SELECT 1 FROM model_service_connections WHERE selected = 1').get() !== undefined;
+      const anySelected = readModelRoleChoices(host.authority).some(choice => choice.roleId === 'foreground-pro');
+      // No Flash model is chosen with the first key (Issue #1620): the Flash roles follow 前台 Pro until the editor picks one.
       host.authority.prepare(
-          `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_model_id)
-           VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, fast_model_id)
+           VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?)`,
       ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
-        credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1, target.binding.modelId);
-      if (host.authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
-        host.authority.prepare('UPDATE model_service_connections SET fast_selected = 1 WHERE connection_id = ?').run(target.connectionId);
-      }
+        credentialReference, credentialOperationState, now, now, now, target.binding.modelId);
+      if (!anySelected) writeModelRoleChoice(host.authority, 'foreground-pro', { connectionId: target.connectionId, modelId: target.binding.modelId });
     } else {
       requireStore(
         host.authority.prepare(
@@ -217,63 +257,201 @@ export function selectModelServiceRoute(host: ModelSearchSettingsHost, route: Mo
   const current = target.connectionId === undefined ? null : host.getModelServiceRouteConnection(route);
   requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
   requireStore(current !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
+  requireModelEffort(host, route, current.binding.modelId, 'main', current.binding.reasoningEffort);
   host.transaction(host.authority, () => {
-    host.authority.prepare('UPDATE model_service_connections SET selected = NULL WHERE selected = 1 AND connection_id != ?').run(target.connectionId);
-    host.authority.prepare('UPDATE model_service_connections SET selected = 1, updated_at = ? WHERE connection_id = ?')
+    writeModelRoleChoice(host.authority, 'foreground-pro', { connectionId: current.connectionId, modelId: current.binding.modelId,
+      ...(current.binding.reasoningEffort === undefined ? {} : { reasoningEffort: current.binding.reasoningEffort }) });
+    host.authority.prepare('UPDATE model_service_connections SET updated_at = ? WHERE connection_id = ?')
       .run(new Date().toISOString(), target.connectionId);
   });
   return host.getModelServiceRouteConnection(route)!;
 }
 
-export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+function modelChoiceEffortRefusal(host: ModelSearchSettingsHost, channel: ModelServiceRouteId,
+  record: NonNullable<ReturnType<typeof modelServiceRuntimeBinding>>, choice: string | undefined): string | null {
+  if (sentReasoningEffort(choice) === null) return null;
+  const evidence = host.getModelServiceModels(channel).find(model => model.modelId === record.model);
+  return modelEffortRefusal(evidence, modelProfileFor(record.route, record.model), choice);
+}
+
+function requireModelEffort(host: ModelSearchSettingsHost, channel: ModelServiceRouteId, model: string, tier: 'main' | 'fast', choice?: string): void {
+  const record = modelServiceRuntimeBinding(channel, model, tier);
+  requireStore(record !== undefined || sentReasoningEffort(choice) === null, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+  if (record !== undefined) requireStore(modelChoiceEffortRefusal(host, channel, record, choice) === null, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+}
+
+/** A role's effective model under the cascade of Issue #1620, and where it comes from. */
+export interface ResolvedModelRole {
+  readonly roleId: ModelRoleId;
+  readonly source: ModelRoleSource;
+  readonly connection: ModelServiceConnectionProjection | null;
+  readonly model: import('../shared/protocol.js').ModelServiceBindingProjection | null;
+  readonly binding: ConfiguredProviderBinding | null;
+  /** Why the effective model or effort cannot be used although the credential is ready. */
+  readonly refusal: string | null;
+  /** The actual model/effort used, after cascade and per-Task overrides; internal, never a wire member. */
+  readonly usedChoice: ModelRoleChoiceInput | null;
+}
+
+/**
+ * Resolve explicit role choices and ADR 0107's defaults (#1650). An unset underlying Flash role takes the primary channel’s served recommendation first.
+ * Unusable Flash choices are retained while following their defaults; an unusable chosen Pro model does not choose another
+ * channel. Per-Task choices retain M1's channel-default semantics, including a usable chosen Flash model on that channel.
+ */
+export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ResolvedModelRole {
+  const roleId = modelRoleIdOf(role)!;
+  const flash = modelTierOf(roleId) === 'flash';
   const connections = host.getModelServiceConnections();
-  const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
-  const connection = override.modelConnectionId === undefined
-    ? chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready')
-    : connections.find((candidate) => candidate.connectionId === override.modelConnectionId);
-  if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
-  // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
-  const selectedBinding = role === 'fast-interaction' ? connection.fastBinding ?? connection.binding : connection.binding;
-  const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: selectedBinding.modelId,
-    ...(selectedBinding.reasoningEffort === undefined ? {} : { reasoningEffort: selectedBinding.reasoningEffort }) }, override);
-  const record = modelServiceRuntimeBinding(selectedBinding.providerId, execution.modelId!, role === 'fast-interaction' ? 'fast' : 'main');
-  if (record === undefined) return null;
+  const choices = readModelRoleChoices(host.authority);
+  const choiceOf = (id: ModelRoleId) => choices.find(choice => choice.roleId === id);
+  const selectedPro = choiceOf('foreground-pro');
+  const pro = selectedPro === undefined
+    ? connections.find(candidate => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready')
+    : connections.find(candidate => candidate.connectionId === selectedPro.connectionId);
+  const modelOf = (connection: ModelServiceConnectionProjection | undefined, choice: ModelRoleChoiceInput | undefined) => connection === undefined ? null
+    : choice === undefined ? connection.binding : { ...host.modelServiceBinding(connection.binding.providerId, choice.modelId),
+      ...(choice.reasoningEffort === undefined ? {} : { reasoningEffort: choice.reasoningEffort }) };
+  const proChoice = roleId === 'underlying-pro' ? choiceOf(roleId) ?? selectedPro : selectedPro;
+  let effectiveConnection = roleId === 'underlying-pro' && proChoice !== undefined
+    ? connections.find(candidate => candidate.connectionId === proChoice.connectionId) : pro;
+  let effectiveModel = modelOf(effectiveConnection, proChoice);
+  let source: ModelRoleSource = 'pro-tier';
+  if (flash) {
+    source = 'follows-foreground-pro';
+    const foreground = choiceOf('foreground-flash');
+    const underlying = roleId === 'underlying-flash' ? choiceOf('underlying-flash') : undefined;
+    const recommended = roleId === 'underlying-flash' && underlying === undefined && pro?.credentialOperationState === 'ready'
+      ? modelServiceRecommendedModels(pro.binding.providerId)?.flash.find(id => modelServiceRuntimeBinding(pro.binding.providerId, id, 'fast') !== undefined)
+      : undefined;
+    const recommendation = pro && recommended ? { connectionId: pro.connectionId, modelId: recommended } : undefined;
+    for (const choice of [underlying, recommendation, foreground]) {
+      if (choice === undefined) continue;
+      const candidate = connections.find(entry => entry.connectionId === choice.connectionId);
+      if (candidate?.credentialOperationState !== 'ready') { source = 'flash-unavailable-follows-foreground-pro'; continue; }
+      if (modelServiceRouteRefusal(candidate.binding.providerId, choice.modelId, 'fast') !== null) { source = 'flash-not-served-follows-foreground-pro'; continue; }
+      effectiveConnection = candidate;
+      effectiveModel = modelOf(candidate, choice);
+      source = choice === recommendation ? 'channel-recommended-flash' : 'flash-tier';
+      break;
+    }
+  }
+  const perTask = override.modelConnectionId !== undefined;
+  const connection = perTask ? connections.find(candidate => candidate.connectionId === override.modelConnectionId) : effectiveConnection;
+  const model = perTask && !(flash && (source === 'flash-tier' || source === 'channel-recommended-flash') && connection === effectiveConnection)
+    ? connection?.binding ?? null : effectiveModel;
+  const resolved = { roleId, source, connection: connection ?? null, model, refusal: null,
+    usedChoice: connection === undefined || model === null ? null : { connectionId: connection.connectionId, modelId: override.modelId ?? model.modelId,
+      ...((override.reasoningEffort ?? model.reasoningEffort) === undefined ? {} : { reasoningEffort: override.reasoningEffort ?? model.reasoningEffort }) } };
+  if (connection === undefined || model === null || connection.credentialOperationState !== 'ready') return { ...resolved, binding: null };
+  const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: model.modelId,
+    ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }) }, override);
+  const record = modelServiceRuntimeBinding(model.providerId, execution.modelId!, flash ? 'fast' : 'main');
+  if (record === undefined) return { ...resolved, binding: null, refusal: modelServiceRouteRefusal(model.providerId, execution.modelId!, flash ? 'fast' : 'main') };
+  const refusal = modelChoiceEffortRefusal(host, model.providerId, record, execution.reasoningEffort);
+  if (refusal !== null) return { ...resolved, binding: null, refusal };
   const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint,
     ...(execution.reasoningEffort === undefined ? {} : { reasoningEffort: execution.reasoningEffort }) };
-  return (role === 'fast-interaction' ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding;
+  return { ...resolved, binding: (flash ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding };
 }
 
-export function selectFastRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'fast', reasoningEffort);
+/** The binding a role's Tasks take; the legacy ids still name the roles they always did (ADR 0107 §1 aliases). */
+export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+  return resolveModelRole(host, role, override).binding;
 }
 
-export function selectMainRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'main', reasoningEffort);
+/** Prepare and launch resolve a new choice. A remembered channel may fall back, while a stale effort needs explicit selection. */
+export function resolveModelLaunchChoice(host: ModelSearchSettingsHost, scope: TrustedOperationalScope,
+  role: 'main-editorial' | 'foreground-flash' | 'fast-interaction', override: RuntimeExecutionConfig, remembered: boolean): LaunchChoice {
+  let notice: string | undefined;
+  if (remembered && Object.keys(override).length > 0) {
+    const connection = resolveModelRole(host, role, override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }).connection;
+    if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
+        (!host.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId) ||
+          modelServiceRouteRefusal(connection.binding.providerId, override.modelId, role === 'main-editorial' ? 'main' : 'fast') !== null))) {
+      override = {};
+      notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
+    }
+  }
+  const { binding, connection, refusal } = resolveModelRole(host, role, override);
+  requireStore(scope !== 'ordinary-production' || refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
+  requireStore(scope !== 'ordinary-production' || binding !== null,
+    refusal === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', refusal ?? '请先在设置中连接可用模型。');
+  return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: binding === null ? {} : {
+    ...(connection === null ? {} : { modelConnectionId: connection.connectionId }), modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off',
+  } };
 }
 
-export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
+/** Legacy preparation and direct turns use a current default. Replaying a frozen plan bypasses this check. */
+export function requireCurrentModelRoleEffort(host: ModelSearchSettingsHost, role: ModelRoleId): void {
+  requireStore(resolveModelRole(host, role).refusal !== MODEL_EFFORT_STALE_REASON, 'MODEL_EFFORT_INVALID', MODEL_EFFORT_STALE_REASON);
 }
 
-export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
+/** The four roles as 设置 › 模型服务 lists them (Issue #1620). */
+export function getModelRoles(host: ModelSearchSettingsHost): ModelRoleResolutionProjection[] {
+  return MODEL_ROLE_IDS.map((roleId) => {
+    const role = resolveModelRole(host, roleId);
+    const state = role.connection?.credentialOperationState;
+    const status = state === 'ready' ? role.refusal === null ? 'available' : 'needs-attention' : state === 'needs-attention' ? 'needs-attention' : 'setup-required';
+    return { roleId, ...MODEL_ROLE_LABELS[roleId], tier: modelTierOf(roleId), source: role.source, sourceLabel: MODEL_ROLE_SOURCE_LABELS[role.source],
+      binding: role.model, status, statusLabel: status === 'available' ? '可用' : status === 'needs-attention' ? '需处理' : '需设置', statusDetail: role.refusal };
+  });
+}
+
+/** Restore the foreground Flash default without changing an explicit underlying choice. */
+export function clearFlashModel(host: ModelSearchSettingsHost): void {
+  host.assertAvailable();
+  host.transaction(host.authority, () => {
+    host.authority.prepare(`UPDATE model_service_connections SET updated_at = ? WHERE connection_id IN
+      (SELECT connection_id FROM model_role_choices WHERE role_id = 'foreground-flash')`).run(new Date().toISOString());
+    writeModelRoleChoice(host.authority, 'foreground-flash', null);
+  });
+}
+
+export function selectUnderlyingModel(host: ModelSearchSettingsHost, input: import('../shared/protocol.js').ServiceOperationMap['selectUnderlyingModel']['input']): void {
+  host.assertAvailable();
+  if ('inherit' in input) {
+    writeModelRoleChoice(host.authority, input.roleId, null);
+    return;
+  }
+  const tier = input.roleId === 'underlying-pro' ? 'main' : 'fast';
+  const refusal = modelServiceRouteRefusal(input.route, input.modelId, tier);
+  requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
+  requireStore(modelServiceRuntimeBinding(input.route, input.modelId, tier) !== undefined, 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
+  const connection = host.getModelServiceRouteConnection(input.route);
+  requireStore(connection?.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
+  requireStore(input.reasoningEffort === undefined || validReasoningEffort(input.reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
+  requireModelEffort(host, input.route, input.modelId, tier, input.reasoningEffort);
+  writeModelRoleChoice(host.authority, input.roleId, { connectionId: connection.connectionId, modelId: input.modelId,
+    ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }) });
+}
+
+export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'foreground-flash' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
   requireStore(reasoningEffort === undefined || validReasoningEffort(reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
-  const roles = role === 'both' ? ['main', 'fast'] as const : [role];
+  const roles = role === 'both' ? ['main', 'fast'] as const : [role === 'foreground-flash' ? 'fast' as const : role];
+  const refusal = roles.map((item) => modelServiceRouteRefusal(route, modelId, item)).find((reason) => reason !== null) ?? null;
+  requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
   requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
+  const requestedEffort = (item: 'main' | 'fast'): string | undefined => item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+  for (const item of roles) requireModelEffort(host, route, modelId, item,
+    requestedEffort(item) ?? (item === 'main' ? connection.binding : connection.fastBinding)?.reasoningEffort);
   host.transaction(host.authority, () => {
     for (const item of roles) {
-      const selected = item === 'main' ? 'selected' : 'fast_selected';
       const model = item === 'main' ? 'model_id' : 'fast_model_id';
-      host.authority.prepare(`UPDATE model_service_connections SET ${selected} = NULL WHERE ${selected} = 1`).run();
-      host.authority.prepare(`UPDATE model_service_connections SET ${selected} = 1, ${model} = ?, updated_at = ? WHERE connection_id = ?`)
+      host.authority.prepare(`UPDATE model_service_connections SET ${model} = ?, updated_at = ? WHERE connection_id = ?`)
         .run(modelId, new Date().toISOString(), connection.connectionId);
-      const chosenEffort = item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+      const chosenEffort = requestedEffort(item);
       if (chosenEffort !== undefined) {
         const effort = item === 'main' ? 'reasoning_effort' : 'fast_reasoning_effort';
         host.authority.prepare(`UPDATE model_service_connections SET ${effort} = ? WHERE connection_id = ?`).run(chosenEffort === 'off' ? null : chosenEffort, connection.connectionId);
       }
+      const saved = host.getModelServiceRouteConnection(route)!;
+      const selectedModel = item === 'main' ? saved.binding : saved.fastBinding!;
+      writeModelRoleChoice(host.authority, item === 'main' ? 'foreground-pro' : 'foreground-flash', {
+        connectionId: saved.connectionId, modelId, ...(selectedModel.reasoningEffort === undefined ? {} : { reasoningEffort: selectedModel.reasoningEffort }),
+      });
     }
   });
 }
@@ -283,9 +461,31 @@ export function modelServiceBinding(host: ModelSearchSettingsHost, route: ModelS
   return { ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel: label, approvedFallbackChain: [] };
 }
 
-export function getModelServiceModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId): import('../shared/protocol.js').DiscoveredModel[] {
-  const row = host.authority.prepare('SELECT cached_models, model_id, fast_model_id FROM model_service_connections WHERE connection_id = ?').get(MODEL_SERVICE_CONNECTION_IDS[route]) as SqlRow | undefined;
-  const cached = row === undefined ? [] : JSON.parse(asString(row.cached_models)) as import('../shared/protocol.js').DiscoveredModel[];
+function isCachedReasoningEvidence(value: unknown): value is DiscoveredModelReasoningEvidence {
+  if (!isRecord(value) || value.source !== 'provider-model-list' || typeof value.observedAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.observedAt)) || (value.completeness !== 'complete' && value.completeness !== 'partial')) return false;
+  const isLevelList = (levels: unknown) => levels === undefined ||
+    Array.isArray(levels) && levels.every((level) => DISCOVERED_EFFORT_LEVELS.includes(level as DiscoveredEffortLevel));
+  const isFlag = (flag: unknown) => flag === undefined || typeof flag === 'boolean';
+  const { effort, thinking } = value;
+  return (effort === undefined || isRecord(effort) && isFlag(effort.supported) &&
+    isLevelList(effort.levels) && isLevelList(effort.unsupportedLevels)) &&
+    (thinking === undefined || isRecord(thinking) && isFlag(thinking.supported) &&
+      (thinking.modes === undefined || isRecord(thinking.modes) && Object.entries(thinking.modes).every(([mode, flag]) =>
+        DISCOVERED_THINKING_MODES.some((known) => known === mode) && typeof flag === 'boolean')));
+}
+
+export function getModelServiceModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId): DiscoveredModel[] {
+  const row = host.authority.prepare('SELECT cached_models, model_id, fast_model_id, credential_operation_state, credential_updated_at FROM model_service_connections WHERE connection_id = ?')
+    .get(MODEL_SERVICE_CONNECTION_IDS[route]) as SqlRow | undefined;
+  const raw: unknown = row === undefined ? [] : JSON.parse(asString(row.cached_models));
+  const cached = Array.isArray(raw) ? raw.flatMap((entry: unknown): DiscoveredModel[] => {
+    if (!isRecord(entry) || typeof entry.modelId !== 'string' || !validModelServiceModelId(entry.modelId) || typeof entry.modelLabel !== 'string') return [];
+    const { modelId, modelLabel, reasoningEvidence } = entry;
+    if (row?.credential_operation_state === 'ready' && entry.credentialUpdatedAt === row.credential_updated_at &&
+      isCachedReasoningEvidence(reasoningEvidence)) return [{ modelId, modelLabel, reasoningEvidence }];
+    return [{ modelId, modelLabel }];
+  }) : [];
   const models = cached.length > 0 ? cached : modelServiceModels(route).map(({ modelId, modelLabel }) => ({ modelId, modelLabel }));
   if (row !== undefined) for (const modelId of [asString(row.model_id), asString(row.fast_model_id)]) {
     if (modelId && !models.some((model) => model.modelId === modelId)) models.push({ modelId, modelLabel: modelId });
@@ -293,10 +493,14 @@ export function getModelServiceModels(host: ModelSearchSettingsHost, route: Mode
   return models;
 }
 
-export function cacheModelServiceModels(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, models: readonly import('../shared/protocol.js').DiscoveredModel[]): void {
+export function cacheModelServiceModels(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, models: readonly DiscoveredModel[]): void {
   requireStore(models.every((model) => validModelServiceModelId(model.modelId) && typeof model.modelLabel === 'string' && model.modelLabel.length <= 200), 'MODEL_CATALOGUE_INVALID', '模型列表无效。');
+  const entries = models.map(({ modelId, modelLabel, reasoningEvidence }) => ({
+    modelId, modelLabel,
+    ...(isCachedReasoningEvidence(reasoningEvidence) ? { reasoningEvidence, credentialUpdatedAt: connection.credentialUpdatedAt } : {}),
+  }));
   host.authority.prepare('UPDATE model_service_connections SET cached_models = ? WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = ?')
-    .run(JSON.stringify(models.map(({ modelId, modelLabel }) => ({ modelId, modelLabel }))), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt, 'ready');
+    .run(JSON.stringify(entries), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt, 'ready');
 }
 
 export function recordModelConnectionTest(host: ModelSearchSettingsHost, connection: ModelServiceConnectionProjection, result: ModelConnectionTestStatus): void {
@@ -308,7 +512,7 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
     facts.credentialReference === connection.credentialReference && modelServiceChannelOf(facts.route) === connection.binding.providerId &&
-    facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33' || (facts.policyVersion === 'v34' || facts.policyVersion === 'v35'))) &&
+    facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33' || (facts.policyVersion === 'v34' || supportsEditorialMemoryPolicy(facts.policyVersion)))) &&
     allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
     (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
     (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),
@@ -330,8 +534,21 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   };
   readModelConnectionTest({ connection_test: JSON.stringify(sanitized), credential_updated_at: connection.credentialUpdatedAt,
     provider_id: connection.binding.providerId, credential_slot: connection.binding.credentialSlot, credential_reference: connection.credentialReference });
-  requireStore(host.authority.prepare(`UPDATE model_service_connections SET connection_test = ?
-      WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`)
-    .run(JSON.stringify(sanitized), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt).changes === 1,
-      'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
+  // The chosen lighter model's result is held in memory and leaves the stored slot, which keeps the main model's result;
+  // any other result — the main model's, or a model tested before it was chosen — is stored as before.
+  const lighter = connection.fastBinding !== undefined && connection.fastBinding.modelId === result.modelId && connection.binding.modelId !== result.modelId;
+  const where = `connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`;
+  const arguments_ = [connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt];
+  requireStore(lighter
+    ? host.authority.prepare(`SELECT 1 FROM model_service_connections WHERE ${where}`).get(...arguments_) !== undefined
+    : host.authority.prepare(`UPDATE model_service_connections SET connection_test = ? WHERE ${where}`).run(JSON.stringify(sanitized), ...arguments_).changes === 1,
+  'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
+  const held = HELD_CONNECTION_TESTS.get(host.authority) ?? new Map<string, Map<string, ModelConnectionTestStatus>>();
+  HELD_CONNECTION_TESTS.set(host.authority, held);
+  // A held result of an older credential is no longer valid; start the connection's set again.
+  const models = new Map([...(held.get(connection.connectionId) ?? [])].filter(([, kept]) => kept.credentialUpdatedAt === connection.credentialUpdatedAt));
+  models.delete(sanitized.modelId);
+  models.set(sanitized.modelId, sanitized);
+  if (models.size > MAX_HELD_MODELS_PER_CONNECTION) models.delete(models.keys().next().value!);
+  held.set(connection.connectionId, models);
 }

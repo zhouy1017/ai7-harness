@@ -349,12 +349,12 @@ describe('model capability profiles', () => {
   });
 
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
-    // The rows of the four routes that predate the provider documents, unchanged by moving into them,
-    // and the one row the DeepSeek official document adds (`deepseek-flash`, inert).
-    const PREDATING_ROUTE = /^(deepseek-open-platform|opencode-go|opencode-go-messages|opencode-go-responses)\//u;
-    expect(Object.keys(PROVIDER_MODEL_PROFILES).filter((key) => PREDATING_ROUTE.test(key)).sort()).toEqual([
+    // Route identity keeps the two Go protocols and Google's own Argon catalogue independent.
+    const GO_AND_DEEPSEEK_ROUTES = /^(deepseek-open-platform|opencode-go(?:-gemini|-messages|-responses)?)\//u;
+    expect(Object.keys(PROVIDER_MODEL_PROFILES).filter((key) => GO_AND_DEEPSEEK_ROUTES.test(key)).sort()).toEqual([
       'deepseek-open-platform/deepseek-flash',
       'deepseek-open-platform/deepseek-v4-pro',
+      'opencode-go-gemini/gemini-4-argon',
       // The same plan's `/messages` models, keyed by the second route that reaches them (S54b).
       'opencode-go-messages/minimax-m2.5', 'opencode-go-messages/minimax-m2.7', 'opencode-go-messages/minimax-m3',
       'opencode-go-messages/qwen3.6-plus', 'opencode-go-messages/qwen3.7-plus',
@@ -423,12 +423,13 @@ describe('model capability profiles', () => {
     expect(profile.capabilities).toMatchObject({ answerChannel: 'message-content-string', toolCalling: 'function', streaming: 'chat-completions-sse', structuredOutput: 'none' });
   });
 
-  it('declares every other model inert beside official, historical V4 and current V4.1 profiles, whichever path reaches it', () => {
+  it('keeps the undocumented legacy Go models inert in the evidence catalogue', () => {
     // The OpenCode Go plan's rows; every other document's rows are pinned inert in provider-configuration.test.ts.
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
-      .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
+      .filter((profile) => profile.route.startsWith('opencode-go') && profile.route !== 'opencode-go-gemini' &&
+        profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
     // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
-    // five it admits on `/messages` (S54b), and the two on `/responses` (S54c).
+    // five it admits on `/messages` (S54b) and two on `/responses` (S54c).
     expect(inert).toHaveLength(16);
     // One evidence record for one reading of the documentation pair, shared rather than restated —
     // by both paths, because reading which path a model is served on is the same reading.
@@ -461,8 +462,7 @@ describe('model capability profiles', () => {
       expect(normalizeModelResponse(profile, { output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }] }), profile.key)
         .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
     }
-    // Every id is distinct, so sixteen rows are sixteen models rather than one written sixteen ways.
-    expect(new Set(inert.map((profile) => profile.model)).size).toBe(16);
+    expect(new Set(inert.map((profile) => profile.model)).size).toBe(inert.length);
   });
 
   it('assembles each inert chat-completions model without a branch, as the live route bytes', () => {

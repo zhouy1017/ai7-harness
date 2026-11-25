@@ -10,6 +10,7 @@ import type {
   MaterialIndexProjection,
   MaterialIndexReason,
   MaterialSegmentsPageProjection,
+  RetrievalAssistMode,
   KnowledgeArtifactProjection,
   ExemplarBookProjection,
   ExemplarProjection,
@@ -27,7 +28,7 @@ import { MAINTENANCE_WITHDRAWN } from '../shared/maintenance-wording.js';
  * versions they used; nothing here is edited in place.
  */
 
-export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'house-words' | 'external';
+export type KnowledgeBaseTab = 'guidelines' | 'standard-tables' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'house-words' | 'external';
 
 export interface KnowledgeBaseTabView {
   readonly tab: KnowledgeBaseTab;
@@ -47,6 +48,12 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
     tab: 'guidelines',
     label: '审阅规范文件',
     holds: '审阅依据的规范文件与编号条款。',
+    pending: null,
+  },
+  {
+    tab: 'standard-tables',
+    label: '字表与词表',
+    holds: '规范字、字形对照、异形词与常用词表，供「规范用语核查」选用。',
     pending: null,
   },
   {
@@ -130,7 +137,7 @@ export function guidelineFixedStatement(document: Pick<ReviewGuidelineDocumentPr
   const categories = document.appliedBy.map((category) => `「${category.label}」`).join('、');
   const does = document.use === 'leads'
     ? `${categories}把基线分析里的线索变成批注，不按这里的条款找问题`
-    : `${categories}按 AI7 固定的事实核查契约执行，不读取这里的条款`;
+    : `${categories}按 AI7 固定的${technicalWords('事实核查契约', '事实核查规则')}执行，不读取这里的条款`;
   return `${does}。这是 AI7 的固定说明，不能导入新版本。`;
 }
 
@@ -323,6 +330,15 @@ export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '给谁用';
 export const LIBRARY_ELIGIBILITY_TERM = '是否可用于学习';
 export const LIBRARY_HOUSE = '本社';
+export const LIBRARY_USE = '给谁用…';
+export const LIBRARY_USE_LATER = '暂不使用';
+export const LIBRARY_USE_CONFIRM = '确认';
+export const LIBRARY_USE_SELECTED = '已选';
+export const LIBRARY_BOOKS_FIRST = '回到图书首页';
+export const libraryBookLabel = (title: string): string => `《${title}》`;
+export const libraryUseRecorded = (material: LibraryMaterialProjection, recorded: boolean): string => recorded
+  ? `已记录「${material.title}」的决定：${libraryReferenceLine(material)}。`
+  : `「${material.title}」的使用范围没有变化：${libraryReferenceLine(material)}。`;
 export const LIBRARY_SERIES = '书系';
 /** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */
 export const LIBRARY_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把资料归到书系。';
@@ -419,15 +435,11 @@ export function libraryEligibilityLine(material: Pick<LibraryMaterialProjection,
 }
 
 /** Whose Tasks may list it under 允许参考 (KB-007), or what it still waits for. */
-export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility'>): string {
+export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility' | 'attribution' | 'notUsed'>): string {
   if (material.reference.state === 'available') {
-    return material.reference.scope === 'book'
-      ? `《${material.reference.bookTitle}》的任务可以把它列进「允许参考」。`
-      : '每本书的任务都可以把它列进「允许参考」。';
+    return material.reference.scope === 'book' ? `《${material.reference.bookTitle}》的任务可参考` : '本社可参考';
   }
-  return material.eligibility?.choice === 'deferred'
-    ? '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。'
-    : '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。';
+  return material.notUsed !== undefined || material.eligibility?.choice === 'deferred' ? LIBRARY_USE_LATER : material.attribution === null ? '还不能参考：先选给谁用' : '还不能参考：请确认给谁用';
 }
 
 /** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
@@ -445,7 +457,7 @@ export function libraryDecisionLine(entry: LibraryMaterialDecisionProjection, in
 }
 
 export function libraryAdded(title: string): string {
-  return `已放入资料库：「${title}」；已允许任务参考。`;
+  return `已放入资料库：「${title}」。`;
 }
 
 export function libraryAttributed(title: string, where: string): string {
@@ -459,7 +471,7 @@ export function libraryEligibilityDecided(title: string, choice: string): string
 // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------------------
 
 /** The five layers of KB-009 in their order, and the two parts the text layer names: recognition and 来源译文. */
-export const MATERIAL_INDEX_LAYERS = ['original', 'metadata', 'text', 'recognition', 'translation', 'segments', 'vectors'] as const;
+export const MATERIAL_INDEX_LAYERS = ['original', 'metadata', 'text', 'recognition', 'translation', 'segments'] as const;
 export const MATERIAL_INDEX_LAYER_TERMS: Readonly<Record<(typeof MATERIAL_INDEX_LAYERS)[number], string>> = {
   original: '原件',
   metadata: '元数据',
@@ -467,18 +479,26 @@ export const MATERIAL_INDEX_LAYER_TERMS: Readonly<Record<(typeof MATERIAL_INDEX_
   recognition: '文字识别',
   translation: '来源译文',
   segments: '分段与锚点',
-  vectors: '相似段落检索',
 };
 export const MATERIAL_INDEX_TERM = '资料索引';
 /** What a layer this build does not provide says: never imitated, never hidden (Owner 2026-10-09, option 乙). */
 export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖）';
-/** 构建相似索引 (Issue #892): the item's vectors made on this machine, only when the editor asks. */
-export const MATERIAL_VECTORS_BUILD = '构建相似索引';
+/**
+ * 相似段落检索 (Issue #892): ranked by words on this machine as soon as the index is built, nothing to build (R5-F2c) — and,
+ * with a fast model connected, widened and re-ordered by it (R5-F2b), which sends the search words and the candidate snippets.
+ */
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
-export const MATERIAL_VECTORS_SEARCH_NOTE = '本机相似搜索仅供参考，原文以分段为准。';
+/** What a search may send, said beside every 相似段落检索 field before the editor searches (0.7.9 review 2.3). */
+export const RETRIEVAL_ASSIST_NOTE = '已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
+/** What left the machine for the search just answered, said beside its results: never 本机 when the words were sent. */
+export const RETRIEVAL_ASSIST_LINES: Readonly<Record<RetrievalAssistMode, string>> = {
+  'fast-model': '本次：较轻模型参与了扩展和重排。',
+  'fast-model-unused': '本次：已发给较轻模型，但没有用上，结果按本机字面检索。',
+  local: '本次：没有发送，只在本机按字面检索。',
+};
+export const MATERIAL_VECTORS_SEARCH_NOTE = `结果仅供参考，原文以分段为准。${RETRIEVAL_ASSIST_NOTE}`;
 export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
-export const MATERIAL_VECTORS_BUILD_FAILED = '暂时无法构建相似索引，请重试。';
 /** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
 export const MATERIAL_TRANSLATION_REQUEST = '生成来源译文';
 export const MATERIAL_TRANSLATION_FAILED = '暂时无法生成来源译文，请重试。';
@@ -504,11 +524,6 @@ export const MATERIAL_INDEX_REASONS: Readonly<Record<MaterialIndexReason, string
   get 'external-entity'() { return technicalWords('文件声明了实体或内部文档类型定义，AI7 为安全起见不读取', '为安全起见，AI7 不读取这个文件'); },
   'needs-recognition': '这份 PDF 没有可用的文字层（像是扫描件），需要先识别文字',
 };
-
-/** What makes an item's similarity vectors, in the editor's words (Issue #892). */
-export function materialEmbeddingLabel(identity: string): string {
-  return technicalWords(identity === 'ai7-embedding/stub-1' ? '本机内置相似向量（按字词相近）' : `本机模型 ${identity}`, '本机相似搜索');
-}
 
 /** One 相似段落检索 candidate's anchor: its page and place on it for a PDF, its position otherwise. */
 export function materialParagraphAnchorLabel(paragraph: number, page: number | null, pageParagraph: number | null): string {
@@ -591,22 +606,15 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
           : `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用${technicalWords('（这种格式没有页码，锚点是位置）')}`;
       }
       return '没有提取出全文，无从分段';
-    case 'vectors': {
-      const vectors = index.vectors;
-      if (state === 'pending') return waiting(index);
-      if (vectors === null) return '没有提取出全文，无从建立相似索引';
-      if (state === 'needs-model') {
-        // The model identity and digest are the developer layer's (Issue #1431 item 88); ordinary mode names the way in.
-        if (!technicalLayerVisible) return '需要安装相似搜索功能：在 设置 › 本机 › 相似索引模型 中添加';
-        return vectors.expectedDigest === null ? '需要模型文件：尚未选择嵌入依赖' : `需要模型文件：在 设置 › 本机 › 相似索引模型 放入摘要为 ${vectors.expectedDigest} 的模型文件`;
-      }
-      if (state === 'building') return `构建中… ${vectors.built} / ${vectors.total} 段`;
-      if (state === 'complete') return `已构建：${vectors.total} 段 · ${materialEmbeddingLabel(vectors.embedding)}`;
-      return vectors.built > 0
-        ? `未构建完：${vectors.built} / ${vectors.total} 段；可以继续「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`
-        : `未构建：可以「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`;
-    }
   }
+}
+
+/**
+ * 来源译文 as ordinary mode reads it (0.7.9 review, BUG-19): its progress, that it is done, or why it stopped — the layer's own
+ * line, the failure's code left to the developer layer.
+ */
+export function materialTranslationLine(index: MaterialIndexProjection): string {
+  return `${MATERIAL_TRANSLATION_TERM}：${materialIndexLayerLine(index, 'translation').replace(/（[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+）/gu, '')}`;
 }
 
 /**
@@ -632,7 +640,7 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
   }
   switch (outcome) {
     case 'complete':
-      return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。';
+      return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪。';
     case 'unsupported':
       return '资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。';
     case 'failed':

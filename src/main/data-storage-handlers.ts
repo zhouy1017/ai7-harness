@@ -7,6 +7,7 @@ import { ServiceClient } from './service-client.js';
 import type { PreferenceStore } from './preferences.js';
 import { envelope, requireDesktop } from './handler-guards.js';
 import type { OwnedRendererWindow } from './application-types.js';
+import type { RestoreOnQuit } from './application-quit.js';
 
 export function registerDataStorageHandlers(context: {
   chooseDatabaseExportFile: NativeFilePickers['chooseDatabaseExportFile'];
@@ -18,7 +19,8 @@ export function registerDataStorageHandlers(context: {
   service: ServiceClient;
   preferences: PreferenceStore;
   requireNothingUnsaved: () => void;
-  quitApplication: () => "quitting" | "blocked";
+  quitApplication: (restore?: RestoreOnQuit) => "quitting" | "blocked";
+  rollbackUpgrade: (() => Promise<RestoreOnQuit | undefined>) | undefined;
 }) {
   const { chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication } = context;
   // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file begins the preparation, and approving
@@ -181,10 +183,17 @@ export function registerDataStorageHandlers(context: {
 
   // 现在关闭 AI7 (Issue #434, S86c): the whole application closes, after every effect already asked for, unless a window still
   // holds changes not yet saved — then nothing closes and that window says so, as when the editor closes AI7 themselves.
-  ipcMain.handle(IPC_CHANNELS.quitApplication, (event) =>
+  ipcMain.handle(IPC_CHANNELS.quitApplication, (event, input: { rollbackUpgrade?: boolean }) =>
     envelope(async () => {
       requireSender(event);
-      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => ({ outcome: quitApplication() }));
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => {
+        if (input?.rollbackUpgrade === true) {
+          requireAuthority();
+          const restore = await context.rollbackUpgrade?.();
+          return { outcome: restore ? quitApplication(restore) : 'blocked' };
+        }
+        return { outcome:quitApplication() };
+      });
     }),
   );
 

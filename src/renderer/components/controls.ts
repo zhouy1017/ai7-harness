@@ -158,14 +158,26 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
   const renderOptions = (): void => {
     const options = Array.from(select.options);
     const query = filter.value.trim().toLocaleLowerCase();
-    const nextSignature = JSON.stringify([query, ...options.map((option) => [option.text, option.value, option.selected, optionDisabled(option), option.hidden, option.parentElement?.hidden])]);
+    const nextSignature = JSON.stringify([query, ...options.map((option) => [option.text, option.value, option.selected, optionDisabled(option), option.hidden, option.parentElement?.hidden, option.parentElement?.getAttribute('label')])]);
     if (nextSignature === signature) return;
     signature = nextSignature;
     const scrollTop = list.scrollTop;
     visible = []; rows = [];
     list.replaceChildren();
+    let previousGroup: Element | null = null;
+    let optionContainer = list;
     options.forEach((option, index) => {
       if (option.hidden || option.parentElement?.hidden || !option.text.toLocaleLowerCase().includes(query)) return;
+      const group = option.parentElement;
+      if (group !== previousGroup) {
+        optionContainer = list;
+        if (select.dataset['showOptionGroups'] === 'true' && group?.tagName === 'OPTGROUP') {
+          optionContainer = doc.createElement('div'); optionContainer.setAttribute('role', 'group'); optionContainer.setAttribute('aria-label', group.getAttribute('label') ?? '');
+          const heading = doc.createElement('div'); heading.className = 'field-note'; heading.setAttribute('aria-hidden', 'true'); heading.textContent = group.getAttribute('label');
+          optionContainer.append(heading); list.append(optionContainer);
+        }
+      }
+      previousGroup = group;
       const row = doc.createElement('div');
       row.className = 'ui-select-option';
       row.id = `${list.id}-${index}`;
@@ -180,7 +192,7 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
       row.addEventListener('click', (event) => { event.preventDefault(); choose(index); });
       row.addEventListener('pointermove', () => { if (!optionDisabled(option)) setActive(index, false); });
       if (!optionDisabled(option)) visible.push(index);
-      rows.push(row); list.append(row);
+      rows.push(row); optionContainer.append(row);
     });
     empty.hidden = rows.length > 0;
     if (!visible.includes(active)) active = visible.includes(select.selectedIndex) ? select.selectedIndex : visible[0] ?? -1;
@@ -393,7 +405,9 @@ export function mountMenuControls(root: HTMLElement): () => void {
       // Measure where the panel will stand: fixed, with the whole window to grow into, not inside its (maybe narrow) anchor.
       panel.style.left = `${8 - origin.left}px`;
       const width = Math.min(panel.offsetWidth, view.innerWidth - 16);
-      panel.style.left = `${Math.max(8, Math.min(rect.right - width, view.innerWidth - width - 8)) - origin.left}px`;
+      // A menu that sits left of the window's far edge may opt to open from its button's left edge, so it never reaches back over the sidebar.
+      const anchor = menu.dataset['menuAnchor'] === 'start' ? rect.left : rect.right - width;
+      panel.style.left = `${Math.max(8, Math.min(anchor, view.innerWidth - width - 8)) - origin.left}px`;
       const below = view.innerHeight - rect.bottom - 12;
       const upwards = below < Math.min(panel.scrollHeight, 200) && rect.top > below;
       panel.style.maxHeight = `${Math.max(48, (upwards ? rect.top : below) - 8)}px`;
@@ -551,6 +565,8 @@ export function tabButton(options: { label: string; id: string; panel: string; s
   button.tabIndex = options.selected ? 0 : -1;
   button.addEventListener('click', options.activate);
   button.addEventListener('keydown', (event) => {
+    // A chord is a command's, never the tab row's: Alt+← on a focused tab is 返回 (0.7.9 review, BUG-18).
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const tabs = Array.from(button.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     const index = tabs.indexOf(button);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1

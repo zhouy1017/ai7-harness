@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import type { FastRoleProvenance } from './fast-role/fast-role-execution.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -8,7 +9,6 @@ import {
   MATERIAL_TRANSLATION_LABEL,
   MAX_FRAME_BYTES,
   MAX_MATERIAL_SEGMENTS_PAGE,
-  MAX_MATERIAL_VECTOR_CANDIDATES,
   type LibraryMaterialFormat,
   type MaterialIndexLanguage,
   type MaterialIndexLayerState,
@@ -18,14 +18,11 @@ import {
   type MaterialTranslationProjection,
   type MaterialTranslationAttemptProjection,
   type ModelTextAttemptProvenance,
-  type MaterialVectorSearchProjection,
-  type MaterialVectorsProjection,
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import { UUID_PATTERN, canonicalRecord, hasExactKeys, isRecord, sha256Hex } from './analysis/canonical.js';
 import { DOC_CONVERTER_IDENTITY, convertDocManuscript } from './doc-manuscript.js';
 import { DOCX_PARSER_IDENTITY, MAX_ARCHIVE_BYTES, parseDocx, type ParsedDocxBlock } from './docx.js';
-import { cosineSimilarity, vectorBytes, vectorFromBytes, vectorNorm, type EmbeddingReadiness } from './knowledge/embedding.js';
 import {
   MATERIAL_FORMAT_CONVERTER_IDENTITIES,
   MaterialFormatRefusal,
@@ -55,25 +52,24 @@ import { TEXT_CONVERTER_IDENTITY, buildManuscriptPackage, convertTextManuscript 
  *    from its text layer by `pdfjs-dist` (the Commander's admission of the exact pin, ADR 0070 §3), and its anchors name the
  *    page: 第 p 页第 m 段, each paragraph on one page. A PDF with no text layer to speak of needs recognition (需要识别).
  *
- * Issue #892 adds the fifth layer and 来源译文, both made only when the editor asks and both kept beside the build they were
- * made from — so a build made again, from a text read again, starts without them and nothing stale is ever served:
+ * 相似段落检索 needs no layer of its own: R5-F2c retired the similarity vectors Issue #892 added (ADR 0107 §4 point 5), and
+ * the item's paragraphs are ranked on this machine by the lexical ranker as soon as the index is built; a search ranks
+ * paragraphs, and the words are read where the anchor points (ADR 0026).
  *
- * 5. similarity vectors (相似段落检索) — one vector per paragraph, made on this machine by the store's `EmbeddingProvider`
- *    and recorded under its identity; a search ranks paragraphs, and the words are read where the anchor points (ADR 0026);
- *
- * and, for an item whose text is not Chinese, its 来源译文 — each paragraph's machine translation, labelled and attributed to
- * the paragraph it translates, never in its place, made by the Fast Interaction Role under the selected policy's rule.
+ * Issue #892 adds, for an item whose text is not Chinese, its 来源译文 — each paragraph's machine translation, labelled and attributed to
+ * the paragraph it translates, never in its place, made by the Fast Interaction Role under the selected policy's rule — made only
+ * when the editor asks and kept beside the build it was made from, so a build made again starts without it.
  *
  * Text recognition for scans (OCR) is not provided: such a PDF is said to need it, never imitated.
  *
  * An index grants nothing. It is no Run Source Scope; a Task reads it read-only, only for an item its plan lists under
- * 允许参考 at the exact index version it pinned (`readForTask`, `queryForTask`), and what any Task sends stays bounded by its
- * plan. Its vectors and translations grant no scope, egress or learning eligibility either.
+ * 允许参考 at the exact index version it pinned (`readForTask`), and what any Task sends stays bounded by its plan. Its
+ * translations grant no scope, egress or learning eligibility either.
  *
  * Schema revision 67 owns two append-only relations: one build per item per indexer identity — its state, the metadata
  * and layer facts, and the digest over its segments — and the segments of a complete build, one row per paragraph.
- * Revision 76 (Issue #892) adds two more, append-only as well: the vectors of a build's paragraphs, by provider identity,
- * and their 来源译文. Neither moves a byte of revision 67's.
+ * Revision 76 (Issue #892) adds the 来源译文 of a build's paragraphs, append-only as well, without moving a byte of revision
+ * 67's. Revision 117 no longer has revision 76's vector table (R5-F2c; ADR 0107 §4 point 5).
  */
 
 export const MATERIAL_INDEX_SCHEMA_SQL = {
@@ -98,44 +94,16 @@ export const MATERIAL_INDEX_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MATERIAL_INDEX_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MATERIAL_INDEX_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  material_index_builds: ['material_id>library_materials.material_id:NO ACTION/NO ACTION/NONE'],
-  material_index_segments: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-};
+export const MATERIAL_INDEX_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_index_builds: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+  material_index_segments: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /**
- * Revision 76's relations (Issue #892): the similarity vectors of a build's paragraphs — one per paragraph per provider
- * identity, naming the build's digest and the segment's own digest it was made from — and the 来源译文 of a build's
- * paragraphs, one per paragraph, its record naming the model and the policy rule it was made under. Both append-only.
+ * Revision 76's relation (Issue #892): the 来源译文 of a build's paragraphs, one per paragraph, its record naming the model and
+ * the policy rule it was made under. Append-only.
  */
 export const MATERIAL_INDEX_LAYER_SCHEMA_SQL = {
-  material_index_vectors: `CREATE TABLE material_index_vectors (
-  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),
-  index_sha256 TEXT NOT NULL CHECK(length(index_sha256) = 64),
-  embedding TEXT NOT NULL CHECK(length(embedding) BETWEEN 1 AND 256),
-  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
-  segment_sha256 TEXT NOT NULL CHECK(length(segment_sha256) = 64),
-  dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 4096),
-  vector BLOB NOT NULL CHECK(length(vector) = dimensions * 4),
-  norm REAL NOT NULL CHECK(norm >= 0),
-  recorded_at TEXT NOT NULL,
-  PRIMARY KEY(index_id, embedding, ordinal)
-) STRICT`,
   material_index_translations: `CREATE TABLE material_index_translations (
   index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
@@ -148,28 +116,9 @@ export const MATERIAL_INDEX_LAYER_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MATERIAL_INDEX_LAYER_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MATERIAL_INDEX_LAYER_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  material_index_vectors: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-  material_index_translations: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-};
-
-/** The revision that adds them; a store stamped at or above it must already hold them exactly. */
-const MATERIAL_INDEX_LAYER_REVISION = 76;
+export const MATERIAL_INDEX_LAYER_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_index_translations: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /** Revision 84: one bounded, payload-free record per actual translation batch attempt; no invented historical attempts. */
 export const MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL = {
@@ -182,34 +131,9 @@ export const MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL = {
   sha256 TEXT NOT NULL CHECK(length(sha256) = 64)
 ) STRICT`,
 } as const;
-export const MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL = {
-  material_translation_attempts_no_update: `CREATE TRIGGER material_translation_attempts_no_update
-    BEFORE UPDATE ON material_translation_attempts
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`,
-  material_translation_attempts_no_delete: `CREATE TRIGGER material_translation_attempts_no_delete
-    BEFORE DELETE ON material_translation_attempts
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`,
-} as const;
-export const MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS = {
-  material_translation_attempts: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-} as const;
-
-export function initializeMaterialTranslationAttemptSchema(db: DatabaseSync, version: number): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'material_translation_attempts'").get() !== undefined) {
-    validateMaterialTranslationAttemptSchema(db);
-    return;
-  }
-  requireIndex(version < 84, 'SCHEMA_INVALID', '来源译文尝试记录表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of [...Object.values(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL), ...Object.values(MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL)]) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
+export const MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_translation_attempts: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /** Closed metadata only; shared by persisted connection tests and translation attempt readers. */
 export function isModelTextAttemptProvenance(value: unknown): value is ModelTextAttemptProvenance {
@@ -328,55 +252,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 function foldSql(sql: string): string {
   return sql.replace(/\s+/gu, ' ').trim();
-}
-
-/**
- * Revision 76's relations (Issue #892), created once before the version is stamped: a store that predates them gains two
- * empty relations and nothing existing moves. A store that holds them must hold them exactly; one stamped 76 or later
- * without them is refused.
- */
-export function initializeMaterialIndexLayerSchema(db: DatabaseSync, version: number): void {
-  const present = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).filter((table) => db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined);
-  if (present.length > 0) {
-    validateMaterialIndexLayerSchema(db);
-    return;
-  }
-  requireIndex(version < MATERIAL_INDEX_LAYER_REVISION, 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MATERIAL_INDEX_LAYER_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MATERIAL_INDEX_LAYER_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Material index layer schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** Every relation and trigger of revision 76 exactly as written, and nothing of it missing. */
-export function validateMaterialIndexLayerSchema(db: DatabaseSync): void {
-  for (const [name, sql] of [...Object.entries(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.entries(MATERIAL_INDEX_LAYER_TRIGGER_SQL)]) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;
-    requireIndex(row !== undefined && typeof row.sql === 'string' && foldSql(row.sql) === foldSql(sql), 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表结构不兼容。');
-  }
-}
-
-/** Revision 67's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeMaterialIndexSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MATERIAL_INDEX_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Material index schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 // ---- the segment layer: sentences, and the language ---------------------------------------------------------------
@@ -811,55 +686,21 @@ export interface MaterialTaskReading {
   readonly next: number | null;
 }
 
-/**
- * One candidate of a similarity search (Issue #892; ADR 0026): a pointer to a paragraph of a pinned build, ranked by the
- * cosine of its vector and the query's, with a short preview. It is never a quotation source: the words are read where the
- * anchor points, at the pinned build (`readForTask` from `ordinal`).
- */
-export interface MaterialVectorCandidate {
-  readonly materialId: string;
-  readonly indexDigest: string;
-  readonly ordinal: number;
-  readonly page: number | null;
-  readonly anchor: string;
-  readonly score: number;
-  readonly preview: string;
-}
-
-/** A Task's similarity search over the items its plan pinned (Issue #892). */
-export interface MaterialVectorQuery {
-  /** The provider identity the query and the vectors it was compared with were made by. */
-  readonly embedding: string;
-  /** The best `k`, highest score first; ties in the items' and paragraphs' order. */
-  readonly candidates: ReadonlyArray<MaterialVectorCandidate>;
-  /** Pinned items whose pinned build holds no complete vectors of this provider, or a provider not ready: not searched. */
-  readonly unsearched: ReadonlyArray<{ readonly materialId: string; readonly reason: 'vectors-not-built' | 'embedding-not-ready' }>;
-}
-
-/** The provider facts a projection or a search reads: what it is and whether it can embed now. */
-export interface MaterialEmbeddingFacts {
-  readonly identity: string;
-  readonly dimensions: number;
-  readonly readiness: EmbeddingReadiness;
-}
-
-/** What the store knows of the two on-request layers beyond the ledger: work under way, and whether 来源译文 may be asked. */
+/** What the store knows of the 来源译文 layer beyond the ledger: work under way, and whether it may be asked. */
 export interface MaterialLayerActivity {
-  readonly embedding: MaterialEmbeddingFacts;
-  readonly vectorsBuilding: boolean;
   readonly translating: boolean;
   readonly translationRequest: MaterialTranslationProjection['request'];
   readonly translationFailure: string | null;
 }
 
-/** One paragraph a vector or a translation is still to be made for. */
+/** One paragraph a translation is still to be made for. */
 export interface MaterialLayerTarget {
   readonly ordinal: number;
   readonly text: string;
   readonly sha256: string;
 }
 
-/** The longest preview a search candidate carries, in code units. */
+/** The longest preview a 相似段落检索 candidate carries, in code units. */
 const PREVIEW_CODE_UNITS = 120;
 /** Leave room for the page metadata and service envelope beside translated paragraphs. */
 const MATERIAL_SEGMENTS_PAGE_BYTES = MAX_FRAME_BYTES - 8_192;
@@ -1053,16 +894,16 @@ export class MaterialIndexLedger {
   /**
    * The item's index as its card reads it (KB-009): every layer's state honestly, recognition (OCR) as not provided. `queue`
    * says whether the store is building it now or it waits its turn, when no build exists yet; `activity` what the store is
-   * making of the two on-request layers (Issue #892) and whether 来源译文 may be asked.
+   * making of 来源译文 (Issue #892) and whether it may be asked.
    */
   projection(material: IndexedMaterial, queue: 'queued' | 'indexing', activity: MaterialLayerActivity): MaterialIndexProjection {
     const build = this.current(material.materialId);
     if (build === null) {
       return {
-        state: queue, reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
+        state: queue, reason: null, builtAt: null, digest: null, metadata: null, translation: null,
         layers: {
           original: 'complete', metadata: 'pending', text: 'pending', recognition: material.format === 'PDF' ? 'pending' : 'not-needed',
-          translation: 'pending', segments: 'pending', vectors: 'pending',
+          translation: 'pending', segments: 'pending',
         },
       };
     }
@@ -1071,20 +912,8 @@ export class MaterialIndexLedger {
     // A scan's text waits for recognition, which is not provided (OCR, Issue #892): said, never imitated.
     const recognition: MaterialIndexLayerState = build.reason === 'needs-recognition' || build.reason === 'needs-local-dependency' && material.format === 'PDF'
       ? 'deferred' : 'not-needed';
-    let vectors: MaterialVectorsProjection | null = null;
     let translation: MaterialTranslationProjection | null = null;
     if (build.state === 'complete') {
-      const facts = this.#vectorFacts(build.indexId, activity.embedding.identity);
-      const readiness = activity.embedding.readiness;
-      vectors = {
-        state: readiness.state !== 'ready' ? 'needs-model' : activity.vectorsBuilding ? 'building' : facts.built === build.segmentCount ? 'complete' : 'not-built',
-        embedding: activity.embedding.identity,
-        dimensions: activity.embedding.dimensions,
-        built: facts.built,
-        total: build.segmentCount,
-        builtAt: facts.builtAt,
-        expectedDigest: readiness.state === 'ready' ? null : readiness.expectedDigest,
-      };
       if (build.metadata.language === 'other') {
         const translated = this.#translationFacts(build.indexId);
         const lastAttempt = this.lastTranslationAttempt(build.indexId);
@@ -1109,13 +938,11 @@ export class MaterialIndexLedger {
       builtAt: build.recordedAt,
       digest: build.sha256,
       metadata: build.metadata,
-      vectors,
       translation,
       layers: {
         original: 'complete', metadata: 'complete', text, recognition,
         translation: translation?.state ?? (build.state !== 'complete' ? text : 'not-needed'),
         segments: text,
-        vectors: vectors?.state ?? text,
       },
     };
   }
@@ -1291,18 +1118,10 @@ export class MaterialIndexLedger {
     });
   }
 
-  // ---- the two on-request layers (Issue #892) ------------------------------------------------------------------------
+  // ---- 来源译文, the on-request layer (Issue #892) ------------------------------------------------------------------------
 
   #layerPresent(table: keyof typeof MATERIAL_INDEX_LAYER_SCHEMA_SQL | keyof typeof MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL): boolean {
     return this.#db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined;
-  }
-
-  /** How many of a build's paragraphs have their vector by `embedding`, and when the last was recorded. */
-  #vectorFacts(indexId: string, embedding: string): { built: number; builtAt: string | null } {
-    if (!this.#layerPresent('material_index_vectors')) return { built: 0, builtAt: null };
-    const row = this.#db.prepare('SELECT count(*) AS built, max(recorded_at) AS built_at FROM material_index_vectors WHERE index_id = ? AND embedding = ?')
-      .get(indexId, embedding) as SqlRow;
-    return { built: integer(row.built), builtAt: row.built_at === null ? null : String(row.built_at) };
   }
 
   /** How many of a build's paragraphs have their 来源译文, and the model that made the latest. */
@@ -1343,15 +1162,11 @@ export class MaterialIndexLedger {
     return found;
   }
 
-  /** A complete current build's paragraphs that still lack a row in `table` (by `embedding` for vectors), at most `limit`. */
-  #targets(build: StoredBuild, table: 'material_index_vectors' | 'material_index_translations', embedding: string | null, limit: number): MaterialLayerTarget[] {
-    const rows = (table === 'material_index_vectors'
-      ? this.#db.prepare(`SELECT s.* FROM material_index_segments s WHERE s.index_id = ? AND NOT EXISTS
-          (SELECT 1 FROM material_index_vectors v WHERE v.index_id = s.index_id AND v.embedding = ? AND v.ordinal = s.ordinal) ORDER BY s.ordinal LIMIT ?`)
-        .all(build.indexId, embedding, limit)
-      : this.#db.prepare(`SELECT s.* FROM material_index_segments s WHERE s.index_id = ? AND NOT EXISTS
+  /** A complete current build's paragraphs that still have no 来源译文, at most `limit`. */
+  #targets(build: StoredBuild, limit: number): MaterialLayerTarget[] {
+    const rows = this.#db.prepare(`SELECT s.* FROM material_index_segments s WHERE s.index_id = ? AND NOT EXISTS
           (SELECT 1 FROM material_index_translations t WHERE t.index_id = s.index_id AND t.ordinal = s.ordinal) ORDER BY s.ordinal LIMIT ?`)
-        .all(build.indexId, limit)) as SqlRow[];
+      .all(build.indexId, limit) as SqlRow[];
     return rows.map((row) => {
       const segment = this.#segment(row, build.indexId);
       return { ordinal: segment.ordinal, text: segment.text, sha256: segment.sha256 };
@@ -1359,159 +1174,15 @@ export class MaterialIndexLedger {
   }
 
   /**
-   * 构建相似索引's next paragraphs (Issue #892): the item's current build — complete, every segment verified — and up to
-   * `limit` of its paragraphs without a vector by `embedding`, in order. None left means its vectors are complete.
+   * 相似段落检索 in an item's 查看索引 (since R5-F2c): every paragraph of the item's current build, verified, in order, with its
+   * anchor and preview, read in one statement for the lexical ranker; read-only. Refused while the index is not built.
    */
-  vectorTargets(materialId: string, embedding: string, limit: number): { indexId: string; indexSha256: string; total: number; targets: MaterialLayerTarget[] } {
-    requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(limit) && limit >= 1, 'MATERIAL_INDEX_INVALID', '资料标识无效。');
-    requireIndex(this.#layerPresent('material_index_vectors'), 'MATERIAL_INDEX_NOT_READY', '这份资料的相似索引还不能建立。');
+  searchableParagraphs(materialId: string): { indexDigest: string; paragraphs: Array<{ ordinal: number; text: string; page: number | null; pageParagraph: number | null; preview: string }> } {
+    requireIndex(UUID_PATTERN.test(materialId), 'MATERIAL_INDEX_INVALID', '资料标识无效。');
     const build = this.#complete(materialId);
-    return { indexId: build.indexId, indexSha256: build.sha256, total: build.segmentCount, targets: this.#targets(build, 'material_index_vectors', embedding, limit) };
-  }
-
-  /**
-   * Some paragraphs' vectors recorded, inside the caller's transaction (Issue #892): each against the build it was made from,
-   * by its digest, and the segment digest it was made from; a paragraph that already has its vector by this identity, or a
-   * build that is gone, refuses the write. Nothing earlier is touched.
-   */
-  recordVectors(
-    target: { readonly indexId: string; readonly indexSha256: string },
-    embedding: { readonly identity: string; readonly dimensions: number },
-    rows: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string; readonly vector: Float32Array }>,
-    recordedAt = new Date().toISOString(),
-  ): void {
-    const build = this.#db.prepare('SELECT sha256 FROM material_index_builds WHERE index_id = ?').get(target.indexId) as SqlRow | undefined;
-    requireIndex(build !== undefined && build.sha256 === target.indexSha256, 'MATERIAL_INDEX_MOVED', '这份资料的索引版本已不在本机。');
-    const segment = this.#db.prepare('SELECT sha256 FROM material_index_segments WHERE index_id = ? AND ordinal = ?');
-    const insert = this.#db.prepare(
-      `INSERT INTO material_index_vectors(index_id, index_sha256, embedding, ordinal, segment_sha256, dimensions, vector, norm, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const row of rows) {
-      requireIndex(row.vector.length === embedding.dimensions && row.vector.every(Number.isFinite), 'MATERIAL_INDEX_INVALID', '相似向量无效。');
-      requireIndex((segment.get(target.indexId, row.ordinal) as SqlRow | undefined)?.sha256 === row.sha256, 'MATERIAL_INDEX_MOVED', '这份资料的分段已不是建立相似索引时读到的样子。');
-      insert.run(target.indexId, target.indexSha256, embedding.identity, row.ordinal, row.sha256, embedding.dimensions, vectorBytes(row.vector), vectorNorm(row.vector), recordedAt);
-    }
-  }
-
-  /**
-   * Every vector of a verified build by `embedding`, each matched to its build's digest, the segment it was made from, its
-   * dimensions and its recorded norm; `null` when not every paragraph has one yet.
-   */
-  #vectors(build: StoredBuild, embedding: MaterialEmbeddingFacts): Array<{ ordinal: number; vector: Float32Array; norm: number }> | null {
-    if (!this.#layerPresent('material_index_vectors')) return null;
-    const rows = this.#db.prepare(
-      `SELECT v.*, s.sha256 AS segment_row_sha256 FROM material_index_vectors v
-       LEFT JOIN material_index_segments s ON s.index_id = v.index_id AND s.ordinal = v.ordinal
-       WHERE v.index_id = ? AND v.embedding = ? ORDER BY v.ordinal`,
-    ).all(build.indexId, embedding.identity) as SqlRow[];
-    if (rows.length !== build.segmentCount) return null;
-    return rows.map((row, index) => {
-      const bytes = row.vector instanceof Uint8Array ? row.vector : null;
-      const vector = bytes === null ? null : vectorFromBytes(bytes, embedding.dimensions);
-      const norm = Number(row.norm);
-      requireIndex(integer(row.ordinal) === index + 1 && row.index_sha256 === build.sha256 && row.segment_sha256 === row.segment_row_sha256 &&
-        integer(row.dimensions) === embedding.dimensions && vector !== null && Math.abs(vectorNorm(vector) - norm) <= 1e-4 * Math.max(1, norm),
-      'MATERIAL_INDEX_RECORD_INVALID', '资料索引的相似向量记录已损坏。');
-      return { ordinal: index + 1, vector, norm };
-    });
-  }
-
-  /**
-   * The best `k` of a build's paragraphs for a query vector: highest cosine first, the earlier paragraph first on a tie. A
-   * paragraph nothing like the query (a cosine of zero or less) is no candidate.
-   */
-  #rank(vectors: ReadonlyArray<{ ordinal: number; vector: Float32Array; norm: number }>, query: Float32Array, k: number): Array<{ ordinal: number; score: number }> {
-    const queryNorm = vectorNorm(query);
-    return vectors.map((entry) => ({ ordinal: entry.ordinal, score: cosineSimilarity(entry.vector, entry.norm, query, queryNorm) }))
-      .filter((entry) => entry.score > 0)
-      .sort((left, right) => right.score - left.score || left.ordinal - right.ordinal)
-      .slice(0, k);
-  }
-
-  #segmentAt(indexId: string, ordinal: number): StoredSegment {
-    const row = this.#db.prepare('SELECT * FROM material_index_segments WHERE index_id = ? AND ordinal = ?').get(indexId, ordinal) as SqlRow | undefined;
-    requireIndex(row !== undefined, 'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录已损坏。');
-    return this.#segment(row, indexId);
-  }
-
-  /**
-   * 相似段落检索 in an item's 查看索引 (Issue #892): its current build's paragraphs nearest the query, by the vectors the editor
-   * built; read-only. Refused while the vectors are not complete, or the provider cannot embed.
-   */
-  search(materialId: string, embedding: MaterialEmbeddingFacts, query: Float32Array, k: number): MaterialVectorSearchProjection {
-    requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(k) && k >= 1 && k <= MAX_MATERIAL_VECTOR_CANDIDATES, 'MATERIAL_INDEX_INVALID', '检索条件无效。');
-    const build = this.#complete(materialId);
-    requireIndex(embedding.readiness.state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符。');
-    const vectors = this.#vectors(build, embedding);
-    requireIndex(vectors !== null, 'MATERIAL_VECTORS_NOT_BUILT', '这份资料的相似索引还没有建好：先「构建相似索引」。');
-    return {
-      materialId,
-      indexDigest: build.sha256,
-      embedding: embedding.identity,
-      candidates: this.#rank(vectors, query, k).map(({ ordinal, score }) => {
-        const segment = this.#segmentAt(build.indexId, ordinal);
-        return { ordinal, page: segment.page, pageParagraph: segment.pageParagraph, score: Math.round(score * 10_000) / 10_000, preview: previewOf(segment.text) };
-      }),
-    };
-  }
-
-  /**
-   * A Task's similarity search (Issue #892; ADR 0026, ADR 0047): read-only, within its plan boundary exactly as `readForTask`
-   * — every item searched is one its plan lists, at the build its plan pinned, which this Book's Tasks may still list; an item
-   * named that the plan does not list, an item no longer referable, or a pinned build gone, refuses the whole search. Each
-   * pinned build is searched by its own vectors; one without complete vectors of this provider is listed as not searched,
-   * never built here. Nothing is written, sent or scheduled, and no scope, egress or learning eligibility follows from it.
-   */
-  queryForTask(
-    boundary: MaterialReferenceBoundary,
-    materialIds: ReadonlyArray<string> | undefined,
-    embedding: MaterialEmbeddingFacts,
-    query: Float32Array | null,
-    k: number,
-    available: MaterialReferenceAvailability,
-    titleOf: (materialId: string) => string,
-  ): MaterialVectorQuery {
-    requireIndex(UUID_PATTERN.test(boundary.bookId) && Number.isSafeInteger(k) && k >= 1 && k <= MAX_MATERIAL_VECTOR_CANDIDATES &&
-      (materialIds === undefined || materialIds.every((id) => UUID_PATTERN.test(id))), 'MATERIAL_INDEX_INVALID', '检索条件无效。');
-    const pins = materialIds === undefined ? boundary.references : materialIds.map((materialId) => {
-      const pin = boundary.references.find((reference) => reference.materialId === materialId);
-      requireIndex(pin !== undefined, 'MATERIAL_OUTSIDE_PLAN', '这份资料不在这项任务计划的「允许参考」里。');
-      return pin;
-    });
-    const builds = pins.map((pin) => {
-      requireIndex(available(pin.materialId, boundary.bookId), 'MATERIAL_REFERENCE_UNAVAILABLE', '这份资料现在不能列进这本书任务的「允许参考」。');
-      return { pin, build: this.#pinned(pin.materialId, pin.indexDigest) };
-    });
-    const unsearched: Array<MaterialVectorQuery['unsearched'][number]> = [];
-    const ranked: Array<{ materialId: string; build: StoredBuild; ordinal: number; score: number }> = [];
-    for (const { pin, build } of builds) {
-      if (embedding.readiness.state !== 'ready' || query === null) {
-        unsearched.push({ materialId: pin.materialId, reason: 'embedding-not-ready' });
-        continue;
-      }
-      const vectors = this.#vectors(build, embedding);
-      if (vectors === null) {
-        unsearched.push({ materialId: pin.materialId, reason: 'vectors-not-built' });
-        continue;
-      }
-      for (const entry of this.#rank(vectors, query, k)) ranked.push({ materialId: pin.materialId, build, ...entry });
-    }
-    const order = new Map(builds.map(({ pin }, index) => [pin.materialId, index]));
-    const best = ranked.sort((left, right) => right.score - left.score || order.get(left.materialId)! - order.get(right.materialId)! || left.ordinal - right.ordinal).slice(0, k);
-    return {
-      embedding: embedding.identity,
-      candidates: best.map(({ materialId, build, ordinal, score }) => {
-        const segment = this.#segmentAt(build.indexId, ordinal);
-        return {
-          materialId, indexDigest: build.sha256, ordinal, page: segment.page,
-          anchor: materialParagraphCitation(titleOf(materialId), ordinal, pageOf(segment)),
-          score: Math.round(score * 10_000) / 10_000,
-          preview: previewOf(segment.text),
-        };
-      }),
-      unsearched,
-    };
+    return { indexDigest: build.sha256, paragraphs: this.#segments(build.indexId, 1, build.segmentCount).map((segment) => ({
+      ordinal: segment.ordinal, text: segment.text, page: segment.page, pageParagraph: segment.pageParagraph, preview: previewOf(segment.text),
+    })) };
   }
 
   /**
@@ -1523,7 +1194,7 @@ export class MaterialIndexLedger {
     requireIndex(this.#layerPresent('material_index_translations'), 'MATERIAL_INDEX_NOT_READY', '这份资料的来源译文还不能生成。');
     const build = this.#complete(materialId);
     requireIndex(build.metadata.language === 'other', 'MATERIAL_TRANSLATION_NOT_NEEDED', '这份资料是中文，不需要来源译文。');
-    return { indexId: build.indexId, indexSha256: build.sha256, total: build.segmentCount, targets: this.#targets(build, 'material_index_translations', null, limit) };
+    return { indexId: build.indexId, indexSha256: build.sha256, total: build.segmentCount, targets: this.#targets(build, limit) };
   }
 
   /** How many of the item's current build's paragraphs still have no 来源译文. */

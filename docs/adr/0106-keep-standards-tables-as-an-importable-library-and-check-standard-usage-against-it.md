@@ -140,6 +140,8 @@ The editor sees only the tables they imported (direction 2). The source file and
 | GF 1001-2001 《第一批异形词整理表》 | 词形 | 国家规范 | 338 main groups; the 44 appendix groups carry the condition 「附录，仅供参考」 |
 | 《现代汉语常用词表（第2版）》 (the default 常用词表) | 常用词 | 辞书推荐 | 56,462 words with their frequency ranks, from the repository transcription at commit `712fb0f` |
 
+> Commander clarification, 2026-11-21, following §6 and §10: the condition of the 44 appendix groups is the data's own text, 「2001年附录参考；须按2013年字表及具体语境复核。」, kept verbatim so that results pinned to version 1 read the same; 「附录，仅供参考」 in the table above was a paraphrase. The 44 groups also carry the source 「附录」, so the main / appendix split lives in the data and not only in a note's wording (R5-L1, [#1649](https://github.com/zhouy1017/ai7-harness/issues/1649)).
+
 They behave like any imported table: they can be disabled, deleted, or replaced by 导入新版本 (e.g. a corrected Annex 1 that adds the ~151 missing forms). A deleted pre-installed table can be put back with 恢复预装字表; the program keeps its seed. No other dictionary table is shipped: 《现代汉语词典》, 《现代汉语规范词典》 and the like stay house-imported.
 
 **The default 常用词表's rights and content** (direction 6):
@@ -183,7 +185,7 @@ The card shows the strength label first (国家规范（应改）, 辞书推荐�
 
 The library's relations are part of **revision 117**, R5's one new revision (ADR 0105 §4). They are not a later additive revision. Two reasons:
 - the R5 upgrade installs the pre-installed tables in the same verified switch;
-- 0.8.0 ships Data Version 2 once.
+- 0.7.9 ships Data Version 2 once.
 
 The relations, roughly:
 - the table (kind, name, origin pre-installed / imported, enabled, current version);
@@ -201,6 +203,8 @@ Versions are immutable while the table exists. Deletion is allowed (direction 3(
 - **Database export and replace-all import** carry them.
 
 ### 10 · Delivery
+
+> Owner 2026-11-24：本轮作为 0.7.9 交付，0.8.0 待 Owner 额外审阅后再定
 
 Five slices join R5. The order is in the [development plan](../development/development-plan.md) R5 section:
 

@@ -1,7 +1,7 @@
 /**
  * A minimal DOM for renderer unit tests that run in Node (Issue #423, slice 7a): elements with attributes, `dataset`, children,
  * form-control properties, bubbling events, focus and a small selector engine (tag, `.class`, `[attr]`, `[attr="value"]`,
- * descendant combinators and comma lists). It is enough to mount one renderer surface and drive it by its data attributes; it
+ * descendant and spaced child (` > `) combinators and comma lists). It is enough to mount one renderer surface and drive it by its data attributes; it
  * lays nothing out and runs no styles. No dependency is added: the suite stays in vitest's `node` environment.
  */
 
@@ -12,10 +12,12 @@ export interface MiniEvent {
   readonly bubbles?: boolean;
   readonly detail?: unknown;
   readonly key?: string;
+  readonly repeat?: boolean;
   readonly ctrlKey?: boolean;
   readonly metaKey?: boolean;
   readonly isComposing?: boolean;
   readonly keyCode?: number;
+  readonly relatedTarget?: EventTarget | MiniElement | null;
   target?: MiniElement;
   defaultPrevented?: boolean;
   preventDefault?(): void;
@@ -33,6 +35,7 @@ export class MiniElement {
   #text = '';
   #listeners = new Map<string, Listener[]>();
   getClientRects(): Array<object> { return this.hidden ? [] : [{}]; }
+  hasChildNodes(): boolean { return this.children.length > 0 || this.#text.length > 0; }
   open = false;
   show(): void { this.open = true; }
   close(): void { this.open = false; this.dispatchEvent({ type: 'close' }); }
@@ -261,7 +264,10 @@ function matches(element: MiniElement, selector: string): boolean {
     if (!compound(element, parts.at(-1)!)) return false;
     let ancestor = element.parentElement;
     for (let index = parts.length - 2; index >= 0; index -= 1) {
-      while (ancestor !== null && !compound(ancestor, parts[index]!)) ancestor = ancestor.parentElement;
+      // ` > `: the part before it is the very parent, not any ancestor.
+      const child = parts[index] === '>';
+      if (child) index -= 1;
+      while (ancestor !== null && !compound(ancestor, parts[index]!)) ancestor = child ? null : ancestor.parentElement;
       if (ancestor === null) return false;
       ancestor = ancestor.parentElement;
     }
@@ -316,6 +322,7 @@ export const miniDocument = {
   removeEventListener(type: string, listener: Listener): void { miniDocument.body.removeEventListener(type, listener); },
   body: new MiniElement('body'),
   activeElement: null as MiniElement | null,
+  adoptedStyleSheets: [] as Array<{ cssRules: Array<{ cssText: string }>; replaceSync(text: string): void }>,
   querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },
   createElementNS(_namespace: string, tag: string): MiniElement { return new MiniElement(tag); },
   createTextNode(data: string): MiniElement { const text = new MiniElement('#text'); text.textContent = data; return text; },
@@ -330,9 +337,11 @@ export const miniDocument = {
 /** Install the minimal DOM as the globals a renderer module reads; answers how to take them away again. */
 export function installMiniDom(): () => void {
   const globals = globalThis as Record<string, unknown>;
-  const saved = ['document', 'HTMLElement', 'HTMLButtonElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'CSS'].map((key) => [key, globals[key]] as const);
+  const saved = ['document', 'HTMLElement', 'HTMLButtonElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'CSS', 'CSSStyleSheet'].map((key) => [key, globals[key]] as const);
   miniDocument.body.replaceChildren();
   miniDocument.activeElement = null;
+  miniDocument.adoptedStyleSheets = [];
+  globals['CSSStyleSheet'] = class { cssRules: Array<{ cssText: string }> = []; replaceSync(text: string): void { this.cssRules = text ? [{ cssText: text }] : []; } };
   globals['document'] = miniDocument;
   globals['HTMLElement'] = MiniElement;
   globals['HTMLButtonElement'] = MiniButton;
