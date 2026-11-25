@@ -47,6 +47,18 @@ export function renderReviewPreferenceGroups(options: {
     const dismiss = action('取消', cancel); dismiss.dataset['deleteCancel'] = ''; buttons.append(confirm, dismiss); strip.append(buttons);
     if (lifecycleState.confirmError) strip.append(el('p', lifecycleState.confirmError)); item.append(strip);
   };
+  /** 编辑偏好 opens the rule's editor in place of its controls, the sentence in focus; 取消 or Escape puts the controls back, focus on 编辑偏好. */
+  const editInPlace = (controls: HTMLElement, existing: GlobalAgentProjection['items'][number]): HTMLButtonElement => {
+    const edit = action('编辑偏好', () => {
+      const replaced = Array.from(controls.children);
+      const form = editorialPreferenceEditor({ categories: global.categories, books: global.books, existing, save: savePreference,
+        cancel: () => { controls.replaceChildren(...replaced); edit.focus(); } });
+      controls.replaceChildren(form);
+      form.querySelector('textarea')?.focus();
+    });
+    edit.dataset['preferenceEdit'] = '';
+    return edit;
+  };
   const category = (id: string): string => global!.categories.find((entry) => entry.categoryId === id)?.label ?? '其他编辑维度';
   const bookTitle = (id: string): string => global!.books.find((book) => book.bookId === id)?.title ?? page.signals.find((signal) => signal.source.bookId === id)?.bookTitle ?? '来源图书';
   for (const { current, history, sources, nextHistoryOffset, nextSourceOffset, row } of page.items) {
@@ -60,12 +72,9 @@ export function renderReviewPreferenceGroups(options: {
     if (row.group === 'pending') {
       controls.append(action('接受', () => run(() => api.acceptEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId, actionId: crypto.randomUUID() }))), action('排除', stop));
     } else if (row.group === 'enabled') controls.append(action('停用', stop));
-    if (row.group === 'enabled') controls.append(action('编辑偏好', () => {
-      controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
-        existing: { itemId: current.itemId, revisionId: current.versionId, kind: 'memory', text: current.title,
-          categoryId: current.editorialDimension, bookId: current.schema === 'ai7.global-editorial-memory/2' && current.applicability.kind === 'book' ? current.applicability.bookId : null,
-          state: 'active', lineage: [] }, save: savePreference }));
-    }));
+    if (row.group === 'enabled') controls.append(editInPlace(controls, { itemId: current.itemId, revisionId: current.versionId, kind: 'memory', text: current.title,
+      categoryId: current.editorialDimension, bookId: current.schema === 'ai7.global-editorial-memory/2' && current.applicability.kind === 'book' ? current.applicability.bookId : null,
+      state: 'active', lineage: [] }));
     const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
     const titles = new Set((sources ?? []).map((source) => source.bookTitle));
     for (const source of [...current.positiveExamples, ...current.negativeExamples]) titles.add(bookTitle(source.bookId));
@@ -95,10 +104,7 @@ export function renderReviewPreferenceGroups(options: {
         categoryId: preference.categoryId, text: '', effect: 'guide' });
       return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }, '已停用这条审阅偏好。'); }));
-    if (row.group === 'enabled') controls.append(action('编辑偏好', () => {
-      controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
-        existing: preference, save: savePreference }));
-    }));
+    if (row.group === 'enabled') controls.append(editInPlace(controls, preference));
     const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
     const basis = house?.current?.legacyBasis?.lines ?? house?.current?.governance?.baseLines ?? house?.current?.lines ?? [];
     const sourceBooks = (itemId: string, seen = new Set<string>()): string[] => {

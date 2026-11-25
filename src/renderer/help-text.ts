@@ -7,7 +7,7 @@ import { technicalLayerVisible } from './technical-layer.js';
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from './shell-labels.js';
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import { TASK_BAR_START } from './task-drawer-labels.js';
-import { visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
+import { RETRIEVAL_ASSIST_NOTE, visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
 import { visibleQualityLearningTabs } from './quality-learning-labels.js';
 import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
 import { EXPORT_MENU_LABEL } from './manuscript-export-labels.js';
@@ -93,7 +93,8 @@ export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSec
 /** 隐私说明: local-first by default, what may leave the machine and under which policy, and what never does. */
 export const HELP_PRIVACY_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
   { heading: '本机处理', paragraphs: [
-    'AI7 默认在本机处理文档、索引与检索；本地处理不联网。',
+    'AI7 在本机处理文档与索引；本机处理不联网。',
+    `「相似段落检索」先在本机按字面查找。${RETRIEVAL_ASSIST_NOTE}结果旁会写明本次是哪一种。`,
   ] },
   // Ordinary mode says plainly what goes to the chosen AI service and how to choose (Issue #1431 item 113); the policy mechanism is technical.
   { heading: '什么会离开本机', get paragraphs() { return technicalLayerVisible ? [

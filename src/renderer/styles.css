@@ -1249,7 +1249,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .material-anchor { display: inline-block; margin-right: .2rem; padding: 0 .25rem; border: 1px solid var(--boundary); border-radius: 4px; font-size: .75rem; color: var(--action-text); }
 /* 相似段落检索 and 来源译文 (Issue #892): made on request; a translation sits under its paragraph, labelled, never in its place. */
 .material-index-layer-actions { display: grid; gap: .3rem; min-width: 0; }
-.material-translation-note, .material-vector-note { margin: 0; color: var(--text-subdued); }
+.material-translation-note, .material-vector-note, .material-translation-progress, .material-vector-mode { margin: 0; color: var(--text-subdued); }
 .material-vector-search { display: grid; gap: .35rem; min-width: 0; }
 .material-vector-search input { flex: 1 1 14rem; min-width: 0; box-sizing: border-box; font: inherit; }
 .material-vector-results-heading { margin: 0; font-weight: 700; }
@@ -2056,7 +2056,8 @@ body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawe
 /* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
    control just above the sticky bar is not under it. */
 :root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
-:root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); }
+/* What is revealed in the text pane — a 批注 composer, a mark's card — stops above the bar (`--status-bar-cover`, Issue #1710). */
+:root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); scroll-padding-bottom: calc(var(--status-bar-cover, 0px) + .45rem); }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
 @media (max-width: 960px) {
@@ -2401,8 +2402,12 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 }
 
 /* Issue #902: bounded Proposal navigator and exact active-range comparison. */
-.proposal-layout { display: grid; grid-template-columns: minmax(240px, 32%) minmax(0, 1fr); gap: 24px; }
-.proposal-navigator { position: relative; min-width: 0; }
+/* The list and the position rail stand side by side: the rail is its own positioned column, as wide as the manuscript's, so its
+   track, ticks and three lanes are drawn inside it and never over the list, and as tall as the list (the row does not stretch to the
+   comparison's height). The navigator is wider by that column, so the list keeps its width. */
+.proposal-layout { display: grid; grid-template-columns: minmax(calc(240px + 4.75rem), calc(32% + 4.75rem)) minmax(0, 1fr); gap: 24px; }
+.proposal-navigator { display: grid; grid-template-columns: minmax(0, 1fr) 4.75rem; align-content: start; min-width: 0; }
+.proposal-navigator > .position-rail { position: relative; }
 .proposal-navigator-row { box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; overflow: hidden; border-bottom: 1px solid var(--boundary); cursor: pointer; }
 .proposal-navigator-row[aria-selected="true"] { outline: 2px solid var(--focus); outline-offset: -2px; }
 .proposal-navigator-row small { display: block; }
@@ -2510,7 +2515,8 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   body[data-task-drawer="open"] #task-drawer-separator { display: block; }
 }
 /* Optional Surface Visibility (VIEW-010): only what `视图` names; identity, status and danger have no such switch. */
-:root[data-hidden-regions~="position-rail"] .rail-column { display: none; }
+:root[data-hidden-regions~="position-rail"] :is(.rail-column, .proposal-navigator > .position-rail) { display: none; }
+:root[data-hidden-regions~="position-rail"] .proposal-navigator { grid-template-columns: minmax(0, 1fr); }
 
 /* The context header's slot for the manuscript's modes and its protection surface. */
 .context-view { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .6rem; }
@@ -2808,6 +2814,8 @@ button.btn.small, button.btn.sidebar-pin { min-height: 28px; }
 .state-term.export-status-degraded::before, .state-term.status-degraded::before, .state-term.is-unmet::before { border-radius: 1px; background: currentColor; transform: rotate(45deg); }
 .state-term.export-status-unavailable::before, .state-term.status-unsupported::before { border-radius: 1px; background: currentColor; }
 
+.similar-materials-note { display: block; }
+.similar-materials-note, .similar-materials-mode { margin: .2rem 0 0; color: var(--text-subdued); overflow-wrap: anywhere; }
 .similar-materials textarea { box-sizing: border-box; width: 100%; padding: .4rem .6rem; border: 1px solid var(--boundary-strong); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
 /* Rail buttons keep the shared hit height while their dots retain the narrow lane geometry. */
 button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padding: 0; border: 0; background: transparent; transform: none; }

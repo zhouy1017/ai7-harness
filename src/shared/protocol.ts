@@ -233,7 +233,7 @@ import type {
   LibraryMaterialProjection,
   LibraryMaterialsProjection,
   MaterialSegmentsPageProjection,
-  MaterialVectorSearchProjection,
+  MaterialVectorSearchProjection, RetrievalAssistMode,
 } from './protocol/library-materials.js';
 import type {
   BackgroundAnalysisEnrollmentProjection,
@@ -4304,7 +4304,7 @@ export interface ServiceOperationMap extends StandardTableOperations, GlobalAgen
   };
   searchReferableMaterials: {
     input: { bookId: string; query: string; k: number };
-    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection> };
+    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection>; assist: RetrievalAssistMode };
   };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {

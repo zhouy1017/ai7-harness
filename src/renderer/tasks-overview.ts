@@ -81,7 +81,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const key = `ai7.task-overview.filters.${options.bookId ?? 'all'}`;
   let selectedBook = options.bookId ?? 'all', selectedType = 'all', selectedTime = 'today';
   try { const saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>; selectedBook = options.bookId ?? saved['book'] ?? 'all'; selectedType = saved['type'] ?? 'all'; selectedTime = saved['time'] ?? 'today'; } catch { /* A missing view preference uses its default. */ }
-  const remember = (): void => { localStorage.setItem(key, JSON.stringify({ book: selectedBook, type: selectedType, time: selectedTime })); painted = ''; paint(); };
+  const save = (): void => localStorage.setItem(key, JSON.stringify({ book: selectedBook, type: selectedType, time: selectedTime }));
+  const remember = (): void => { save(); painted = ''; paint(); };
   // The page's name is said once, by the context header; the heading stays for the page's label (#1522).
   const headingRow = el('div', 'task-overview-heading-row'); const heading = el(options.bookId ? 'h3' : 'h1', options.bookId ? 'task-overview-title' : 'task-overview-title visually-hidden', '任务');
   const start = el('button', 'primary', '发起任务 ▾'); start.dataset['taskOverviewStart'] = ''; start.disabled = true;
@@ -212,17 +213,21 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     return true;
   }
   function paint(): void {
-    if (!projection) return; start.disabled = false; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
+    if (!projection) return; start.disabled = false;
+    // A remembered Book that no longer exists would hide every other Book's tasks for ever (Issue #1668): the filter returns to 全部.
+    if (!options.bookId && selectedBook !== 'all' && !projection.books.some((book) => book.bookId === selectedBook)) { selectedBook = 'all'; save(); }
+    const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
     const restoreInteraction = retainPollInteraction(options.root);
     const answers = [...host.querySelectorAll<HTMLElement>('[data-card-answer]')].map((form) => ({ form, itemId: form.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] }));
-    const count = (key: string): number => projection!.groups.find((group) => group.key === key)!.items.filter((item) => !options.bookId || item.bookId === options.bookId).length;
-    context.textContent = `${options.bookId ? '本书' : '全部图书'} · 同时运行 ${count('running')} 项 · 排队 ${count('queued')} 项 · 上限 ${projection.capacity}`;
+    // The renderer places each card by its record's state (Issue #1680); the service's own groups are only read as one list.
+    // The header counts the Books the page shows, in the groups the cards stand in (Issue #1668).
+    const scoped = projection.groups.flatMap((group) => group.items).filter((item) => selectedBook === 'all' || item.bookId === selectedBook).map((item) => ({ item, view: taskCardView(item) }));
+    const count = (group: string): number => scoped.filter(({ view }) => view.pageGroup === group).length;
+    context.textContent = `${options.bookId ? '本书' : selectedBook === 'all' ? '全部图书' : '所选图书'} · 同时运行 ${count('running')} 项 · 排队 ${count('queued')} 项 · 上限 ${projection.capacity}`;
     all.textContent = projection.queueFrozen ? '继续全部' : '暂停全部'; all.disabled = projection.groups.some((group) => group.items.some((item) => item.attention.state === 'analysis-pausing')); all.hidden = !projection.queueFrozen && projection.runningCount === 0;
     note.hidden = !!options.bookId || nothingToShow();
     paintFilters(); const midnight = new Date(); midnight.setHours(0, 0, 0, 0); const since = selectedTime === 'all' ? 0 : selectedTime === 'week' ? Date.now() - 7 * 86400000 : midnight.getTime();
-    // The renderer places each card by its record's state (Issue #1680); the service's own groups are only read as one list.
-    const listed = projection.groups.flatMap((group) => group.items).filter((item) => (selectedBook === 'all' || item.bookId === selectedBook) && (selectedType === 'all' || item.taskKind === selectedType));
-    const placed = listed.map((item) => ({ item, view: taskCardView(item) })).filter(({ item, view }) => view.pageGroup !== 'recent' || Date.parse(item.at) >= since);
+    const placed = scoped.filter(({ item, view }) => (selectedType === 'all' || item.taskKind === selectedType) && (view.pageGroup !== 'recent' || Date.parse(item.at) >= since));
     const groups = options.bookId
       ? TASK_PANEL_GROUPS.map((key) => ({ key, heading: TASK_PANEL_GROUP_LABELS[key], items: placed.filter(({ view }) => view.panelGroup === key).map(({ item }) => item) }))
       : TASK_PAGE_GROUPS.map((key) => ({ key, heading: TASK_PAGE_GROUP_LABELS[key], items: placed.filter(({ view }) => view.pageGroup === key).map(({ item }) => item) }));

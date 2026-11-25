@@ -2,7 +2,8 @@ import { chooseImportTarget } from './import-page.mjs';
 import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
 import { chooseDispatch, pointerClick, EFFORT_WORDS, EFFORT_UNKNOWN_SENTENCE } from './dispatch-chooser.mjs';
 import { chooseEffort, effortKey, effortListFacts, openEffortList, pressEffortRow, reachPress, wheelClear } from './effort-list.mjs';
-import { assertReachable } from './task-card-reach.mjs';
+import { assertReachable, pressReachable as wheelPress } from './task-card-reach.mjs';
+import { pressEscape } from './ordinary-pages.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -1550,6 +1551,23 @@ async function main() {
       return Boolean(category&&scope&&text&&save)&&category.value==='style-and-format'&&category.disabled&&scope.value===''&&scope.disabled&&
         text.value===${JSON.stringify(preferenceText)}&&!save.disabled&&form.parentElement.children.length===1;
     })()`, 'ordinary-preference-edit-fields');
+    // 0.7.9 review BUG-19: an edit has a way out. 取消 (real pointer, asserted in the window before the press) and Escape (real
+    // key, from the sentence the editor is writing) each put the rule's controls back with 编辑偏好 in focus, and save nothing.
+    const preferenceCss = `[data-screen="quality-learning"] [data-editorial-memory] [data-review-preference="${createdRule.itemId}"]`;
+    const preferenceLeft = `(() => { const row=${preferenceRow(createdRule.itemId)}; const names=Array.from(row?.querySelectorAll('.preference-actions > button')??[], node=>node.textContent);
+      return Boolean(row)&&!row.querySelector('form')&&names.join(',')==='停用,编辑偏好'&&document.activeElement===row.querySelector('[data-preference-edit]')&&row.querySelector('p')?.textContent===${JSON.stringify(preferenceText)}; })()`;
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-cancel]`, 'ordinary-preference-edit-cancel');
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-cancelled');
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-reopen');
+    await waitFor(primary, `document.activeElement===${preferenceRow(createdRule.itemId)}?.querySelector('form.preference-editor textarea')`, 'ordinary-preference-edit-sentence-focus');
+    await primary.send('Input.insertText', { text: '（写到一半）' });
+    await assertRenderer(primary, `${preferenceRow(createdRule.itemId)}.querySelector('form.preference-editor textarea').value===${JSON.stringify(`${preferenceText}（写到一半）`)}`, 'ordinary-preference-edit-typed');
+    await pressEscape(primary);
+    await waitFor(primary, preferenceLeft, 'ordinary-preference-edit-escaped');
+    const untouchedPreference = await primary.evaluate(preferenceState(preferenceText));
+    requireJourney(untouchedPreference.items.length === 1 && untouchedPreference.directives === createdPreference.directives, 'ordinary-preference-edit-left-unsaved', untouchedPreference);
+    await wheelPress(primary, waitFor, requireJourney, `${preferenceCss} [data-preference-edit]`, 'ordinary-preference-edit-open-again');
+    await waitFor(primary, `${preferenceRow(createdRule.itemId)}?.querySelector('[data-preference-editor="${createdRule.itemId}"] textarea')?.value===${JSON.stringify(preferenceText)}`, 'ordinary-preference-edit-open-clean');
     await assertRenderer(primary, `(() => {
       const form=${preferenceRow(createdRule.itemId)}.querySelector('[data-preference-editor="${createdRule.itemId}"]');
       const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
@@ -2752,6 +2770,18 @@ async function main() {
     await chooseModel('deepseek-flash', true);
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：') && document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-two-sentence');
+    // BUG-11: the lighter model has its own test control and its own result line beside it, apart from the main model's. A
+    // provider-free run refuses a connection test before anything is sent, so there is no result to show: the stage proves the
+    // control is reachable and pressed for real, that the refusal is said, and that neither result line took the other's place.
+    const TEST_PLACES = `(() => { const light=document.querySelector('[data-action="test-fast-flow-connection"]'), main=document.querySelector('[data-action="test-flow-connection"]');
+      const lightLine=document.querySelector('.model-service-optional [data-flash-connection-test]'), mainLine=document.querySelector('.model-service-flow-test .model-service-flow-feedback');
+      return light instanceof HTMLButtonElement && main instanceof HTMLButtonElement && !light.disabled && !main.disabled && lightLine instanceof HTMLElement && mainLine instanceof HTMLElement &&
+        light.nextElementSibling===lightLine && !mainLine.contains(lightLine) && lightLine.textContent==='' && document.querySelector('[data-connection-test-outcome]')===null; })()`;
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places');
+    await reachPress(primary, waitFor, requireJourney, '[data-action="test-fast-flow-connection"]', 'model-choice-light-test');
+    await waitFor(primary, `(() => { const bar=document.querySelector('#persistence-status'); return bar?.dataset.tone==='error' && !bar.hidden && bar.textContent!=='' && !bar.textContent.includes('正在测试连接'); })()`, 'model-choice-light-test-refused');
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places-kept');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.every(route=>(route.connection?.connectionTests??[]).length===0))`)) === true, 'model-choice-no-test-recorded');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
     await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');

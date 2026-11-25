@@ -596,7 +596,7 @@ _中文_: 资料条目
 _Avoid_: Source Version of a Book, Working Corpus entry, Run Source Scope, factual evidence by itself
 
 **Material Index**:
-The locally built five-layer index of a Materials Library Item or a retained external source: the original, metadata, extracted text with recognition and a labeled Source Translation, segments with page or position anchors citable at sentence level; 相似段落检索 ranks those segments on this machine by words, with no layer of its own to build ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md); since R5-F2c, [ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md) §4 point 5).
+The locally built five-layer index of a Materials Library Item or a retained external source: the original, metadata, extracted text with recognition and a labeled Source Translation, segments with page or position anchors citable at sentence level; 相似段落检索 ranks those segments on this machine by words, with no layer of its own to build, optionally widened and re-ordered by the Underlying Flash Role — which receives the search words and candidate snippets, as the search's own surface states ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md); since R5-F2c, [ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md) §4 point 5).
 _中文_: 资料索引
 _Avoid_: Manuscript Retrieval Chunk, a model context, a Run Source Scope grant, a cloud index
 

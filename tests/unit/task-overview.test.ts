@@ -226,6 +226,34 @@ describe('task overview', () => {
       expect(startQuickTasks).not.toHaveBeenCalled();
     } finally { surface.destroy(); vi.unstubAllGlobals(); uninstall(); }
   });
+  it('counts the header by the Book the page shows and returns a filter on a Book that is gone to 全部 (Issue #1668)', async () => {
+    const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {} });
+    const stored = { value: JSON.stringify({ book: 'other', type: 'all', time: 'all' }) };
+    vi.stubGlobal('localStorage', { getItem: () => stored.value, setItem: (_key: string, value: string) => { stored.value = value; } });
+    const inBook = (item: GlobalAttentionItemProjection, bookId: string): GlobalAttentionItemProjection => ({ ...item, book: { bookId, title: bookId }, target: { kind: 'analysis', bookId, taskIntentId: item.itemId } });
+    // 「book」 runs one task and queues one; 「other」 queues one, and one of its tasks is paused while the service still lists it as running.
+    const items = [task('active', 'analysis-running', 'run'), task('active', 'analysis-waiting-capacity', 'wait'),
+      inBook(task('active', 'analysis-waiting-capacity', 'other-wait'), 'other'), inBook(task('active', 'analysis-pausing', 'other-pausing'), 'other')];
+    const books = [{ bookId: 'book', title: '任务总览' }, { bookId: 'other', title: '另一本' }];
+    let projection = composeTaskOverview({ groups: [{ key: 'active', items, total: items.length }], actionableCount: 0, running: true, processing: { state: 'local' } }, 2,
+      (id) => id === 'wait' ? 1 : id === 'other-wait' ? 2 : null, undefined, books);
+    const root = document.createElement('section');
+    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => projection } as unknown as RendererApi, setStatus: vi.fn(), openTarget: vi.fn(), openBook: vi.fn(), openResult: vi.fn() });
+    const header = (): string => root.querySelector('.task-overview-context')!.textContent!;
+    const cards = (): string[] => Array.from(root.querySelectorAll<HTMLElement>('[data-task-item]'), (card) => card.dataset['taskItem']!);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(header()).toBe('所选图书 · 同时运行 0 项 · 排队 1 项 · 上限 2');
+      expect(cards().sort()).toEqual(['other-pausing', 'other-wait']);
+      // 「other」 is deleted: the page shows every Book again, and remembers that.
+      projection = { ...projection, books: [books[0]!], groups: projection.groups.map((group) => ({ ...group, items: group.items.filter((item) => item.bookId === 'book') })) };
+      surface.refresh();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(header()).toBe('全部图书 · 同时运行 1 项 · 排队 1 项 · 上限 2');
+      expect(cards().sort()).toEqual(['run', 'wait']);
+      expect(JSON.parse(stored.value)).toMatchObject({ book: 'all' });
+    } finally { surface.destroy(); vi.unstubAllGlobals(); uninstall(); }
+  });
   it('opens the eleventh Book result from its card even when the legacy reading has only ten', async () => {
     const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {} });
     const recent = Array.from({ length: 11 }, (_, i) => ({ item: task('recent', 'analysis-completed', `done-${i}`), result: { kind: 'analysis-revision' as const, revisionId: `revision-${i}` } }));

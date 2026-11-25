@@ -78,8 +78,10 @@ import {
   MATERIAL_VECTORS_SEARCH_FAILED,
   MATERIAL_VECTORS_SEARCH_LABEL,
   MATERIAL_VECTORS_SEARCH_NOTE,
+  RETRIEVAL_ASSIST_LINES,
   materialAnchorLabel,
   materialIndexLayerLine,
+  materialTranslationLine,
   materialIndexStateLine,
   materialParagraphAnchorLabel,
   materialSegmentsHeading,
@@ -105,7 +107,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * is drawn again, until it is built.
  *
  * Once the index is built, `相似段落检索` finds the item's paragraphs that best match the words the editor writes, ranked on this
- * machine with nothing to build (R5-F2c). Issue #892 adds the layer made on request: `生成来源译文` asks for a non-Chinese item's
+ * machine with nothing to build (R5-F2c) and, with a fast model connected, widened and re-ordered by it; the field says what a
+ * search may send and each answer says what this one sent (0.7.9 review 2.3). Issue #892 adds the layer made on request: `生成来源译文` asks for a non-Chinese item's
  * machine translation — shown disabled, with why, when the selected policy names no rule for it — and 查看分段 shows each
  * paragraph's 来源译文 beneath it, labelled. While it is being made the item is read again as an index being built is.
  */
@@ -204,11 +207,14 @@ export async function recordLibraryUse(
     now = await api.decideLibraryMaterial({ materialId: now.materialId, expectedDecisions: now.decisionCount, decision });
     updated(now);
   };
-  if (value === 'deferred' && (now.attribution === null || now.eligibility?.choice === 'deferred')) return now;
-  if (value !== 'deferred' && same && now.reference.state === 'available') return now;
-  if (value !== 'deferred' && !same) await send({ kind: 'attribution', attribution: target });
-  const eligibility = value === 'deferred' ? 'deferred' : target.scope;
-  if (now.eligibility?.choice !== eligibility || now.eligibility.reason !== null) await send({ kind: 'eligibility', choice: eligibility, reason: null });
+  // 暂不使用 is its own decision (Issue #1671): recorded with or without an attribution, it takes the item out of 待我处理.
+  if (value === 'deferred') {
+    if (now.notUsed === undefined) await send({ kind: 'not-used' });
+    return now;
+  }
+  if (same && now.reference.state === 'available') return now;
+  if (!same) await send({ kind: 'attribution', attribution: target });
+  if (now.eligibility?.choice !== target.scope || now.eligibility.reason !== null) await send({ kind: 'eligibility', choice: target.scope, reason: null });
   return now;
 }
 
@@ -505,6 +511,12 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     // The layered index and its boundary are the developer layer's (Issue #1431 item 86); reading, translating and searching stay.
     section.append(heading);
     if (technicalLayerVisible) section.append(layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
+    // Ordinary mode still reads how 来源译文 stands — its progress, that it is done, or why it stopped (0.7.9 review, BUG-19).
+    else if (index.translation !== null) {
+      const line = el('p', 'material-translation-progress', materialTranslationLine(index));
+      line.dataset['translationState'] = index.translation.state;
+      section.append(line);
+    }
     const layerActions = indexActions(material);
     if (layerActions !== null) section.append(layerActions);
     if (index.state === 'complete') section.append(vectorSearch(material), segmentsReader(material));
@@ -597,7 +609,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
           document.createTextNode(` ${candidate.preview}`));
         list.append(item);
       }
-      results.replaceChildren(el('p', 'material-vector-results-heading', materialVectorResultsHeading(projection.candidates.length)), list);
+      const mode = el('p', 'material-vector-mode', RETRIEVAL_ASSIST_LINES[projection.assist]);
+      mode.dataset['retrievalAssist'] = projection.assist;
+      results.replaceChildren(el('p', 'material-vector-results-heading', materialVectorResultsHeading(projection.candidates.length)), mode, list);
     };
     if (saved?.result !== undefined && saved.result !== null) show(saved.result);
     const run = action(MATERIAL_VECTORS_SEARCH, 'secondary', 'vector-search', () => void search());
