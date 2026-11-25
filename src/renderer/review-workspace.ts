@@ -1381,6 +1381,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (runHasResults(run)) {
       section.classList.add('review-run-leading');
       meta.textContent = `${run.scope.label.replaceAll('内容块', '段落')} · 创建于 ${reviewMinuteLabel(run.createdAt)}`;
+      // Where the one-row header is too narrow these words are cut short; hovering says them whole.
+      meta.title = meta.textContent;
       // One row (Issue #1524 6.1): the Run's state, name, scope and date share it with the history fold, the 新建审阅
       // actions and the one export entry. The synthesis header below keeps its own one-line behaviour (#1433 / #1510).
       const reasonId = uid('new-review-reason');

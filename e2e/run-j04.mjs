@@ -3141,7 +3141,10 @@ async function main() {
         synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.top <= synthesisLayout.height * .45 && synthesisLayout.bottom <= synthesisLayout.height,
           `review-first-card-${viewport}-geometry`, synthesisLayout);
-        // 查看计划 is in the Run's header, above the findings (#1706): inside the window with the page unscrolled, then pressed.
+        // 查看计划 is in the Run's header, above the findings (#1706): on the header's one row — level with 导出 at its end — and
+        // inside the window with the page unscrolled, then pressed.
+        requireJourney(await renderer.evaluate(`(() => {const centre=(node)=>{const box=node.getBoundingClientRect();return box.top+box.height/2;},plan=document.querySelector('.review-run-heading > [data-review-action="view-plan"]'),last=document.querySelector('.review-run-heading > .review-header-export > summary');
+          return !!plan&&!!last&&Math.abs(centre(plan)-centre(last))<plan.getBoundingClientRect().height/2;})()`) === true, `review-first-card-${viewport}-header-one-row`);
         await pressReviewControl(renderer, waitFor, '.review-run-heading > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`, null);
         await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`, `review-first-card-${viewport}-drawer`);
         await renderer.evaluate(`scrollTo(0, 0)`);

@@ -3278,6 +3278,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-run-leading > .review-run-heading { justify-content: flex-start; gap: .3rem .5rem; font-size: .84rem; }
 .review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
 .review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
+/* The header stays one row with 查看计划 in it: where the row is too narrow, the Run's scope and date give way with an ellipsis before anything wraps and pushes the findings down. */
+.review-run-leading .review-run-meta { flex: 1 1 0; min-width: 0; max-width: max-content; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
 .review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
 .review-run-leading .review-new-actions { margin-left: auto; }
