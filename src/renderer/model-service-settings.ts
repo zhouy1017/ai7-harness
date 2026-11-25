@@ -124,6 +124,26 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   /** The 模型服务 page last mounted; it leaves the document when the editor navigates elsewhere. */
   let mounted: HTMLElement | null = null;
 
+  /** Advanced by every opening of 模型服务 and every action started on it, never reset; `opened` is the last opening's. */
+  let generation = 0;
+  let opened = 0;
+
+  /**
+   * An action's answer is acted on only in the opening it started in, while the page is on screen and shows the channel it
+   * started on (BUG-11). A late answer repaints nothing, says nothing and moves no focus; its data stays in the service and the
+   * page's own reads show it.
+   */
+  function beginRequest(channel: ModelServiceChannelId): () => boolean {
+    const request = ++generation;
+    return () => {
+      if (request < opened || mounted?.isConnected !== true) return false;
+      if (channel === modelServiceChannel) return true;
+      // Same opening, another channel: the busy line this action left ends, unless a later action has said its own since.
+      if (request === generation) setStatus('');
+      return false;
+    };
+  }
+
   /**
    * Repaints 模型服务 with an answer that arrived after an action on it (refresh, save, select, test, proxy, search): only while the
    * page is still on screen (Issue #1445). A late answer never brings the page back after the editor left; its data stays in the
@@ -149,9 +169,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       element('h2', undefined, '模型服务'),
       element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再选择使用的模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
-    content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+    content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage, beginRequest,
       get flashModelId() { return modelServiceChannel === null ? '' : flashModelChoices.get(modelServiceChannel) ?? ''; },
-      chooseFlashModel: model => { if (modelServiceChannel !== null) flashModelChoices.set(modelServiceChannel, model); },
+      chooseFlashModel: (model, channel = modelServiceChannel ?? undefined) => { if (channel !== undefined) flashModelChoices.set(channel, model); },
       effortDraft: (channel, role, modelId) => { const draft = effortDrafts.get(`${channel}/${role}`); return draft?.modelId === modelId ? draft.effort : undefined; },
       setEffortDraft: (channel, role, modelId, effort) => { const key = `${channel}/${role}`; if (effort === undefined) effortDrafts.delete(key); else effortDrafts.set(key, { modelId, effort }); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
@@ -244,7 +264,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
     // An unsaved 思考强度 is a draft like the fields above: a passive read does not repaint the page under it.
     content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form, .model-service-effort')) draftEdited = true; });
-    const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
+    // The connection tests too: a result whose answer arrived after the page moved to another channel shows on the next read.
+    const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null,
+      page.routeChoice.routes.map((route) => route.connection?.connectionTests)]);
     const signature = catalogueKey(projection);
     let changedCataloguePolls = 0;
     content.dataset['changedCataloguePolls'] = '0';
@@ -276,6 +298,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
     const route = navigation.begin();
     setStatus('正在读取模型服务状态…', 'busy');
+    opened = ++generation;
     modelServiceChannel = null;
     modelChoices.clear();
     flashModelChoices.clear();

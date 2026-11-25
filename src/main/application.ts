@@ -17,7 +17,6 @@ import { registerModelConnectionTestHandler } from './model-connection-test-hand
 import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
 import {
   app,
   BrowserWindow,
@@ -180,7 +179,8 @@ async function announceProductReadiness(): Promise<void> {
   });
 }
 
-import { storageMaintenance } from './storage-maintenance.js';
+import { createApplicationQuit, type RestoreOnQuit } from './application-quit.js';
+import { prepareUpgradeRollback, resumeStorageUpgrade, offerStorageUpgrade } from './storage-upgrade-ui.js';
 
 export function registerRendererHandlers(
   service: ServiceClient,
@@ -215,7 +215,7 @@ export function registerRendererHandlers(
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
   consumeInjectedFolderPath: () => string | undefined,
-  quitApplication: () => 'quitting' | 'blocked',
+  quitApplication: (restore?: RestoreOnQuit) => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
   preferences: PreferenceStore,
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
@@ -223,7 +223,7 @@ export function registerRendererHandlers(
   journalFaultArmed: boolean,
   navigationAnswerHoldPath?: string,
   sourceOpener: SourceOpener = (address) => shell.openExternal(address),
-  rollbackUpgrade?: () => Promise<boolean>,
+  rollbackUpgrade?: () => Promise<RestoreOnQuit | undefined>,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -3503,12 +3503,12 @@ export async function runApplication(): Promise<void> {
   let serviceInterrupted = false;
   let productReady = false;
   let quitting = false;
-  let restoreOnShutdown: (() => Promise<unknown>) | undefined;
   let quitReady = false;
   let shutdown: Promise<void> | undefined;
   let unregisterHandlers: (() => void) | undefined;
   let launcherLease: NodeJS.Timeout | undefined;
   const ownedWindows = new Map<number, OwnedRendererWindow>();
+  const applicationQuit = createApplicationQuit(() => ownedWindows.values(), () => app.quit());
   const bookWindows = new Map<string, OwnedRendererWindow>();
   // #1504: a renderer leave parks that window's own job/search/preview grants for its Book. Only the same window's next
   // non-activating re-acquire of that Book, with no route of its own and no other holder in between, takes them back.
@@ -3657,7 +3657,7 @@ export async function runApplication(): Promise<void> {
     for (const attentionId of owned.recoveryAttentionIds) claims.releaseAttention(owned, attentionId);
     for (const commitId of owned.importCommitIds) claims.releaseCommit(owned, commitId);
   };
-  const stop = (): Promise<void> =>
+  const stop = (restore?: RestoreOnQuit): Promise<void> =>
     (shutdown ??= (async () => {
       journeyClose('stop-entry');
       if (launcherLease) clearInterval(launcherLease);
@@ -3665,7 +3665,7 @@ export async function runApplication(): Promise<void> {
       unregisterHandlers?.();
       unregisterHandlers = undefined;
       await service?.stop();
-      await restoreOnShutdown?.();
+      await restore?.();
       quitReady = true;
       journeyClose('stop-complete');
     })());
@@ -3685,12 +3685,8 @@ export async function runApplication(): Promise<void> {
       return;
     }
     event.preventDefault();
-    const riskyWindows = [...ownedWindows.values()].filter(
-      (owned) => owned.closeRisk && !owned.window.isDestroyed(),
-    );
-    if (!quitting && riskyWindows.length > 0) {
+    if (!quitting && applicationQuit.blocked()) {
       journeyClose('close-risk-blocked');
-      for (const owned of riskyWindows) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
       return;
     }
     // The existing guard allowed this close, including a quit already in progress.
@@ -3700,7 +3696,7 @@ export async function runApplication(): Promise<void> {
       return;
     }
     quitting = true;
-    void stop().then(() => {
+    void stop(applicationQuit.takeRestore()).then(() => {
       journeyClose('app-quit');
       app.quit();
     }, () => {
@@ -3866,18 +3862,14 @@ export async function runApplication(): Promise<void> {
       launch.calibrationMinBooks,
       launch.journalFaultArmed,
     );
-    if (existsSync(join(shellRoot, 'storage-upgrade.json')) && !(await storageMaintenance(serviceEntry,dataRoot,'resume'))) {
+    if (!(await resumeStorageUpgrade(serviceEntry, dataRoot, shellRoot))) {
       app.quit();
       return;
     }
     try { service = await startService(); }
     catch (error) {
       if (!(error instanceof ServiceCallError && error.code === 'DATA_VERSION_OLDER')) throw error;
-      if (!(await storageMaintenance(serviceEntry,dataRoot,'preflight'))) { app.quit(); return; }
-      const answer = await dialog.showMessageBox({ type:'question',title:'升级书库',
-        message:'AI7 将先备份，再整理为新格式。升级前的书库会保留，旧版 AI7 无法打开升级后的数据。升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。',
-        buttons:['升级','关闭'],defaultId:1,cancelId:1 });
-      if (answer.response !== 0 || !(await storageMaintenance(serviceEntry,dataRoot,'upgrade'))) { app.quit(); return; }
+      if (!(await offerStorageUpgrade(serviceEntry, dataRoot))) { app.quit(); return; }
       service = await startService();
     }
     service.onUnexpectedExit(() => {
@@ -4403,17 +4395,7 @@ export async function runApplication(): Promise<void> {
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
       // J-07's folder-dialog answer for a package export (Issue #416, S67b) is single-use too.
       takeOnce(launch.injectedFolderPath),
-      // 现在关闭 AI7 (Issue #434, S86c): a window still holding changes not yet saved keeps AI7 open and says so, as when the
-      // editor closes AI7 themselves; otherwise AI7 closes once the answer is on its way.
-      () => {
-        const risky = [...ownedWindows.values()].filter((owned) => owned.closeRisk && !owned.window.isDestroyed());
-        if (risky.length > 0) {
-          for (const owned of risky) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
-          return 'blocked';
-        }
-        setImmediate(() => app.quit());
-        return 'quitting';
-      },
+      applicationQuit.request,
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
       preferenceStore,
       () => ownedWindows.values(),
@@ -4421,15 +4403,7 @@ export async function runApplication(): Promise<void> {
       launch.journalFaultArmed,
       launch.navigationAnswerHoldPath,
       await createSourceOpener(dataRoot, launch.browserRecord),
-      async () => {
-        const answer = await dialog.showMessageBox({type:'warning',title:'回到升级前的数据',
-          message:'升级后所做的修改不在旧书库中。恢复后，请使用上一版 AI7 打开。',buttons:['回到升级前的数据','取消'],defaultId:1,cancelId:1});
-        if (answer.response !== 0) return false;
-        if (!(await storageMaintenance(serviceEntry, dataRoot, 'check-rollback'))) return false;
-        if ([...ownedWindows.values()].some(owned => owned.closeRisk && !owned.window.isDestroyed())) return false;
-        restoreOnShutdown = () => storageMaintenance(serviceEntry, dataRoot, 'rollback');
-        return true;
-      },
+      () => prepareUpgradeRollback(serviceEntry, dataRoot, applicationQuit.blocked),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

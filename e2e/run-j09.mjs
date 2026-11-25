@@ -1806,13 +1806,24 @@ async function main() {
       console.error('J-09/overview-filter-chosen-by-key/diagnostic', JSON.stringify(diagnostic));
       throw error;
     }
+    // #1668: the header counts the Book the filter shows, in the groups its cards stand in — none here, while other Books run and queue.
+    const headerCountsCards = (scope) => `(() => { const cards = (group) => document.querySelectorAll('.task-overview-group[data-task-group="' + group + '"] .task-overview-card').length;
+      return (document.querySelector('.task-overview-context')?.textContent ?? '').startsWith(${JSON.stringify(scope)} + ' · 同时运行 ' + cards('running') + ' 项 · 排队 ' + cards('queued') + ' 项 · '); })()`;
+    await waitFor(renderer, `(async () => { const p = await window.ai7.inspectTaskOverview(); return p.runningCount > 0 && p.queuedCount > 0 && document.querySelector('.task-overview-context')?.textContent.startsWith('所选图书 · 同时运行 0 项 · 排队 0 项 · '); })()`, 'overview-header-counts-the-chosen-book');
     await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
     await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
+    await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length === 1 && ${headerCountsCards('所选图书')}`, 'overview-header-counts-the-new-task', 60000);
     await press(renderer, 'ArrowDown');
     await waitFor(renderer, `${filterActive} === ${filterIndex}`, 'overview-filter-reopened-by-key');
     for (let step = filterIndex - 1; step >= 0; step -= 1) { await press(renderer, 'ArrowUp'); await waitFor(renderer, `${filterActive} === ${step}`, 'overview-filter-back-follows-key'); }
     await press(renderer, 'Enter');
     await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
+    try {
+      await waitFor(renderer, `document.querySelectorAll('.task-overview-group[data-task-group="running"] .task-overview-card').length > 0 && document.querySelectorAll('.task-overview-group[data-task-group="queued"] .task-overview-card').length > 0 && ${headerCountsCards('全部图书')}`, 'overview-header-counts-every-book');
+    } catch (error) {
+      console.error('J-09/overview-header-counts-every-book/diagnostic', JSON.stringify(await renderer.evaluate(`({ header: document.querySelector('.task-overview-context')?.textContent ?? null, groups: Array.from(document.querySelectorAll('.task-overview-group'), (group) => [group.dataset.taskGroup, group.querySelectorAll('.task-overview-card').length]), pressed: Array.from(document.querySelectorAll('.task-overview-filters [aria-pressed="true"]'), (node) => node.textContent) })`).catch(() => null)));
+      throw error;
+    }
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');

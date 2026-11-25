@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory)][string]$Executable,
   [Parameter(Mandatory)][string]$Title,
   [Parameter(Mandatory)][string]$Button,
-  [string]$Disclosure = ''
+  [string]$Disclosure = '',
+  [switch]$PressDefault
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -35,6 +36,8 @@ public static class UpgradeDialogMouse {
     return clicked;
   }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 }
@@ -55,12 +58,24 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $matchedDialogs++
     if ($Disclosure) {
       $text = $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition)
-      if (!($text | Where-Object { !$_.Current.IsOffscreen -and $_.Current.Name.Contains($Disclosure) })) {
-        throw 'The owned upgrade dialog did not show the expected disclosure.'
+      foreach ($sentence in ($Disclosure -split '\|')) {
+        if (!($text | Where-Object { !$_.Current.IsOffscreen -and $_.Current.Name.Contains($sentence) })) {
+          throw 'The owned upgrade dialog did not show the expected disclosure.'
+        }
       }
     }
     $hwnd = [IntPtr]$window.Current.NativeWindowHandle
     [void][UpgradeDialogMouse]::SetForegroundWindow($hwnd)
+    if ($PressDefault) {
+      if ([UpgradeDialogMouse]::GetForegroundWindow() -ne $hwnd) { continue }
+      $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+      if (!$focused -or $focused.Current.Name.Replace('&','').Trim() -ne $Button -or $focused.Current.IsOffscreen) {
+        continue
+      }
+      [UpgradeDialogMouse]::keybd_event(13,0,0,[UIntPtr]::Zero)
+      [UpgradeDialogMouse]::keybd_event(13,0,2,[UIntPtr]::Zero)
+      exit 0
+    }
     if ([UpgradeDialogMouse]::ClickNamedButton($hwnd,$Button)) { exit 0 }
     foreach ($control in $window.FindAll($descendants, $buttonName)) {
       $matchedControls++

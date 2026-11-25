@@ -1094,7 +1094,20 @@ async function main() {
         await click(page,'数据与存储','upgrade-settings-storage');
         await waitFor(page,`document.querySelector('.database-import')`,'upgrade-settings-ready');
       };
+      const pressRollback = (page, name) => reachPress(page, waitFor, requireJourney,
+        '.data-storage-summary > .source-card:first-of-type > button.secondary', name);
       const marker = async root => JSON.parse(await readFile(join(root,'store','ai7-data-version.json'),'utf8')).dataVersion;
+      at('upgrade-failure');
+      const unreadable = resolve(runRoot,'upgrade-version-mismatch');
+      await cp(baseline,unreadable,{recursive:true});
+      const markerPath = join(unreadable, 'store', 'ai7-data-version.json');
+      const mismatched = JSON.parse(await readFile(markerPath, 'utf8'));
+      await writeFile(markerPath, JSON.stringify({ ...mismatched, schemaRevision: 115 }));
+      await launch(undefined,undefined,unreadable);
+      await exitProduct(() => pressUpgradeDialog(executable,unreadable,'书库升级','关闭',
+        '升级前的书库会安全保留。|如果备份已完成|请先用 0.7.3 打开。',true));
+      requireJourney(await marker(unreadable) === 1,'upgrade-failure-keeps-library');
+
       const root = resolve(runRoot,'upgrade-library');
       await cp(baseline,root,{recursive:true});
       at('upgrade-decline');
@@ -1104,10 +1117,21 @@ async function main() {
       for (const fallback of [false,true]) {
         at('upgrade-consent');
         const manager = await launch(undefined,undefined,root);
-        await pressUpgradeDialog(executable,root,'升级书库','升级','升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。');
+        const disclosure = fallback ? '升级前的修改不能逐步撤销，可以通过「版本」恢复整份稿件。' : '待升级：2 本书';
+        await pressUpgradeDialog(executable,root,'升级书库','升级',disclosure,true);
+        const progress = await findRenderer(manager, 'document.title === "正在整理书库"', 'upgrade-progress-opened');
+        await waitFor(progress, `(() => {
+          const list = [...document.querySelectorAll('ol li')];
+          return list.map(step => step.textContent).join(' → ') === '备份 → 转换 → 核对 → 切换'
+            && list.at(-1).matches('[aria-current="step"]')
+            && list.every(step => {
+              const box = step.getBoundingClientRect();
+              return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0
+                && box.right <= innerWidth && box.bottom <= innerHeight;
+            });
+        })()`, 'upgrade-progress-stages-visible');
         await pressUpgradeDialog(executable,root,'书库升级','关闭');
-        const [page] = await waitForRendererCount(manager,1,'upgrade-library-opened');
-        await waitFor(page,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-ready');
+        const page = await findRenderer(manager,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-ready');
         if (!fallback) {
           at('upgrade-card');
           await page.evaluate(`window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(legacy.bookId)}})`);
@@ -1143,14 +1167,14 @@ async function main() {
           const [home] = await waitForRendererCount(back,1,'upgrade-library-reopened');
           await settings(home);
           await waitFor(home,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-rollback-available');
-          await click(home,'回到升级前的数据','upgrade-rollback-button');
+          await pressRollback(home,'upgrade-rollback-button');
         } else {
           await settings(page);
           at('upgrade-backup-rollback');
           requireJourney(await marker(root) === 2,'upgrade-recorded');
           await waitFor(page,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-backup-rollback-available');
           await rm(join(root,'objects'),{recursive:true});
-          await click(page,'回到升级前的数据','upgrade-backup-rollback-button');
+          await pressRollback(page,'upgrade-backup-rollback-button');
         }
         await pressUpgradeDialog(executable,root,'回到升级前的数据','回到升级前的数据');
         await exitProduct(() => pressUpgradeDialog(executable,root,'书库升级','关闭'));
@@ -2728,6 +2752,18 @@ async function main() {
     await chooseModel('deepseek-flash', true);
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：') && document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-two-sentence');
+    // BUG-11: the lighter model has its own test control and its own result line beside it, apart from the main model's. A
+    // provider-free run refuses a connection test before anything is sent, so there is no result to show: the stage proves the
+    // control is reachable and pressed for real, that the refusal is said, and that neither result line took the other's place.
+    const TEST_PLACES = `(() => { const light=document.querySelector('[data-action="test-fast-flow-connection"]'), main=document.querySelector('[data-action="test-flow-connection"]');
+      const lightLine=document.querySelector('.model-service-optional [data-flash-connection-test]'), mainLine=document.querySelector('.model-service-flow-test .model-service-flow-feedback');
+      return light instanceof HTMLButtonElement && main instanceof HTMLButtonElement && !light.disabled && !main.disabled && lightLine instanceof HTMLElement && mainLine instanceof HTMLElement &&
+        light.nextElementSibling===lightLine && !mainLine.contains(lightLine) && lightLine.textContent==='' && document.querySelector('[data-connection-test-outcome]')===null; })()`;
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places');
+    await reachPress(primary, waitFor, requireJourney, '[data-action="test-fast-flow-connection"]', 'model-choice-light-test');
+    await waitFor(primary, `(() => { const bar=document.querySelector('#persistence-status'); return bar?.dataset.tone==='error' && !bar.hidden && bar.textContent!=='' && !bar.textContent.includes('正在测试连接'); })()`, 'model-choice-light-test-refused');
+    await assertRenderer(primary, TEST_PLACES, 'model-choice-test-places-kept');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.every(route=>(route.connection?.connectionTests??[]).length===0))`)) === true, 'model-choice-no-test-recorded');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
     await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');
