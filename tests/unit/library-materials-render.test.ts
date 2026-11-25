@@ -88,10 +88,10 @@ describe('来源译文 in ordinary mode (0.7.9 review BUG-19)', () => {
 });
 
 describe('相似段落检索 says what leaves the machine (0.7.9 review 2.3)', () => {
-  const NOTE = '已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
+  const NOTE = '已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
   const MODES: ReadonlyArray<[RetrievalAssistMode, string]> = [
-    ['fast-model', '本次：快速模型参与了扩展和重排。'],
-    ['fast-model-unused', '本次：已发给快速模型，但没有用上，结果按本机字面检索。'],
+    ['fast-model', '本次：较轻模型参与了扩展和重排。'],
+    ['fast-model-unused', '本次：已发给较轻模型，但没有用上，结果按本机字面检索。'],
     ['local', '本次：没有发送，只在本机按字面检索。'],
   ];
 

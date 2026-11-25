@@ -164,7 +164,6 @@ import {
   reviewBatchItemLine,
   reviewBatchReadyLine,
   reviewBatchScopeLine,
-  reviewBatchStrengthsLine,
   reviewCategoryProgressLine,
   reviewChapterOptionLabel,
   reviewClauseLine,
@@ -2207,10 +2206,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       nothing.id = scopeId;
       node.append(nothing);
     } else {
-      const scopeParts = [reviewBatchScopeLine(strip.items.length), REVIEW_BATCH_ALL_OR_NONE];
+      // Whole sentences, one after another: what will be written (and of which strength), that it is all or none, what is left out.
+      const scopeParts = [reviewBatchScopeLine(strip.items.length, strip.strengths), REVIEW_BATCH_ALL_OR_NONE];
       if (strip.excluded > 0) scopeParts.push(reviewBatchExcludedLine(strip.excluded));
       if (strip.capped) scopeParts.push(reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS));
-      const scope = el('p', 'review-batch-scope', `${scopeParts.map((line) => line.replace(/。$/u, '')).join('；')}。`);
+      const scope = el('p', 'review-batch-scope', scopeParts.join(''));
       scope.id = scopeId;
       const items = el('ol', 'review-batch-items');
       for (const item of strip.items) {
@@ -2219,9 +2219,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         line.dataset['markId'] = item.markId;
         items.append(line);
       }
-      node.append(scope);
-      if (strip.strengths.length > 0) node.append(el('p', 'review-batch-strengths', reviewBatchStrengthsLine(strip.strengths)));
-      node.append(items);
+      node.append(scope, items);
       if (strip.unknown) {
         node.append(el('p', 'review-problem', technicalWords('结果待确认；确认权威记录之前不能再次应用。', '正在确认上次修改的结果，请稍后再试。')));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
@@ -2914,8 +2912,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     });
   }
 
+  /** 取消 and Escape: the strip goes, and with it the notice that asked for the confirmation while it still stands. */
   function closeBatch(categoryId: string): void {
+    const strip = ui.batch;
     ui.batch = null;
+    if (strip !== null) hideToast(serviceWords(strip.items.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(strip.items.length)));
     if (projection !== null) renderCard(projection);
     card?.querySelector<HTMLElement>(`section.review-group[data-review-category="${categoryId}"] [data-review-action="batch-prepare"]`)?.focus();
   }

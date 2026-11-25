@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { mountTaskOverview } from '../../src/renderer/tasks-overview.js';
@@ -117,6 +118,14 @@ describe('任务 page', () => {
     const six = await mount([running('a')], named(6));
     expect(six.querySelectorAll('.task-overview-filter-row select')).toHaveLength(0);
     expect(six.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(7);
+  });
+  it('marks the pressed filter with a rule the quiet button does not clear', async () => {
+    const six = await mount([running('a')], named(6));
+    // A filter is a quiet button, and `.btn.quiet` clears a background later in the sheet: the pressed rule names `.btn` to outrank it.
+    expect(six.querySelector('.task-overview-filter[aria-pressed="true"]')!.className.split(' ')).toEqual(expect.arrayContaining(['btn', 'quiet']));
+    const css = readFileSync('src/renderer/styles.css', 'utf8');
+    expect(css).toMatch(/^\.btn\.task-overview-filter\[aria-pressed="true"\] \{[^}]*background: var\(--status-progress-surface\)/mu);
+    expect(css).not.toMatch(/^\.task-overview-filter\[aria-pressed="true"\]/mu);
   });
   it.each([3, 7])('filters restart-queued tasks from every ledger kind by Book with %i Books (#1656)', async count => {
     const books = named(count), source = books[0]!, empty = books[1]!;

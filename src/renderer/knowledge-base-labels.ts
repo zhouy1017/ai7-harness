@@ -490,11 +490,11 @@ export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖�
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
 /** What a search may send, said beside every 相似段落检索 field before the editor searches (0.7.9 review 2.3). */
-export const RETRIEVAL_ASSIST_NOTE = '已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
+export const RETRIEVAL_ASSIST_NOTE = '已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。';
 /** What left the machine for the search just answered, said beside its results: never 本机 when the words were sent. */
 export const RETRIEVAL_ASSIST_LINES: Readonly<Record<RetrievalAssistMode, string>> = {
-  'fast-model': '本次：快速模型参与了扩展和重排。',
-  'fast-model-unused': '本次：已发给快速模型，但没有用上，结果按本机字面检索。',
+  'fast-model': '本次：较轻模型参与了扩展和重排。',
+  'fast-model-unused': '本次：已发给较轻模型，但没有用上，结果按本机字面检索。',
   local: '本次：没有发送，只在本机按字面检索。',
 };
 export const MATERIAL_VECTORS_SEARCH_NOTE = `结果仅供参考，原文以分段为准。${RETRIEVAL_ASSIST_NOTE}`;

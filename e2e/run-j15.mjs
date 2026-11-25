@@ -878,7 +878,7 @@ async function main() {
       JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
       layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
       !layers.has('vectors') && libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null &&
-      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 结果仅供参考，原文以分段为准。已连接快速模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && libraryIndexed.cards[0].vectorSearch.heading === null && libraryIndexed.cards[0].vectorSearch.mode === null,
+      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 结果仅供参考，原文以分段为准。已连接较轻模型时，检索词和候选片段会发给它做扩展和重排；没有连接或连不上时，只在本机按字面检索。' && libraryIndexed.cards[0].vectorSearch.heading === null && libraryIndexed.cards[0].vectorSearch.mode === null,
     'library-index-layers', libraryIndexed.cards[0].layers);
     const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
     requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,

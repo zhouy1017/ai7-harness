@@ -277,12 +277,14 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('states the batch write scope before 确认应用', () => {
-    expect(reviewBatchScopeLine(3)).toBe('将把 3 条修改建议写入稿件：');
+    // One whole sentence, with the count per strength inside it; the strip sets whole sentences one after another.
+    expect(reviewBatchScopeLine(3)).toBe('将把 3 条修改建议写入稿件。');
+    expect(reviewBatchScopeLine(3, [{ label: '国家规范（应改）', count: 2 }, { label: '辞书推荐（建议改）', count: 1 }])).toBe('将把 3 条修改建议写入稿件，其中 国家规范（应改） 2 条、辞书推荐（建议改） 1 条。');
     expect(reviewBatchItemLine('的的', '的')).toBe('「的的」→「的」');
     expect(reviewBatchItemLine('多余', '')).toBe('「多余」→（删去）');
     expect(reviewBatchExcludedLine(2)).toBe('另有 2 条需要逐条确认，不在其中；请在稿件上逐条处理。');
     expect(reviewBatchCappedLine(500)).toBe('一次最多应用 500 条；其余的在这次应用之后再准备。');
-    expect(REVIEW_BATCH_ALL_OR_NONE).toBe('确认后一次写入稿件：全部写入，或一条也不写。');
+    expect(REVIEW_BATCH_ALL_OR_NONE).toBe('确认后一次写入：全部写入，或一条也不写。');
   });
 
   it('versions the 审阅报告 and says why export waits', () => {
