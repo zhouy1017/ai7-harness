@@ -1085,31 +1085,48 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-library-action="segments-close"]') !== null`, 'library-use-read-ready');
     await pointerClick(renderer, waitFor, '[data-library-action="segments-close"]', 'library-use-read-close');
     const useStart = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material'); return { count:Number(card.dataset.decisions), attribution:card.dataset.attribution, materialId:card.dataset.materialId }; })()`);
-    // 暂不使用 on a NEW item (0.7.9 review BUG-03): nobody was named for it, so 待我处理 lists it. Opened from there its 资料 button
-    // takes focus inside the window; 暂不使用 is one recorded decision — still no attribution — the card reads 暂不使用, and
-    // 待我处理 lists it no more. Every control named here is asserted reachable before its press, with no scripted scroll.
+    // 暂不使用 is a decision of its own (0.7.9 review BUG-03). Before the fix a usable new item marked 暂不使用 entered 待我处理 and
+    // could never leave it, and an item already waiting there stayed. Here the editor marks a usable item 暂不使用; opens the
+    // item that waits in 待我处理 from there — its 资料 button takes focus inside the window — and marks it too; 待我处理, read
+    // again, lists neither. Every control named is asserted reachable before a real press, with no scripted scroll. The press in
+    // 待我处理 is on an item whose standing has not changed since the page last read it: the list is painted from the cached
+    // reading first and replaced when the fresh one differs, so a press right after a decision could land on the list being replaced.
     const attentionItem = (id) => `[data-attention-item="library-material:${id}"]`;
-    const freshId = await renderer.evaluate(`document.querySelector('article.library-material[data-attribution="none"][data-decisions="0"]')?.dataset.materialId ?? null`);
-    requireJourney(typeof freshId === 'string' && freshId !== useStart.materialId, 'library-use-new-item', freshId);
-    const freshCard = `article.library-material[data-material-id="${freshId}"]`;
+    const useCard = (id) => `article.library-material[data-material-id="${id}"]`;
+    const markNotUsed = async (id, name) => {
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} [data-library-action="use"]`, `${name}-open`);
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} .library-use-chooser input[data-library-choice="deferred"]`, `${name}-choice`);
+      await pressReachable(renderer, waitFor, requireJourney, `${useCard(id)} [data-library-action="confirm-use"]`, `${name}-confirm`);
+    };
+    const usedCard = (id, attribution, count) => `(() => { const card=document.querySelector(${JSON.stringify(useCard(id))}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('暂不使用') && card.dataset.attribution===${JSON.stringify(attribution)} && card.dataset.eligibility==='deferred' && Number(card.dataset.decisions)===${count}; })()`;
+    const usable = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material[data-attribution="house"][data-eligibility="house"][data-reference="available"]'); return card ? { materialId: card.dataset.materialId, count: Number(card.dataset.decisions) } : null; })()`);
+    requireJourney(usable !== null && usable.materialId !== useStart.materialId, 'library-use-usable-item', usable);
+    await markNotUsed(usable.materialId, 'library-use-usable');
+    await waitFor(renderer, usedCard(usable.materialId, 'house', usable.count + 1), 'library-use-usable-recorded');
+    const usableService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(usable.materialId)} }).then((material)=>[material.notUsed !== undefined, material.reference.state, material.decisions.at(-1)?.decision.notUsed === true])`);
+    requireJourney(JSON.stringify(usableService) === JSON.stringify([true, 'pending', true]), 'library-use-usable-service', usableService);
     await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention');
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${attentionItem(freshId)} button.global-attention-open`)})?.disabled === false`, 'library-use-attention-ready');
-    await pressReachable(renderer, waitFor, requireJourney, `${attentionItem(freshId)} button.global-attention-open`, 'library-use-attention-open');
-    await waitFor(renderer, `(() => { const button=document.querySelector(${JSON.stringify(`${freshCard} [data-library-action="use"]`)}); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
-    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} [data-library-action="use"]`, 'library-use-new-open');
-    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} .library-use-chooser input[data-library-choice="deferred"]`, 'library-use-new-choice');
-    await pressReachable(renderer, waitFor, requireJourney, `${freshCard} [data-library-action="confirm-use"]`, 'library-use-new-confirm');
-    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(freshCard)}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('暂不使用') && card.dataset.attribution==='none' && card.dataset.decisions==='1'; })()`, 'library-use-new-recorded');
-    const freshService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(freshId)} }).then((material)=>[material.notUsed !== undefined, material.attribution, material.reference.state, material.decisions.at(-1)?.decision.notUsed === true])`);
-    requireJourney(JSON.stringify(freshService) === JSON.stringify([true, null, 'pending', true]), 'library-use-new-service', freshService);
+    const attentionOpen = `${attentionItem(useStart.materialId)} button.global-attention-open`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionOpen)})?.disabled === false`, 'library-use-attention-ready');
+    await pressReachable(renderer, waitFor, requireJourney, attentionOpen, 'library-use-attention-open');
+    await waitFor(renderer, `(() => { const button=document.querySelector(${JSON.stringify(`${useCard(useStart.materialId)} [data-library-action="use"]`)}); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
+    await markNotUsed(useStart.materialId, 'library-use-waiting');
+    let useCount = useStart.count + 1;
+    await waitFor(renderer, usedCard(useStart.materialId, useStart.attribution, useCount), 'library-use-recorded');
     await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention-after');
-    // 待我处理 is read — the item that still waits for its decision is listed — and the one marked 暂不使用 is not.
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionItem(useStart.materialId))}) !== null && document.querySelector(${JSON.stringify(attentionItem(freshId))}) === null`, 'library-use-new-left-attention');
+    // The reading taken before the decision listed the waiting item: once it is gone the list shows the fresh reading, and
+    // the usable item marked 暂不使用 is not in it either.
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host[data-attention-count]') !== null && document.querySelector(${JSON.stringify(attentionItem(useStart.materialId))}) === null`, 'library-use-left-attention');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(attentionItem(usable.materialId))}) === null`, 'library-use-usable-not-in-attention');
     await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'library-use-knowledge-again');
     await pointerClick(renderer, waitFor, '[data-knowledge-category="library"]', 'library-use-category-again');
-    await waitFor(renderer, `document.querySelector('article.library-material')?.dataset.materialId === ${JSON.stringify(useStart.materialId)} && document.querySelector('[data-library-action="use"]')?.disabled === false`, 'library-use-ready-again');
-    let useCount = useStart.count;
-    for (const [value, expected] of [['deferred', '暂不使用'], ['house', '本社可参考'], ['book:', null]]) {
+    await waitFor(renderer, `document.querySelector('article.library-material')?.dataset.materialId === ${JSON.stringify(useStart.materialId)} && document.querySelector('article.library-material [data-library-action="use"]')?.disabled === false`, 'library-use-ready-again');
+    // A later choice supersedes 暂不使用: the usable item goes back to the house, as the stages after this one found it.
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} [data-library-action="use"]`, 'library-use-usable-again-open');
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} .library-use-chooser input[data-library-choice="house"]`, 'library-use-usable-again-choice');
+    await pressReachable(renderer, waitFor, requireJourney, `${useCard(usable.materialId)} [data-library-action="confirm-use"]`, 'library-use-usable-again-confirm');
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(useCard(usable.materialId))}); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith('本社可参考') && card.dataset.reference==='available' && Number(card.dataset.decisions)===${usable.count + 2}; })()`, 'library-use-usable-restored');
+    for (const [value, expected] of [['house', '本社可参考'], ['book:', null]]) {
       await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="use"]', 'library-use-open');
       const radio = value==='book:' ? '.library-use-chooser input[data-library-choice^="book:"]' : `.library-use-chooser input[data-library-choice="${value}"]`;
       await waitFor(renderer, `document.querySelector(${JSON.stringify(radio)})`, 'library-use-choice-ready');
@@ -1117,9 +1134,9 @@ async function main() {
       await pointerClick(renderer, waitFor, radio, 'library-use-choice');
       await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-library-action="confirm-use"]'); const r=button?.getBoundingClientRect(); return !!r && r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-confirm-in-window');
       await pointerClick(renderer, waitFor, '[data-library-action="confirm-use"]', 'library-use-confirm');
-      useCount += value==='deferred' ? 1 : 2;
+      useCount += 2;
       const expectedLine = expected ?? `${bookTitle}的任务可参考`;
-      await waitFor(renderer, `(() => { const card=document.querySelector('article.library-material'); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith(${JSON.stringify(expectedLine)}) && card.dataset.attribution===${JSON.stringify(value==='deferred'?useStart.attribution:value==='book:'?'book':'house')} && card.dataset.eligibility===${JSON.stringify(value==='book:'?'book':value)} && Number(card.dataset.decisions)===${useCount}; })()`, 'library-use-recorded');
+      await waitFor(renderer, `(() => { const card=document.querySelector('article.library-material'); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith(${JSON.stringify(expectedLine)}) && card.dataset.attribution===${JSON.stringify(value==='book:'?'book':'house')} && card.dataset.eligibility===${JSON.stringify(value==='book:'?'book':value)} && Number(card.dataset.decisions)===${useCount}; })()`, 'library-use-recorded');
     }
     await setDeveloperMode(renderer, waitFor, true, 'library-use-restore');
 
