@@ -240,13 +240,22 @@ export const MAX_MATERIAL_VECTOR_CANDIDATES = 8;
 export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 1_000;
 
 /**
+ * What left the machine for one 相似段落检索 (0.7.9 review 2.3): `fast-model` — the fast model's expansion or rerank shaped the
+ * answer; `fast-model-unused` — the search words (and candidate previews) were sent to it but nothing usable came back, so the
+ * ranking is this machine's; `local` — nothing was sent. A page never calls a search local unless it is `local`.
+ */
+export type RetrievalAssistMode = 'fast-model' | 'fast-model-unused' | 'local';
+
+/**
  * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs that best match the editor's words, ranked on this machine by
- * the lexical ranker (R5-F2c), each with its anchor and a short preview. The ranking finds candidates; the words are read where
- * the anchor points (ADR 0026). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
+ * the lexical ranker (R5-F2c), each with its anchor and a short preview — widened and re-ordered by the fast model when one is
+ * connected, and `assist` says what this search sent. The ranking finds candidates; the words are read where the anchor points
+ * (ADR 0026). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
  */
 export interface MaterialVectorSearchProjection {
   readonly materialId: string;
   readonly indexDigest: string;
+  readonly assist: RetrievalAssistMode;
   readonly candidates: ReadonlyArray<{
     readonly ordinal: number;
     readonly page: number | null;

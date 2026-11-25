@@ -231,17 +231,24 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
       .toEqual(['本社', '纳入本社经验', '本社可参考']);
-    // #1552: standing state × answer. Reconfirming reference access preserves learning choices and notes.
+    // #1552: standing state × answer. Reconfirming reference access preserves learning choices and notes. 暂不使用 is its own
+    // decision (Issue #1671; 0.7.9 review BUG-03): sent for every item it does not already stand on — a new one with no
+    // attribution and one left for later included, which the page used to answer with nothing — and never sent twice.
     const eligibility = (choice: 'book' | 'house' | 'excluded' | 'deferred') => ({ ...own.eligibility, choice });
+    const notUsed = { decidedAt: '2026-09-25T04:00:00.000Z' };
+    expect([libraryReferenceLine({ ...pending, notUsed }), libraryUseRecorded({ ...pending, notUsed }, false)])
+      .toEqual(['暂不使用', '「样书一」的使用范围没有变化：暂不使用。']);
     const states: Array<[LibraryMaterialProjection, string[][]]> = [
-      [pending, [['A', 'eb'], ['B', 'eb'], ['H', 'eh'], []]],
-      [house, [['A', 'eb'], ['B', 'eb'], [], ['ed']]],
-      [{ ...house, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['A', 'eb'], ['B', 'eb'], ['eh'], []]],
-      [{ ...book, decisionCount: 10 }, [['eb'], ['B', 'eb'], ['H', 'eh'], ['ed']]],
-      [own, [[], ['B', 'eb'], ['H', 'eh'], ['ed']]],
-      [{ ...own, eligibility: eligibility('excluded') }, [[], ['B', 'eb'], ['H', 'eh'], ['ed']]],
-      [{ ...own, eligibility: eligibility('house') }, [[], ['B', 'eb'], ['H', 'eh'], ['ed']]],
-      [{ ...own, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['eb'], ['B', 'eb'], ['H', 'eh'], []]],
+      [pending, [['A', 'eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...pending, notUsed }, [['A', 'eb'], ['B', 'eb'], ['H', 'eh'], []]],
+      [house, [['A', 'eb'], ['B', 'eb'], [], ['nu']]],
+      [{ ...house, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['A', 'eb'], ['B', 'eb'], ['eh'], ['nu']]],
+      [{ ...house, eligibility: eligibility('deferred'), reference: { state: 'pending' }, notUsed }, [['A', 'eb'], ['B', 'eb'], ['eh'], []]],
+      [{ ...book, decisionCount: 10 }, [['eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [own, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('excluded') }, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('house') }, [[], ['B', 'eb'], ['H', 'eh'], ['nu']]],
+      [{ ...own, eligibility: eligibility('deferred'), reference: { state: 'pending' } }, [['eb'], ['B', 'eb'], ['H', 'eh'], ['nu']]],
     ];
     const decisions = {
       A: { kind: 'attribution', attribution: { scope: 'book', bookId: 'b' } },
@@ -249,7 +256,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       H: { kind: 'attribution', attribution: { scope: 'house' } },
       eb: { kind: 'eligibility', choice: 'book', reason: null },
       eh: { kind: 'eligibility', choice: 'house', reason: null },
-      ed: { kind: 'eligibility', choice: 'deferred', reason: null },
+      nu: { kind: 'not-used' },
     } as const;
     for (const [start, expected] of states) for (const [index, answer] of ['book:b', 'book:other', 'house', 'deferred'].entries()) {
       const calls: unknown[] = [];
@@ -259,17 +266,19 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
         calls.push(request);
         const decision = request.decision;
         current = { ...current, decisionCount: current.decisionCount + 1 };
-        if (decision.kind === 'attribution') current = { ...current,
+        const { notUsed: _stood, ...kept } = current;
+        if (decision.kind === 'attribution') current = { ...kept,
           attribution: decision.attribution.scope === 'house' ? { scope: 'house', decidedAt: '' } : { ...decision.attribution, bookTitle: '甲书', decidedAt: '' }, eligibility: null };
-        else if (decision.kind === 'eligibility') current = { ...current, eligibility: { ...own.eligibility, choice: decision.choice, reason: decision.reason } };
+        else if (decision.kind === 'eligibility') current = { ...kept, eligibility: { ...own.eligibility, choice: decision.choice, reason: decision.reason } };
+        else current = { ...current, notUsed, reference: { state: 'pending' }, eligibility: current.attribution === null ? null : eligibility('deferred') };
         return current;
       } }, initial, answer, () => {});
       expect(calls).toEqual(expected[index]!.map((key, offset) => ({ materialId: 'm', expectedDecisions: 10 + offset, decision: decisions[key as keyof typeof decisions] })));
       if (expected[index]!.length === 0) expect(result).toBe(initial);
       const recorded = expected[index]!.length !== 0;
-      const expectedStatus = recorded ? `已记录「样书一」的决定：${libraryReferenceLine(result)}。`
-        : start.attribution === null ? '还没有选给谁用，任务不会参考它。' : `「样书一」的使用范围没有变化：${libraryReferenceLine(start)}。`;
+      const expectedStatus = recorded ? `已记录「样书一」的决定：${libraryReferenceLine(result)}。` : `「样书一」的使用范围没有变化：${libraryReferenceLine(start)}。`;
       expect(libraryUseRecorded(result, recorded)).toBe(expectedStatus);
+      if (answer === 'deferred') expect([result.notUsed, libraryReferenceLine(result)]).toEqual([notUsed, '暂不使用']);
     }
     // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
