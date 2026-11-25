@@ -1322,12 +1322,16 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
   }
 
-  async function rememberEntryPosition(): Promise<void> {
+  async function rememberEntryPosition(arrival = false): Promise<void> {
     // Where the editor was belongs to the manuscript the Book opens into, never to a Production Document.
     if (!editor || options.interrupted() || isDocument) return;
     // The caret while the editor can see it. Scrolled out of sight, or left on another window by 向前浏览 / 向后浏览, it is
     // not where they read: the paragraph at the middle of the page answers, so the way back opens on that page (Issue #1703).
-    const point = editor.readingPoint();
+    // The arrival of a paging command itself still names the window's own first block, as it has since Issue #405.
+    const first = currentWindow.blocks[0]?.blockId;
+    const caretBlock = arrival ? editor.captureContinuity().anchor.blockId : undefined;
+    const paged = first !== undefined && caretBlock !== undefined && !currentWindow.blocks.some((block) => block.blockId === caretBlock);
+    const point = paged ? { blockId: first, grapheme: 0 } : editor.readingPoint();
     await api.recordManuscriptEntryPosition({
       manuscriptId: currentWindow.manuscriptId,
       branchId: currentWindow.branchId,
@@ -1555,7 +1559,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // must not read as the editor reaching an edge. Held across the write as well, it made every
       // paging command that arrived while the disk was busy vanish without a word: a second PageDown,
       // 向后浏览 or a scroll to the window's end was dropped rather than deferred (#474).
-      const remembered = rememberEntryPosition();
+      const remembered = rememberEntryPosition(true);
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       releaseGuard();
       await remembered;

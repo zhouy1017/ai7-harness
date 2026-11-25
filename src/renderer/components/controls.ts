@@ -565,6 +565,8 @@ export function tabButton(options: { label: string; id: string; panel: string; s
   button.tabIndex = options.selected ? 0 : -1;
   button.addEventListener('click', options.activate);
   button.addEventListener('keydown', (event) => {
+    // A chord is a command's, never the tab row's: Alt+← on a focused tab is 返回 (0.7.9 review, BUG-18).
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const tabs = Array.from(button.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     const index = tabs.indexOf(button);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
